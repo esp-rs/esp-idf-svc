@@ -44,9 +44,16 @@ impl<'r> IdfRequest<'r> {
         }
 
         for (c_field, c_value) in &c_headers {
-            esp!(unsafe {
-                esp_idf_sys::httpd_resp_set_hdr(self.0, c_field.as_ptr(), c_value.as_ptr())
-            })?;
+            match c_field.as_bytes() {
+                b"content-type" | b"Content-Type" => {
+                    esp!(unsafe { esp_idf_sys::httpd_resp_set_type(self.0, c_value.as_ptr()) })?
+                }
+                _ => {
+                    esp!(unsafe {
+                        esp_idf_sys::httpd_resp_set_hdr(self.0, c_field.as_ptr(), c_value.as_ptr())
+                    })?;
+                }
+            }
         }
 
         match response.body {
