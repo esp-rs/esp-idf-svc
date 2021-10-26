@@ -2,10 +2,12 @@
 #![cfg_attr(feature = "experimental", feature(generic_associated_types))] // for http, http::client, http::server, ota
 #![feature(const_btree_new)]
 
-#[cfg(any(feature = "alloc"))]
+#[cfg(feature = "alloc")]
 #[macro_use]
 extern crate alloc;
 
+#[cfg(feature = "alloc")]
+pub mod dns;
 #[cfg(feature = "alloc")]
 #[cfg(any(
     all(esp32, esp_idf_eth_use_esp32_emac),
@@ -25,6 +27,7 @@ pub mod httpd;
 #[cfg(feature = "alloc")]
 // TODO: Ideally should not need "alloc" (also for performance reasons)
 pub mod log;
+pub mod lwip;
 pub mod misc;
 #[cfg(esp_idf_config_lwip_ipv4_napt)]
 pub mod napt;
