@@ -545,17 +545,22 @@ impl EspWifi {
 
         self.shared.with_lock(|shared| shared.operating = false);
 
-        esp!(unsafe { esp_wifi_disconnect() }).or_else(|err| {
-            if err.code() == esp_idf_sys::ESP_ERR_WIFI_NOT_STARTED as esp_err_t {
-                Ok(())
-            } else {
-                Err(err)
-            }
-        })?;
-        info!("Disconnect requested");
+        let status = self.get_status();
+        if status.0 != ClientStatus::Stopped {
+            esp!(unsafe { esp_wifi_disconnect() }).or_else(|err| {
+                if err.code() == esp_idf_sys::ESP_ERR_WIFI_NOT_STARTED as esp_err_t {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            })?;
+            info!("Disconnect requested");
+        }
 
-        esp!(unsafe { esp_wifi_stop() })?;
-        info!("Stop requested");
+        if status.1 != ApStatus::Stopped {
+            esp!(unsafe { esp_wifi_stop() })?;
+            info!("Stop requested");
+        }
 
         self.wait_status(|s| matches!(s, Status(ClientStatus::Stopped, ApStatus::Stopped)));
 
