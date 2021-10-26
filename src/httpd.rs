@@ -13,7 +13,7 @@ use embedded_svc::httpd::*;
 
 use esp_idf_sys::c_types::*;
 use esp_idf_sys::esp;
-use esp_idf_sys::esp_nofail;
+use esp_idf_sys::*;
 
 use crate::private::cstr::*;
 
@@ -173,18 +173,106 @@ impl Default for Configuration {
     }
 }
 
-pub struct ServerRegistry(registry::MiddlewareRegistry);
+#[derive(Debug, Copy, Clone)]
+pub enum HttpdError {
+    InternalServerError,
+    MethodNotImplemented,
+    VersionNotSupported,
+    BadRequest,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    MethodNotAllowed,
+    ReqTimeout,
+    LengthRequired,
+    UriTooLong,
+    ReqHdrFieldsTooLarge,
+}
+
+impl From<httpd_err_code_t> for HttpdError {
+    #[allow(non_upper_case_globals)]
+    fn from(from: httpd_err_code_t) -> Self {
+        match from {
+            httpd_err_code_t_HTTPD_500_INTERNAL_SERVER_ERROR => HttpdError::InternalServerError,
+            httpd_err_code_t_HTTPD_501_METHOD_NOT_IMPLEMENTED => HttpdError::MethodNotImplemented,
+            httpd_err_code_t_HTTPD_505_VERSION_NOT_SUPPORTED => HttpdError::VersionNotSupported,
+            httpd_err_code_t_HTTPD_400_BAD_REQUEST => HttpdError::BadRequest,
+            httpd_err_code_t_HTTPD_401_UNAUTHORIZED => HttpdError::Unauthorized,
+            httpd_err_code_t_HTTPD_403_FORBIDDEN => HttpdError::Forbidden,
+            httpd_err_code_t_HTTPD_404_NOT_FOUND => HttpdError::NotFound,
+            httpd_err_code_t_HTTPD_405_METHOD_NOT_ALLOWED => HttpdError::MethodNotAllowed,
+            httpd_err_code_t_HTTPD_408_REQ_TIMEOUT => HttpdError::ReqTimeout,
+            httpd_err_code_t_HTTPD_411_LENGTH_REQUIRED => HttpdError::LengthRequired,
+            httpd_err_code_t_HTTPD_414_URI_TOO_LONG => HttpdError::UriTooLong,
+            httpd_err_code_t_HTTPD_431_REQ_HDR_FIELDS_TOO_LARGE => HttpdError::ReqHdrFieldsTooLarge,
+            _ => unimplemented!("all httpd errors should be covered"),
+        }
+    }
+}
+
+impl Into<httpd_err_code_t> for HttpdError {
+    #[allow(non_upper_case_globals)]
+    fn into(self) -> httpd_err_code_t {
+        match self {
+            HttpdError::InternalServerError => httpd_err_code_t_HTTPD_500_INTERNAL_SERVER_ERROR,
+            HttpdError::MethodNotImplemented => httpd_err_code_t_HTTPD_501_METHOD_NOT_IMPLEMENTED,
+            HttpdError::VersionNotSupported => httpd_err_code_t_HTTPD_505_VERSION_NOT_SUPPORTED,
+            HttpdError::BadRequest => httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+            HttpdError::Unauthorized => httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+            HttpdError::Forbidden => httpd_err_code_t_HTTPD_403_FORBIDDEN,
+            HttpdError::NotFound => httpd_err_code_t_HTTPD_404_NOT_FOUND,
+            HttpdError::MethodNotAllowed => httpd_err_code_t_HTTPD_405_METHOD_NOT_ALLOWED,
+            HttpdError::ReqTimeout => httpd_err_code_t_HTTPD_408_REQ_TIMEOUT,
+            HttpdError::LengthRequired => httpd_err_code_t_HTTPD_411_LENGTH_REQUIRED,
+            HttpdError::UriTooLong => httpd_err_code_t_HTTPD_414_URI_TOO_LONG,
+            HttpdError::ReqHdrFieldsTooLarge => httpd_err_code_t_HTTPD_431_REQ_HDR_FIELDS_TOO_LARGE,
+        }
+    }
+}
+
+pub struct ErrorHandler {
+    error: HttpdError,
+    // handler: Box<dyn Fn(Request, HttpdError) -> Result<Response>>,
+    handler: unsafe extern "C" fn(req: *mut httpd_req_t, error: httpd_err_code_t) -> esp_err_t,
+}
+
+pub struct ServerRegistry {
+    registry: registry::MiddlewareRegistry,
+    error_handlers: Vec<ErrorHandler>,
+}
 
 impl ServerRegistry {
     pub fn new() -> Self {
-        Self(Default::default())
+        ServerRegistry {
+            registry: Default::default(),
+            error_handlers: Vec::new(),
+        }
+    }
+
+    pub fn error_handler(
+        mut self,
+        error: HttpdError,
+        f: unsafe extern "C" fn(req: *mut httpd_req_t, error: httpd_err_code_t) -> esp_err_t,
+    ) -> ServerRegistry {
+        self.error_handlers.push(ErrorHandler {
+            error,
+            handler: f,
+        });
+        ServerRegistry {
+            registry: self.registry,
+            error_handlers: self.error_handlers,
+        }
     }
 
     pub fn start(self, configuration: &Configuration) -> Result<Server> {
         let mut server = Server::new(configuration)?;
 
-        for handler in self.0.apply_middleware() {
+        for handler in self.registry.apply_middleware() {
             server.register(handler)?;
+        }
+
+        for error_handler in self.error_handlers {
+            server.register_error_handler(error_handler)?;
         }
 
         Ok(server)
@@ -199,11 +287,17 @@ impl Default for ServerRegistry {
 
 impl registry::Registry for ServerRegistry {
     fn handler(self, handler: Handler) -> Result<Self> {
-        Ok(Self(self.0.handler(handler)?))
+        Ok(Self {
+            registry: self.registry.handler(handler)?,
+            ..self
+        })
     }
 
     fn middleware(self, middleware: Middleware) -> Result<Self> {
-        Ok(Self(self.0.middleware(middleware)?))
+        Ok(Self {
+            registry: self.registry.middleware(middleware)?,
+            ..self
+        })
     }
 }
 
@@ -268,6 +362,17 @@ impl Server {
             "Unregistered Httpd IDF server handler {:?} for URI \"{}\"",
             conf.method,
             uri.to_str().unwrap()
+        );
+
+        Ok(())
+    }
+
+    fn register_error_handler(&mut self, handler: ErrorHandler) -> Result<()> {
+        esp!(unsafe { esp_idf_sys::httpd_register_err_handler(self.sd, handler.error.into(), Some(handler.handler)) })?;
+
+        info!(
+            "Registered Httpd IDF error handler for Error \"{:?}\"",
+            handler.error
         );
 
         Ok(())
