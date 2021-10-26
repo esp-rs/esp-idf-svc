@@ -43,6 +43,8 @@ pub mod nvs_storage;
 ))]
 pub mod ota;
 pub mod ping;
+#[cfg(feature = "alloc")]
+pub mod reset;
 pub mod sysloop;
 #[cfg(feature = "alloc")]
 pub mod task;
