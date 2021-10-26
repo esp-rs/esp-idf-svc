@@ -25,6 +25,7 @@ pub mod httpd;
 #[cfg(feature = "alloc")]
 // TODO: Ideally should not need "alloc" (also for performance reasons)
 pub mod log;
+pub mod misc;
 #[cfg(esp_idf_config_lwip_ipv4_napt)]
 pub mod napt;
 pub mod netif;
@@ -43,6 +44,7 @@ pub mod nvs_storage;
 pub mod ota;
 pub mod ping;
 pub mod sysloop;
+pub mod time;
 #[cfg(feature = "alloc")] // TODO: Expose a subset which does not require "alloc"
 pub mod wifi;
 
