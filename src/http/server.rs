@@ -1,4 +1,5 @@
 use core::ptr;
+use core::marker::PhantomData;
 
 extern crate alloc;
 use alloc::borrow::Cow;
@@ -8,14 +9,10 @@ use alloc::vec;
 
 use log::info;
 
-#[cfg(feature = "std")]
-pub use std::ffi::CString;
-
-#[cfg(not(feature = "std"))]
-pub use cstr_core::CString;
+use crate::private::cstr::CString;
 
 use embedded_svc::http::server::{
-    HttpCompletion, HttpHandler, HttpRegistry, HttpRequest, HttpResponse,
+    HandlerRegistration, InlineHandler, InlineResponse, Registry, Request, SendError,
 };
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
@@ -65,42 +62,42 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
     }
 }
 
-impl From<HttpMethod> for Newtype<c_types::c_uint> {
-    fn from(method: HttpMethod) -> Self {
+impl From<Method> for Newtype<c_types::c_uint> {
+    fn from(method: Method) -> Self {
         Self(match method {
-            HttpMethod::Get => esp_idf_sys::http_method_HTTP_GET,
-            HttpMethod::Post => esp_idf_sys::http_method_HTTP_POST,
-            HttpMethod::Delete => esp_idf_sys::http_method_HTTP_DELETE,
-            HttpMethod::Head => esp_idf_sys::http_method_HTTP_HEAD,
-            HttpMethod::Put => esp_idf_sys::http_method_HTTP_PUT,
-            HttpMethod::Connect => esp_idf_sys::http_method_HTTP_CONNECT,
-            HttpMethod::Options => esp_idf_sys::http_method_HTTP_OPTIONS,
-            HttpMethod::Trace => esp_idf_sys::http_method_HTTP_TRACE,
-            HttpMethod::Copy => esp_idf_sys::http_method_HTTP_COPY,
-            HttpMethod::Lock => esp_idf_sys::http_method_HTTP_LOCK,
-            HttpMethod::MkCol => esp_idf_sys::http_method_HTTP_MKCOL,
-            HttpMethod::Move => esp_idf_sys::http_method_HTTP_MOVE,
-            HttpMethod::Propfind => esp_idf_sys::http_method_HTTP_PROPFIND,
-            HttpMethod::Proppatch => esp_idf_sys::http_method_HTTP_PROPPATCH,
-            HttpMethod::Search => esp_idf_sys::http_method_HTTP_SEARCH,
-            HttpMethod::Unlock => esp_idf_sys::http_method_HTTP_UNLOCK,
-            HttpMethod::Bind => esp_idf_sys::http_method_HTTP_BIND,
-            HttpMethod::Rebind => esp_idf_sys::http_method_HTTP_REBIND,
-            HttpMethod::Unbind => esp_idf_sys::http_method_HTTP_UNBIND,
-            HttpMethod::Acl => esp_idf_sys::http_method_HTTP_ACL,
-            HttpMethod::Report => esp_idf_sys::http_method_HTTP_REPORT,
-            HttpMethod::MkActivity => esp_idf_sys::http_method_HTTP_MKACTIVITY,
-            HttpMethod::Checkout => esp_idf_sys::http_method_HTTP_CHECKOUT,
-            HttpMethod::Merge => esp_idf_sys::http_method_HTTP_MERGE,
-            HttpMethod::MSearch => esp_idf_sys::http_method_HTTP_MSEARCH,
-            HttpMethod::Notify => esp_idf_sys::http_method_HTTP_NOTIFY,
-            HttpMethod::Subscribe => esp_idf_sys::http_method_HTTP_SUBSCRIBE,
-            HttpMethod::Unsubscribe => esp_idf_sys::http_method_HTTP_UNSUBSCRIBE,
-            HttpMethod::Patch => esp_idf_sys::http_method_HTTP_PATCH,
-            HttpMethod::Purge => esp_idf_sys::http_method_HTTP_PURGE,
-            HttpMethod::MkCalendar => esp_idf_sys::http_method_HTTP_MKCALENDAR,
-            HttpMethod::Link => esp_idf_sys::http_method_HTTP_LINK,
-            HttpMethod::Unlink => esp_idf_sys::http_method_HTTP_UNLINK,
+            Method::Get => esp_idf_sys::http_method_HTTP_GET,
+            Method::Post => esp_idf_sys::http_method_HTTP_POST,
+            Method::Delete => esp_idf_sys::http_method_HTTP_DELETE,
+            Method::Head => esp_idf_sys::http_method_HTTP_HEAD,
+            Method::Put => esp_idf_sys::http_method_HTTP_PUT,
+            Method::Connect => esp_idf_sys::http_method_HTTP_CONNECT,
+            Method::Options => esp_idf_sys::http_method_HTTP_OPTIONS,
+            Method::Trace => esp_idf_sys::http_method_HTTP_TRACE,
+            Method::Copy => esp_idf_sys::http_method_HTTP_COPY,
+            Method::Lock => esp_idf_sys::http_method_HTTP_LOCK,
+            Method::MkCol => esp_idf_sys::http_method_HTTP_MKCOL,
+            Method::Move => esp_idf_sys::http_method_HTTP_MOVE,
+            Method::Propfind => esp_idf_sys::http_method_HTTP_PROPFIND,
+            Method::Proppatch => esp_idf_sys::http_method_HTTP_PROPPATCH,
+            Method::Search => esp_idf_sys::http_method_HTTP_SEARCH,
+            Method::Unlock => esp_idf_sys::http_method_HTTP_UNLOCK,
+            Method::Bind => esp_idf_sys::http_method_HTTP_BIND,
+            Method::Rebind => esp_idf_sys::http_method_HTTP_REBIND,
+            Method::Unbind => esp_idf_sys::http_method_HTTP_UNBIND,
+            Method::Acl => esp_idf_sys::http_method_HTTP_ACL,
+            Method::Report => esp_idf_sys::http_method_HTTP_REPORT,
+            Method::MkActivity => esp_idf_sys::http_method_HTTP_MKACTIVITY,
+            Method::Checkout => esp_idf_sys::http_method_HTTP_CHECKOUT,
+            Method::Merge => esp_idf_sys::http_method_HTTP_MERGE,
+            Method::MSearch => esp_idf_sys::http_method_HTTP_MSEARCH,
+            Method::Notify => esp_idf_sys::http_method_HTTP_NOTIFY,
+            Method::Subscribe => esp_idf_sys::http_method_HTTP_SUBSCRIBE,
+            Method::Unsubscribe => esp_idf_sys::http_method_HTTP_UNSUBSCRIBE,
+            Method::Patch => esp_idf_sys::http_method_HTTP_PATCH,
+            Method::Purge => esp_idf_sys::http_method_HTTP_PURGE,
+            Method::MkCalendar => esp_idf_sys::http_method_HTTP_MKCALENDAR,
+            Method::Link => esp_idf_sys::http_method_HTTP_LINK,
+            Method::Unlink => esp_idf_sys::http_method_HTTP_UNLINK,
         })
     }
 }
@@ -168,12 +165,16 @@ impl EspHttpServer {
     unsafe extern "C" fn handle(raw_req: *mut httpd_req_t) -> c_types::c_int {
         let handler = ((*raw_req).user_ctx
             as *mut Box<
-                dyn Fn(EspHttpRequest, EspHttpResponse) -> Result<HttpCompletion, EspError>,
+                dyn Fn(EspHttpRequest, EspHttpResponse) -> Result<(), EspError>,
             >)
             .as_ref()
             .unwrap();
 
-        let request = EspHttpRequest(raw_req);
+        let request = EspHttpRequest {
+            raw_req,
+            _data: PhantomData,
+        };
+
         let response = EspHttpResponse {
             raw_req,
             status: 200,
@@ -212,17 +213,16 @@ impl Drop for EspHttpServer {
     }
 }
 
-impl HttpRegistry for EspHttpServer {
-    type Request<'a> = EspHttpRequest;
+impl Registry for EspHttpServer {
+    type Request<'a> = EspHttpRequest<'a>;
     type Response<'a> = EspHttpResponse<'a>;
     type Error = EspError;
 
-    fn set_handler<'b, F, E>(&mut self, handler: HttpHandler<F>) -> Result<&mut Self, Self::Error>
+    fn set_inline_handler<'a, F>(&mut self, handler: HandlerRegistration<F>) -> Result<&mut Self, Self::Error>
     where
-        F: Fn(Self::Request<'b>, Self::Response<'b>) -> Result<HttpCompletion, E>,
-        E: Into<Box<dyn std::error::Error>>,
+        F: InlineHandler<'a, Self::Request<'a>, Self::Response<'a>>
     {
-        let c_str = CString::new(handler.uri().as_ref()).unwrap();
+        let c_str = CString::new(handler.uri()).unwrap();
         let method = handler.method();
 
         let conf = esp_idf_sys::httpd_uri_t {
@@ -246,15 +246,15 @@ impl HttpRegistry for EspHttpServer {
     }
 }
 
-pub struct EspHttpRequest(*mut httpd_req_t);
+pub struct EspHttpRequest<'a> {
+    raw_req: *mut httpd_req_t,
+    _data: PhantomData<&'a httpd_req_t>,
+}
 
-impl<'a> HttpRequest<'a> for EspHttpRequest {
-    type Read = Self;
-    type Error = EspError;
-
+impl<'a> Request<'a> for EspHttpRequest<'a> {
     fn query_string(&self) -> Cow<'a, str> {
         unsafe {
-            match esp_idf_sys::httpd_req_get_url_query_len(self.0) as usize {
+            match esp_idf_sys::httpd_req_get_url_query_len(self.raw_req) as usize {
                 0 => "".into(),
                 len => {
                     // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
@@ -265,7 +265,7 @@ impl<'a> HttpRequest<'a> for EspHttpRequest {
                     let mut buf: vec::Vec<u8> = Vec::with_capacity(len + 1);
 
                     esp_nofail!(esp_idf_sys::httpd_req_get_url_query_str(
-                        self.0,
+                        self.raw_req,
                         buf.as_mut_ptr() as *mut _,
                         (len + 1) as esp_idf_sys::size_t
                     ));
@@ -278,19 +278,15 @@ impl<'a> HttpRequest<'a> for EspHttpRequest {
             }
         }
     }
-
-    fn payload(&mut self) -> &mut Self::Read {
-        self
-    }
 }
 
-impl Read for EspHttpRequest {
+impl<'a> Read for EspHttpRequest<'a> {
     type Error = EspError;
 
     fn do_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         unsafe {
             let len = esp_idf_sys::httpd_req_recv(
-                self.0,
+                self.raw_req,
                 buf.as_mut_ptr() as *mut _,
                 buf.len() as esp_idf_sys::size_t,
             );
@@ -304,12 +300,12 @@ impl Read for EspHttpRequest {
     }
 }
 
-impl HttpHeaders for EspHttpRequest {
-    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'_, str>> {
+impl<'a> Headers<'a> for EspHttpRequest<'a> {
+    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
         let c_name = CString::new(name.as_ref()).unwrap();
 
         unsafe {
-            match esp_idf_sys::httpd_req_get_hdr_value_len(self.0, c_name.as_ptr() as _) as usize {
+            match esp_idf_sys::httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _) as usize {
                 0 => None,
                 len => {
                     // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
@@ -320,7 +316,7 @@ impl HttpHeaders for EspHttpRequest {
                     let mut buf: vec::Vec<u8> = Vec::with_capacity(len + 1);
 
                     esp_nofail!(esp_idf_sys::httpd_req_get_hdr_value_str(
-                        self.0,
+                        self.raw_req,
                         c_name.as_ptr() as _,
                         buf.as_mut_ptr() as *mut _,
                         (len + 1) as esp_idf_sys::size_t
@@ -343,44 +339,8 @@ pub struct EspHttpResponse<'a> {
     headers: BTreeMap<Cow<'a, str>, Cow<'a, str>>,
 }
 
-impl<'a> HttpSendStatus<'a> for EspHttpResponse<'a> {
-    fn set_status(&mut self, status: u16) -> &mut Self {
-        self.status = status;
-        self
-    }
-
-    fn set_status_message<M>(&mut self, message: M) -> &mut Self
-    where
-        M: Into<Cow<'a, str>>,
-    {
-        self.status_message = Some(message.into());
-        self
-    }
-}
-
-impl<'a> HttpSendHeaders<'a> for EspHttpResponse<'a> {
-    fn set_header<H, V>(&mut self, name: H, value: V) -> &mut Self
-    where
-        H: Into<Cow<'a, str>>,
-        V: Into<Cow<'a, str>>,
-    {
-        *self.headers.entry(name.into()).or_insert(Cow::Borrowed("")) = value.into();
-        self
-    }
-}
-
-impl<'a> HttpResponse<'a> for EspHttpResponse<'a> {
-    type Write = Self;
-    type Error = EspError;
-
-    fn send(
-        mut self,
-        request: impl HttpRequest<'a>,
-        f: impl FnOnce(&mut Self::Write) -> Result<(), Self::Error>,
-    ) -> Result<HttpCompletion, Self::Error>
-    where
-        Self: Sized,
-    {
+impl <'a> EspHttpResponse<'a> {
+    fn send_headers(&self) -> Result<(CString, Vec<(CString, CString)>, Option<CString>), EspError> {
         // TODO: Would be much more effective if we are serializing the status line and headers directly
         // Consider implement this, based on http_resp_send() - even though that would require implementing
         // chunking in Rust
@@ -395,7 +355,7 @@ impl<'a> HttpResponse<'a> for EspHttpResponse<'a> {
 
         esp!(unsafe { esp_idf_sys::httpd_resp_set_status(self.raw_req, c_status.as_ptr() as _) })?;
 
-        let mut c_headers: std::vec::Vec<(CString, CString)> = vec![];
+        let mut c_headers: Vec<(CString, CString)> = vec![];
         let mut c_content_type: Option<CString> = None;
         let mut content_len: Option<usize> = None; // TODO: Use it
 
@@ -434,13 +394,78 @@ impl<'a> HttpResponse<'a> for EspHttpResponse<'a> {
             })?;
         }
 
+        Ok((c_status, c_headers, c_content_type))
+    }
+}
+
+impl<'a> SendStatus<'a> for EspHttpResponse<'a> {
+    fn set_status(&mut self, status: u16) -> &mut Self {
+        self.status = status;
+        self
+    }
+
+    fn set_status_message<M>(&mut self, message: M) -> &mut Self
+    where
+        M: Into<Cow<'a, str>>,
+    {
+        self.status_message = Some(message.into());
+        self
+    }
+}
+
+impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
+    fn set_header<H, V>(&mut self, name: H, value: V) -> &mut Self
+    where
+        H: Into<Cow<'a, str>>,
+        V: Into<Cow<'a, str>>,
+    {
+        *self.headers.entry(name.into()).or_insert(Cow::Borrowed("")) = value.into();
+        self
+    }
+}
+
+impl<'a> InlineResponse<'a> for EspHttpResponse<'a> {
+    type Write = Self;
+    type Error = EspError;
+
+    #[cfg(feature = "std")]
+    fn send<E: std::error::Error + Send + Sync + 'static>(
+        self,
+        request: impl Request<'a>,
+        f: impl FnOnce(&mut Self::Write) -> Result<(), SendError<Self::Error, E>>,
+    ) -> Result<(), SendError<Self::Error, E>>
+    where
+        Self: Sized,
+    {
+        let _headers = self.send_headers().map_err(SendError::SendError)?;
+
         f(&mut self)?;
 
         esp!(unsafe {
-            esp_idf_sys::httpd_resp_send_chunk(self.raw_req, std::ptr::null() as *const _, 0)
-        })?;
+            esp_idf_sys::httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0)
+        }).map_err(SendError::SendError)?;
 
-        Ok(HttpCompletion::new(request, self))
+        Ok(())
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn send<E: fmt::Display + fmt::Debug>(
+        self,
+        request: impl Request<'a>,
+        f: impl FnOnce(&mut Self::Write) -> Result<(), SendError<Self::Error, E>>,
+    ) -> Result<(), SendError<Self::Error, E>>
+    where
+        Self: Sized,
+    {
+        let _headers = self.send_headers().map_err(SendError::SendError)?;
+
+        f(&mut self)?;
+
+        esp!(unsafe {
+            esp_idf_sys::httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0)
+        }).map_err(SendError::SendError)?;
+
+        Ok(())
     }
 }
 

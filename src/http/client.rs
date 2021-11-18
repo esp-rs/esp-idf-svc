@@ -15,27 +15,27 @@ use esp_idf_sys::*;
 use crate::private::common::Newtype;
 use crate::private::cstr::*;
 
-impl From<HttpMethod> for Newtype<(esp_http_client_method_t, ())> {
-    fn from(method: HttpMethod) -> Self {
+impl From<Method> for Newtype<(esp_http_client_method_t, ())> {
+    fn from(method: Method) -> Self {
         Self((
             match method {
-                HttpMethod::Get => esp_http_client_method_t_HTTP_METHOD_GET,
-                HttpMethod::Post => esp_http_client_method_t_HTTP_METHOD_POST,
-                HttpMethod::Delete => esp_http_client_method_t_HTTP_METHOD_DELETE,
-                HttpMethod::Head => esp_http_client_method_t_HTTP_METHOD_HEAD,
-                HttpMethod::Put => esp_http_client_method_t_HTTP_METHOD_PUT,
-                HttpMethod::Options => esp_http_client_method_t_HTTP_METHOD_OPTIONS,
-                HttpMethod::Copy => esp_http_client_method_t_HTTP_METHOD_COPY,
-                HttpMethod::Lock => esp_http_client_method_t_HTTP_METHOD_LOCK,
-                HttpMethod::MkCol => esp_http_client_method_t_HTTP_METHOD_MKCOL,
-                HttpMethod::Move => esp_http_client_method_t_HTTP_METHOD_MOVE,
-                HttpMethod::Propfind => esp_http_client_method_t_HTTP_METHOD_PROPFIND,
-                HttpMethod::Proppatch => esp_http_client_method_t_HTTP_METHOD_PROPPATCH,
-                HttpMethod::Unlock => esp_http_client_method_t_HTTP_METHOD_UNLOCK,
-                HttpMethod::Notify => esp_http_client_method_t_HTTP_METHOD_NOTIFY,
-                HttpMethod::Subscribe => esp_http_client_method_t_HTTP_METHOD_SUBSCRIBE,
-                HttpMethod::Unsubscribe => esp_http_client_method_t_HTTP_METHOD_UNSUBSCRIBE,
-                HttpMethod::Patch => esp_http_client_method_t_HTTP_METHOD_PATCH,
+                Method::Get => esp_http_client_method_t_HTTP_METHOD_GET,
+                Method::Post => esp_http_client_method_t_HTTP_METHOD_POST,
+                Method::Delete => esp_http_client_method_t_HTTP_METHOD_DELETE,
+                Method::Head => esp_http_client_method_t_HTTP_METHOD_HEAD,
+                Method::Put => esp_http_client_method_t_HTTP_METHOD_PUT,
+                Method::Options => esp_http_client_method_t_HTTP_METHOD_OPTIONS,
+                Method::Copy => esp_http_client_method_t_HTTP_METHOD_COPY,
+                Method::Lock => esp_http_client_method_t_HTTP_METHOD_LOCK,
+                Method::MkCol => esp_http_client_method_t_HTTP_METHOD_MKCOL,
+                Method::Move => esp_http_client_method_t_HTTP_METHOD_MOVE,
+                Method::Propfind => esp_http_client_method_t_HTTP_METHOD_PROPFIND,
+                Method::Proppatch => esp_http_client_method_t_HTTP_METHOD_PROPPATCH,
+                Method::Unlock => esp_http_client_method_t_HTTP_METHOD_UNLOCK,
+                Method::Notify => esp_http_client_method_t_HTTP_METHOD_NOTIFY,
+                Method::Subscribe => esp_http_client_method_t_HTTP_METHOD_SUBSCRIBE,
+                Method::Unsubscribe => esp_http_client_method_t_HTTP_METHOD_UNSUBSCRIBE,
+                Method::Patch => esp_http_client_method_t_HTTP_METHOD_PATCH,
                 method => panic!("Method {:?} is not supported", method),
             },
             (),
@@ -127,14 +127,14 @@ impl Drop for EspHttpClient {
     }
 }
 
-impl HttpClient for EspHttpClient {
+impl Client for EspHttpClient {
     type Request<'a> = EspHttpRequest<'a>;
 
     type Error = EspError;
 
     fn request(
         &mut self,
-        method: HttpMethod,
+        method: Method,
         url: impl AsRef<str>,
     ) -> Result<Self::Request<'_>, Self::Error> {
         let c_url = CString::new(url.as_ref()).unwrap();
@@ -150,7 +150,7 @@ impl HttpClient for EspHttpClient {
         let follow_redirects = match self.follow_redirects_policy {
             FollowRedirectsPolicy::FollowAll => true,
             FollowRedirectsPolicy::FollowGetHead => {
-                method == HttpMethod::Get || method == HttpMethod::Head
+                method == Method::Get || method == Method::Head
             }
             _ => false,
         };
@@ -168,37 +168,7 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn register_handler(
-        &mut self,
-        handler: impl Fn(&esp_http_client_event_t) -> esp_err_t + 'static,
-    ) {
-        *self.client.event_handler = Some(Box::new(handler));
-    }
-
-    fn deregister_handler(&mut self) {
-        *self.client.event_handler = None;
-    }
-}
-
-impl<'a> HttpRequest<'a> for EspHttpRequest<'a> {
-    type Response<'b> = EspHttpResponse<'b>;
-
-    type Write<'b> = Self;
-
-    type Error = EspError;
-
-    fn send(
-        mut self,
-        size: usize,
-        f: impl FnOnce(&mut Self::Write<'a>) -> Result<(), Self::Error>,
-    ) -> Result<Self::Response<'a>, Self::Error>
-    where
-        Self: Sized,
-    {
-        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) })?;
-
-        f(&mut self)?;
-
+    fn fetch_headers(&self, size: usize) -> Result<BTreeMap<String, String>, EspError> {
         let mut headers = BTreeMap::new();
 
         loop {
@@ -258,6 +228,63 @@ impl<'a> HttpRequest<'a> for EspHttpRequest<'a> {
             break;
         }
 
+        Ok(headers)
+    }
+
+    fn register_handler(
+        &mut self,
+        handler: impl Fn(&esp_http_client_event_t) -> esp_err_t + 'static,
+    ) {
+        *self.client.event_handler = Some(Box::new(handler));
+    }
+
+    fn deregister_handler(&mut self) {
+        *self.client.event_handler = None;
+    }
+}
+
+impl<'a> Request<'a> for EspHttpRequest<'a> {
+    type Response<'b> = EspHttpResponse<'b>;
+
+    type Write<'b> = Self;
+
+    type Error = EspError;
+
+    #[cfg(feature = "std")]
+    fn send<E: std::error::Error + Send + Sync + 'static>(
+        mut self,
+        size: usize,
+        f: impl FnOnce(&mut Self::Write<'a>) -> Result<(), SendError<Self::Error, E>>,
+    ) -> Result<Self::Response<'a>, SendError<Self::Error, E>>
+    where
+        Self: Sized,
+    {
+        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) }).map_err(SendError::SendError)?;
+
+        f(&mut self)?;
+
+        let headers = self.fetch_headers(size).map_err(SendError::SendError)?;
+
+        Ok(EspHttpResponse {
+            client: self.client,
+            headers,
+        })
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn send<E: fmt::Display + fmt::Debug>(
+        mut self,
+        f: impl FnOnce(&mut Self::Write<'a>) -> Result<(), SendError<Self::Error, E>>,
+    ) -> Result<Self::Response<'a>, SendError<Self::Error, E>>
+    where
+        Self: Sized,
+    {
+        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) }).map_err(SendError::SendError)?;
+
+        f(&mut self)?;
+
+        let headers = self.fetch_headers().map_err(SendError::SendError)?;
+
         Ok(EspHttpResponse {
             client: self.client,
             headers,
@@ -265,7 +292,7 @@ impl<'a> HttpRequest<'a> for EspHttpRequest<'a> {
     }
 }
 
-impl<'a> HttpSendHeaders<'a> for EspHttpRequest<'a> {
+impl<'a> SendHeaders<'a> for EspHttpRequest<'a> {
     fn set_header<H, V>(&mut self, name: H, value: V) -> &mut Self
     where
         H: Into<Cow<'a, str>>,
@@ -304,25 +331,11 @@ pub struct EspHttpResponse<'a> {
     headers: BTreeMap<String, String>,
 }
 
-impl<'a> HttpResponse<'a> for EspHttpResponse<'a> {
-    type Read<'b> = Self;
-
-    type Error = EspError;
-
-    fn payload(&mut self) -> &mut Self {
-        self
-    }
-
-    fn into_payload(self) -> Self::Read<'a>
-    where
-        Self: Sized,
-    {
-        self
-    }
+impl<'a> Response<'a> for EspHttpResponse<'a> {
 }
 
-impl<'a> HttpHeaders for EspHttpResponse<'a> {
-    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'_, str>> {
+impl<'a> Headers<'a> for EspHttpResponse<'a> {
+    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
         if name.as_ref().eq_ignore_ascii_case("Content-Length") {
             self.content_len().map(|l| Cow::Owned(l.to_string()))
         } else {
@@ -343,12 +356,12 @@ impl<'a> HttpHeaders for EspHttpResponse<'a> {
     }
 }
 
-impl<'a> HttpStatus for EspHttpResponse<'a> {
+impl<'a> Status<'a> for EspHttpResponse<'a> {
     fn status(&self) -> u16 {
         unsafe { esp_http_client_get_status_code(self.client.raw) as _ }
     }
 
-    fn status_message(&self) -> Option<Cow<'_, str>> {
+    fn status_message(&self) -> Option<Cow<'a, str>> {
         None
     }
 }
