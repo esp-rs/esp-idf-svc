@@ -149,15 +149,14 @@ impl Client for EspHttpClient {
 
         let follow_redirects = match self.follow_redirects_policy {
             FollowRedirectsPolicy::FollowAll => true,
-            FollowRedirectsPolicy::FollowGetHead => {
-                method == Method::Get || method == Method::Head
-            }
+            FollowRedirectsPolicy::FollowGetHead => method == Method::Get || method == Method::Head,
             _ => false,
         };
 
         Ok(EspHttpRequest {
             client: self,
             follow_redirects,
+            size: 0,
         })
     }
 }
@@ -165,10 +164,11 @@ impl Client for EspHttpClient {
 pub struct EspHttpRequest<'a> {
     client: &'a mut EspHttpClient,
     follow_redirects: bool,
+    size: usize,
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn fetch_headers(&self, size: usize) -> Result<BTreeMap<String, String>, EspError> {
+    fn fetch_headers(&self) -> Result<BTreeMap<String, String>, EspError> {
         let mut headers = BTreeMap::new();
 
         loop {
@@ -217,7 +217,7 @@ impl<'a> EspHttpRequest<'a> {
                         )
                     })?;
                     esp!(unsafe { esp_http_client_set_redirection(self.client.raw) })?;
-                    esp!(unsafe { esp_http_client_open(self.client.raw, size as _) })?;
+                    esp!(unsafe { esp_http_client_open(self.client.raw, self.size as _) })?;
 
                     headers.clear();
 
@@ -244,46 +244,24 @@ impl<'a> EspHttpRequest<'a> {
 }
 
 impl<'a> Request<'a> for EspHttpRequest<'a> {
-    type Response<'b> = EspHttpResponse<'b>;
-
-    type Write<'b> = Self;
+    type Write<'b> = EspHttpRequest<'b>;
 
     type Error = EspError;
 
-    #[cfg(feature = "std")]
-    fn send<E: std::error::Error + Send + Sync + 'static>(
-        mut self,
-        size: usize,
-        f: impl FnOnce(&mut Self::Write<'a>) -> Result<(), SendError<Self::Error, E>>,
-    ) -> Result<Self::Response<'a>, SendError<Self::Error, E>>
-    where
-        Self: Sized,
-    {
-        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) }).map_err(SendError::SendError)?;
+    fn into_writer(mut self, size: usize) -> Result<Self::Write<'a>, Self::Error> {
+        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) })?;
 
-        f(&mut self)?;
+        self.size = size;
 
-        let headers = self.fetch_headers(size).map_err(SendError::SendError)?;
-
-        Ok(EspHttpResponse {
-            client: self.client,
-            headers,
-        })
+        Ok(self)
     }
+}
 
-    #[cfg(not(feature = "std"))]
-    fn send<E: fmt::Display + fmt::Debug>(
-        mut self,
-        f: impl FnOnce(&mut Self::Write<'a>) -> Result<(), SendError<Self::Error, E>>,
-    ) -> Result<Self::Response<'a>, SendError<Self::Error, E>>
-    where
-        Self: Sized,
-    {
-        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) }).map_err(SendError::SendError)?;
+impl<'a> RequestWrite<'a> for EspHttpRequest<'a> {
+    type Response = EspHttpResponse<'a>;
 
-        f(&mut self)?;
-
-        let headers = self.fetch_headers().map_err(SendError::SendError)?;
+    fn into_response(self) -> Result<Self::Response, Self::Error> {
+        let headers = self.fetch_headers()?;
 
         Ok(EspHttpResponse {
             client: self.client,
@@ -331,11 +309,21 @@ pub struct EspHttpResponse<'a> {
     headers: BTreeMap<String, String>,
 }
 
-impl<'a> Response<'a> for EspHttpResponse<'a> {
+impl<'a> Response for EspHttpResponse<'a> {
+    type Read<'b>
+    where
+        'a: 'b,
+    = &'b EspHttpResponse<'a>;
+
+    type Error = EspError;
+
+    fn reader(&self) -> Self::Read<'_> {
+        self
+    }
 }
 
-impl<'a> Headers<'a> for EspHttpResponse<'a> {
-    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
+impl<'a> Headers for EspHttpResponse<'a> {
+    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'_, str>> {
         if name.as_ref().eq_ignore_ascii_case("Content-Length") {
             self.content_len().map(|l| Cow::Owned(l.to_string()))
         } else {
@@ -356,17 +344,17 @@ impl<'a> Headers<'a> for EspHttpResponse<'a> {
     }
 }
 
-impl<'a> Status<'a> for EspHttpResponse<'a> {
+impl<'a> Status for EspHttpResponse<'a> {
     fn status(&self) -> u16 {
         unsafe { esp_http_client_get_status_code(self.client.raw) as _ }
     }
 
-    fn status_message(&self) -> Option<Cow<'a, str>> {
+    fn status_message(&self) -> Option<Cow<'_, str>> {
         None
     }
 }
 
-impl<'a> Read for EspHttpResponse<'a> {
+impl<'a> Read for &EspHttpResponse<'a> {
     type Error = EspError;
 
     fn do_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {

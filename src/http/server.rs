@@ -1,5 +1,5 @@
-use core::ptr;
 use core::marker::PhantomData;
+use core::ptr;
 
 extern crate alloc;
 use alloc::borrow::Cow;
@@ -12,7 +12,8 @@ use log::info;
 use crate::private::cstr::CString;
 
 use embedded_svc::http::server::{
-    HandlerRegistration, InlineHandler, InlineResponse, Registry, Request, SendError,
+    Completion, HandlerRegistration, InlineHandler, InlineResponse, Registry, Request,
+    ResponseWrite,
 };
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
@@ -164,9 +165,7 @@ impl EspHttpServer {
 
     unsafe extern "C" fn handle(raw_req: *mut httpd_req_t) -> c_types::c_int {
         let handler = ((*raw_req).user_ctx
-            as *mut Box<
-                dyn Fn(EspHttpRequest, EspHttpResponse) -> Result<(), EspError>,
-            >)
+            as *mut Box<dyn Fn(EspHttpRequest, EspHttpResponse) -> Result<(), EspError>>)
             .as_ref()
             .unwrap();
 
@@ -180,6 +179,9 @@ impl EspHttpServer {
             status: 200,
             status_message: None,
             headers: BTreeMap::new(),
+            c_headers: None,
+            c_content_type: None,
+            c_status: None,
         };
 
         info!("About to handle query string {:?}", request.query_string());
@@ -218,9 +220,12 @@ impl Registry for EspHttpServer {
     type Response<'a> = EspHttpResponse<'a>;
     type Error = EspError;
 
-    fn set_inline_handler<'a, F>(&mut self, handler: HandlerRegistration<F>) -> Result<&mut Self, Self::Error>
+    fn set_inline_handler<'a, F>(
+        &mut self,
+        handler: HandlerRegistration<F>,
+    ) -> Result<&mut Self, Self::Error>
     where
-        F: InlineHandler<'a, Self::Request<'a>, Self::Response<'a>>
+        F: InlineHandler<'a, Self::Request<'a>, Self::Response<'a>>,
     {
         let c_str = CString::new(handler.uri()).unwrap();
         let method = handler.method();
@@ -252,6 +257,13 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> Request<'a> for EspHttpRequest<'a> {
+    type Read<'b>
+    where
+        'a: 'b,
+    = &'b EspHttpRequest<'a>;
+
+    type Error = EspError;
+
     fn query_string(&self) -> Cow<'a, str> {
         unsafe {
             match esp_idf_sys::httpd_req_get_url_query_len(self.raw_req) as usize {
@@ -278,9 +290,13 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
             }
         }
     }
+
+    fn reader(&self) -> Self::Read<'_> {
+        self
+    }
 }
 
-impl<'a> Read for EspHttpRequest<'a> {
+impl<'a> Read for &EspHttpRequest<'a> {
     type Error = EspError;
 
     fn do_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
@@ -300,12 +316,14 @@ impl<'a> Read for EspHttpRequest<'a> {
     }
 }
 
-impl<'a> Headers<'a> for EspHttpRequest<'a> {
+impl<'a> Headers for EspHttpRequest<'a> {
     fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
         let c_name = CString::new(name.as_ref()).unwrap();
 
         unsafe {
-            match esp_idf_sys::httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _) as usize {
+            match esp_idf_sys::httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _)
+                as usize
+            {
                 0 => None,
                 len => {
                     // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
@@ -337,10 +355,13 @@ pub struct EspHttpResponse<'a> {
     status: u16,
     status_message: Option<Cow<'a, str>>,
     headers: BTreeMap<Cow<'a, str>, Cow<'a, str>>,
+    c_headers: Option<Vec<(CString, CString)>>,
+    c_content_type: Option<CString>,
+    c_status: Option<CString>,
 }
 
-impl <'a> EspHttpResponse<'a> {
-    fn send_headers(&self) -> Result<(CString, Vec<(CString, CString)>, Option<CString>), EspError> {
+impl<'a> EspHttpResponse<'a> {
+    fn send_headers(&mut self) -> Result<(), EspError> {
         // TODO: Would be much more effective if we are serializing the status line and headers directly
         // Consider implement this, based on http_resp_send() - even though that would require implementing
         // chunking in Rust
@@ -357,18 +378,19 @@ impl <'a> EspHttpResponse<'a> {
 
         let mut c_headers: Vec<(CString, CString)> = vec![];
         let mut c_content_type: Option<CString> = None;
-        let mut content_len: Option<usize> = None; // TODO: Use it
+        //let content_len: Option<usize> = None;
 
         for (key, value) in &self.headers {
             if key.as_ref().eq_ignore_ascii_case("Content-Type") {
                 c_content_type = Some(CString::new(value.as_ref()).unwrap());
             } else if key.as_ref().eq_ignore_ascii_case("Content-Length") {
-                content_len = Some(
-                    value
-                        .as_ref()
-                        .parse::<usize>()
-                        .map_err(|_| EspError::from(ESP_ERR_INVALID_ARG as _).unwrap())?,
-                );
+                // TODO: Skip this header for now, as we are doing a chunked delivery anyway
+                // content_len = Some(
+                //     value
+                //         .as_ref()
+                //         .parse::<usize>()
+                //         .map_err(|_| EspError::from(ESP_ERR_INVALID_ARG as _).unwrap())?,
+                // );
             } else {
                 c_headers.push((
                     CString::new(key.as_ref()).unwrap(),
@@ -394,7 +416,11 @@ impl <'a> EspHttpResponse<'a> {
             })?;
         }
 
-        Ok((c_status, c_headers, c_content_type))
+        self.c_headers = Some(c_headers);
+        self.c_content_type = c_content_type;
+        self.c_status = Some(c_status);
+
+        Ok(())
     }
 }
 
@@ -425,47 +451,23 @@ impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
 }
 
 impl<'a> InlineResponse<'a> for EspHttpResponse<'a> {
-    type Write = Self;
+    type Write<'b> = EspHttpResponse<'b>;
     type Error = EspError;
 
-    #[cfg(feature = "std")]
-    fn send<E: std::error::Error + Send + Sync + 'static>(
-        self,
-        request: impl Request<'a>,
-        f: impl FnOnce(&mut Self::Write) -> Result<(), SendError<Self::Error, E>>,
-    ) -> Result<(), SendError<Self::Error, E>>
-    where
-        Self: Sized,
-    {
-        let _headers = self.send_headers().map_err(SendError::SendError)?;
+    fn into_writer(mut self, _request: impl Request<'a>) -> Result<Self::Write<'a>, Self::Error> {
+        self.send_headers()?;
 
-        f(&mut self)?;
-
-        esp!(unsafe {
-            esp_idf_sys::httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0)
-        }).map_err(SendError::SendError)?;
-
-        Ok(())
+        Ok(self)
     }
+}
 
-    #[cfg(not(feature = "std"))]
-    fn send<E: fmt::Display + fmt::Debug>(
-        self,
-        request: impl Request<'a>,
-        f: impl FnOnce(&mut Self::Write) -> Result<(), SendError<Self::Error, E>>,
-    ) -> Result<(), SendError<Self::Error, E>>
-    where
-        Self: Sized,
-    {
-        let _headers = self.send_headers().map_err(SendError::SendError)?;
-
-        f(&mut self)?;
-
+impl<'a> ResponseWrite<'a> for EspHttpResponse<'a> {
+    fn complete(self) -> Result<Completion, Self::Error> {
         esp!(unsafe {
             esp_idf_sys::httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0)
-        }).map_err(SendError::SendError)?;
+        })?;
 
-        Ok(())
+        Ok(unsafe { Completion::internal_new() })
     }
 }
 
