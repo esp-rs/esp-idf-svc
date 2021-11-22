@@ -1,3 +1,4 @@
+use core::fmt;
 use core::marker::PhantomData;
 use core::ptr;
 
@@ -11,10 +12,7 @@ use log::info;
 
 use crate::private::cstr::CString;
 
-use embedded_svc::http::server::{
-    Completion, HandlerRegistration, InlineHandler, InlineResponse, Registry, Request,
-    ResponseWrite,
-};
+use embedded_svc::http::server::{Completion, InlineResponse, Registry, Request, ResponseWrite};
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
 
@@ -163,35 +161,21 @@ impl EspHttpServer {
         Ok(())
     }
 
-    unsafe extern "C" fn handle(raw_req: *mut httpd_req_t) -> c_types::c_int {
-        let handler = ((*raw_req).user_ctx
-            as *mut Box<dyn Fn(EspHttpRequest, EspHttpResponse) -> Result<(), EspError>>)
-            .as_ref()
-            .unwrap();
+    fn handle_request<'a, H, E>(
+        req: EspHttpRequest<'a>,
+        resp: EspHttpResponse<'a>,
+        handler: &H,
+    ) -> c_types::c_int
+    where
+        H: for<'b> Fn(EspHttpRequest<'b>, EspHttpResponse<'b>) -> Result<Completion, E>,
+        E: fmt::Display + fmt::Debug,
+    {
+        info!("About to handle query string {:?}", req.query_string());
 
-        let request = EspHttpRequest {
-            raw_req,
-            _data: PhantomData,
-        };
-
-        let response = EspHttpResponse {
-            raw_req,
-            status: 200,
-            status_message: None,
-            headers: BTreeMap::new(),
-            c_headers: None,
-            c_content_type: None,
-            c_status: None,
-        };
-
-        info!("About to handle query string {:?}", request.query_string());
-
-        if let Err(_err) = handler(request, response) {
+        if let Err(_err) = handler(req, resp) {
             // TODO
             return 0;
         }
-
-        0
 
         // let mut idf_request_response = IdfRequest(rd, PhantomData);
 
@@ -206,6 +190,41 @@ impl EspHttpServer {
         //     Result::Ok(_) => esp_idf_sys::ESP_OK as _,
         //     Result::Err(_) => esp_idf_sys::ESP_FAIL as _,
         // }
+        0
+    }
+
+    fn to_native_handler<H, E>(handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
+    where
+        H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
+        E: fmt::Display + fmt::Debug,
+    {
+        Box::new(move |raw_req| {
+            let req = EspHttpRequest {
+                raw_req,
+                _data: PhantomData,
+            };
+
+            let resp = EspHttpResponse {
+                raw_req,
+                status: 200,
+                status_message: None,
+                headers: BTreeMap::new(),
+                c_headers: None,
+                c_content_type: None,
+                c_status: None,
+            };
+
+            Self::handle_request(req, resp, &handler)
+        })
+    }
+
+    extern "C" fn handle(raw_req: *mut httpd_req_t) -> c_types::c_int {
+        let handler = unsafe {
+            ((*raw_req).user_ctx as *mut Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>).as_ref()
+        }
+        .unwrap();
+
+        (handler)(raw_req)
     }
 }
 
@@ -217,23 +236,27 @@ impl Drop for EspHttpServer {
 
 impl Registry for EspHttpServer {
     type Request<'a> = EspHttpRequest<'a>;
-    type Response<'a> = EspHttpResponse<'a>;
+    type InlineResponse<'a> = EspHttpResponse<'a>;
     type Error = EspError;
 
-    fn set_inline_handler<'a, F>(
+    fn set_inline_handler<H, E>(
         &mut self,
-        handler: HandlerRegistration<F>,
+        uri: &str,
+        method: Method,
+        handler: H,
     ) -> Result<&mut Self, Self::Error>
     where
-        F: InlineHandler<'a, Self::Request<'a>, Self::Response<'a>>,
+        H: for<'a> Fn(Self::Request<'a>, Self::InlineResponse<'a>) -> Result<Completion, E>
+            + 'static,
+        E: fmt::Display + fmt::Debug,
     {
-        let c_str = CString::new(handler.uri()).unwrap();
-        let method = handler.method();
+        let c_str = CString::new(uri).unwrap();
 
+        //let handler = |req: EspHttpRequest
         let conf = esp_idf_sys::httpd_uri_t {
             uri: c_str.as_ptr() as _,
             method: Newtype::<c_types::c_uint>::from(method).0,
-            user_ctx: Box::into_raw(Box::new(handler.handler())) as *mut _,
+            user_ctx: Box::into_raw(Self::to_native_handler(handler)) as *mut _,
             handler: Some(EspHttpServer::handle),
         };
 
