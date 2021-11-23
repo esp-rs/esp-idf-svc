@@ -71,12 +71,10 @@ pub struct EspHttpClientConfiguration {
     pub follow_redirects_policy: FollowRedirectsPolicy,
 }
 
-trait EventHandler = Fn(&esp_http_client_event_t) + 'static;
-
 pub struct EspHttpClient {
     raw: esp_http_client_handle_t,
     follow_redirects_policy: FollowRedirectsPolicy,
-    event_handler: Box<Option<NonNull<dyn EventHandler>>>,
+    event_handler: Box<Option<NonNull<dyn Fn(&esp_http_client_event_t)>>>,
 }
 
 impl EspHttpClient {
@@ -115,7 +113,7 @@ impl EspHttpClient {
         match unsafe { event.as_mut() } {
             Some(event) => {
                 let event_handler = unsafe {
-                    (event.user_data as *const Option<NonNull<dyn EventHandler>>).as_ref()
+                    (event.user_data as *const Option<NonNull<dyn Fn(&esp_http_client_event_t)>>).as_ref()
                 };
                 if let Some(opt_handler) = event_handler {
                     let handler = unsafe { opt_handler.unwrap().as_mut() };
@@ -178,10 +176,10 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn register_handler(&self, handler: &mut impl EventHandler) {
+    fn register_handler(&self, handler: &mut impl Fn(&esp_http_client_event_t) + 'static) {
         *self.event_handler = Some(unsafe {
             // SAFETY: reference to pointer cast always results in a non-null pointer.
-            NonNull::new_unchecked(handler as *mut dyn EventHandler)
+            NonNull::new_unchecked(handler as *mut _)
         });
     }
 
