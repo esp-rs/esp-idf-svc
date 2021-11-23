@@ -51,10 +51,6 @@ impl From<HttpMethod> for Newtype<(esp_http_client_method_t, ())> {
     }
 }
 
-static mut EVENT_HANDLERS: EspMutex<
-    BTreeMap<esp_http_client_handle_t, *const dyn Fn(&esp_http_client_event_t)>,
-> = EspMutex::new(BTreeMap::new());
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "std", derive(Hash))]
 pub enum FollowRedirectsPolicy {
@@ -75,9 +71,12 @@ pub struct EspHttpClientConfiguration {
     pub follow_redirects_policy: FollowRedirectsPolicy,
 }
 
+trait EventHandler = Fn(&esp_http_client_event_t) + 'static;
+
 pub struct EspHttpClient {
     raw: esp_http_client_handle_t,
     follow_redirects_policy: FollowRedirectsPolicy,
+    event_handler: Box<Option<NonNull<dyn EventHandler>>>,
 }
 
 impl EspHttpClient {
@@ -86,11 +85,13 @@ impl EspHttpClient {
     }
 
     pub fn new(configuration: &EspHttpClientConfiguration) -> Result<Self, EspError> {
+        let mut event_handler = Box::new(None);
         let mut native_config = esp_http_client_config_t {
             // The ESP-IDF HTTP client is really picky on being initialized with a valid URL
             // So we set something here, which will be changed later anyway, in the request() method
             url: b"http://127.0.0.1\0".as_ptr() as *const _,
             event_handler: Some(Self::on_events),
+            user_data: event_handler.as_mut() as *mut _ as *mut c_void,
             ..Default::default()
         };
 
@@ -105,23 +106,27 @@ impl EspHttpClient {
             Ok(Self {
                 raw,
                 follow_redirects_policy: configuration.follow_redirects_policy,
+                event_handler,
             })
         }
     }
 
     extern "C" fn on_events(event: *mut esp_http_client_event_t) -> i32 {
-        let event = unsafe { event.as_mut().unwrap() };
+        match unsafe { event.as_mut() } {
+            Some(event) => {
+                let event_handler = unsafe {
+                    (event.user_data as *const Option<NonNull<dyn EventHandler>>).as_ref()
+                };
+                if let Some(opt_handler) = event_handler {
+                    let handler = unsafe { opt_handler.unwrap().as_mut() };
+                    handler(event);
+                }
 
-        let handler =
-            unsafe { EVENT_HANDLERS.lock(|handlers| handlers.get(&event.client).copied()) };
+                ESP_OK as _
+            }
 
-        if let Some(handler) = handler {
-            let handler = unsafe { handler.as_ref().unwrap() };
-
-            handler(event);
+            None => ESP_FAIL as _,
         }
-
-        ESP_OK as _
     }
 }
 
@@ -173,20 +178,15 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn register_handler(&self, handler: *const dyn Fn(&esp_http_client_event_t)) {
-        unsafe {
-            EVENT_HANDLERS.lock(|handlers| {
-                handlers.insert(self.client.raw, handler);
-            });
-        }
+    fn register_handler(&self, handler: &mut impl EventHandler) {
+        *self.event_handler = Some(unsafe {
+            // SAFETY: reference to pointer cast always results in a non-null pointer.
+            NonNull::new_unchecked(handler as *mut dyn EventHandler)
+        });
     }
 
-    fn deregister_handler(&self) {
-        unsafe {
-            EVENT_HANDLERS.lock(|handlers| {
-                handlers.remove(&self.client.raw);
-            });
-        }
+    fn deregister_handler(&mut self) {
+        *self.event_handler = None;
     }
 }
 
@@ -228,7 +228,7 @@ impl<'a> HttpRequest<'a> for EspHttpRequest<'a> {
                 }
             };
 
-            self.register_handler(&handler);
+            self.register_handler(handler);
 
             let result = unsafe { esp_http_client_fetch_headers(self.client.raw) };
 
