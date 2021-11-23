@@ -176,7 +176,7 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn register_handler(&self, handler: &mut impl Fn(&esp_http_client_event_t) + 'static) {
+    fn register_handler(&self, handler: &mut (impl Fn(&esp_http_client_event_t) + 'static)) {
         *self.event_handler = Some(unsafe {
             // SAFETY: reference to pointer cast always results in a non-null pointer.
             NonNull::new_unchecked(handler as *mut _)
