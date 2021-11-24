@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
 
-use ::log::*;
+use log::*;
 
 #[cfg(feature = "std")]
 pub use std::ffi::{CStr, CString};
@@ -113,10 +113,12 @@ impl EspHttpClient {
         match unsafe { event.as_mut() } {
             Some(event) => {
                 let event_handler = unsafe {
-                    (event.user_data as *const Option<NonNull<dyn Fn(&esp_http_client_event_t)>>).as_ref()
+                    (event.user_data as *const Option<NonNull<dyn Fn(&esp_http_client_event_t)>>)
+                        .as_ref()
+                        .unwrap()
                 };
-                if let Some(opt_handler) = event_handler {
-                    let handler = unsafe { opt_handler.unwrap().as_mut() };
+                if let Some(mut opt_handler) = *event_handler {
+                    let handler = unsafe { opt_handler.as_mut() };
                     handler(event);
                 }
 
