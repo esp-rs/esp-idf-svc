@@ -111,7 +111,6 @@ impl From<&Newtype<wifi_sta_config_t>> for ClientConfiguration {
                 None
             },
             ip_conf: None, // This must be set at a later stage
-            hostname: None,
         }
     }
 }
@@ -353,13 +352,7 @@ impl EspWifi {
 
         esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
 
-        let hostname = if let Some(hn) = &conf.hostname {
-            Some(hn.as_str())
-        } else {
-            None
-        };
-
-        self.set_client_ip_conf(&conf.ip_conf, hostname)?;
+        self.set_client_ip_conf(&conf.ip_conf)?;
 
         info!("STA configuration done");
 
@@ -396,7 +389,6 @@ impl EspWifi {
     fn set_client_ip_conf(
         &mut self,
         conf: &Option<ipv4::ClientConfiguration>,
-        hostname: Option<&str>,
     ) -> Result<(), EspError> {
         Self::netif_unbind(self.sta_netif.as_mut())?;
 
@@ -410,15 +402,6 @@ impl EspWifi {
 
             esp!(unsafe { esp_netif_attach_wifi_station(netif.1) })?;
             esp!(unsafe { esp_wifi_set_default_wifi_sta_handlers() })?;
-
-            if let Some(hn) = hostname {
-                if let Ok(hostname) = CString::new(hn) {
-                    esp!(unsafe { esp_netif_set_hostname(netif.1, hostname.as_ptr()) })?;
-                    info!("hostname set to: {}", hn);
-                } else {
-                    error!("Failed to create CString from hostname");
-                }
-            }
 
             self.sta_netif = Some(netif);
 
@@ -718,7 +701,7 @@ impl EspWifi {
                 shared.status.0 = ClientStatus::Started(ClientConnectionStatus::Connected(
                     match shared.client_ip_conf.as_ref() {
                         None => ClientIpStatus::Disabled,
-                        Some(ipv4::ClientConfiguration::DHCP) => ClientIpStatus::Waiting,
+                        Some(ipv4::ClientConfiguration::DHCP(_)) => ClientIpStatus::Waiting,
                         Some(ipv4::ClientConfiguration::Fixed(ref status)) => {
                             ClientIpStatus::Done(status.clone())
                         }
