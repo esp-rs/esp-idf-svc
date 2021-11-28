@@ -1,18 +1,19 @@
-use core::fmt;
-use core::marker::PhantomData;
-use core::ptr;
+use core::{cell::RefCell, fmt, marker::PhantomData, ptr, time::*};
 
 extern crate alloc;
 use alloc::borrow::Cow;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec;
 
 use log::info;
 
 use crate::private::cstr::CString;
 
-use embedded_svc::http::server::{Completion, InlineResponse, Registry, Request, ResponseWrite};
+use embedded_svc::http::server::{
+    attr, middleware, registry::*, session, Completion, Request, Response, ResponseWrite, Session,
+};
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
 
@@ -24,6 +25,12 @@ use crate::private::common::Newtype;
 pub struct Configuration {
     pub http_port: u16,
     pub https_port: u16,
+    pub max_sessions: usize,
+    pub session_timeout: Duration,
+    pub stack_size: usize,
+    pub max_open_sockets: usize,
+    pub max_uri_handlers: usize,
+    pub max_resp_handlers: usize,
 }
 
 impl Default for Configuration {
@@ -31,6 +38,12 @@ impl Default for Configuration {
         Configuration {
             http_port: 80,
             https_port: 443,
+            max_sessions: 16,
+            session_timeout: Duration::from_secs(20 * 60),
+            stack_size: 10240,
+            max_open_sockets: 8,
+            max_uri_handlers: 32,
+            max_resp_handlers: 4,
         }
     }
 }
@@ -39,13 +52,13 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
     fn from(conf: &Configuration) -> Self {
         Self(httpd_config_t {
             task_priority: 5,
-            stack_size: if conf.https_port != 0 { 10240 } else { 4096 },
+            stack_size: conf.stack_size as _,
             core_id: std::i32::MAX,
             server_port: conf.http_port,
             ctrl_port: 32768,
-            max_open_sockets: if conf.https_port != 0 { 4 } else { 7 },
-            max_uri_handlers: 8,
-            max_resp_headers: 8,
+            max_open_sockets: conf.max_open_sockets as _,
+            max_uri_handlers: conf.max_uri_handlers as _,
+            max_resp_headers: conf.max_resp_handlers as _,
             backlog_conn: 5,
             lru_purge_enable: conf.https_port != 0,
             recv_wait_timeout: 5,
@@ -101,9 +114,15 @@ impl From<Method> for Newtype<c_types::c_uint> {
     }
 }
 
+type EspSessionMutex = EspMutex<session::SessionState>;
+type EspSessionsMutex = EspMutex<BTreeMap<String, Arc<EspSessionMutex>>>;
+type EspSessions = session::Sessions<EspSessionsMutex, EspSessionMutex>;
+type EspRequestScopedSession = session::RequestScopedSession<EspSessionsMutex, EspSessionMutex>;
+
 pub struct EspHttpServer {
     sd: esp_idf_sys::httpd_handle_t,
     registrations: Vec<(CString, esp_idf_sys::httpd_uri_t)>,
+    sessions: Arc<EspSessions>,
 }
 
 impl EspHttpServer {
@@ -120,7 +139,30 @@ impl EspHttpServer {
         Ok(EspHttpServer {
             sd: handle,
             registrations: vec![],
+            sessions: Arc::new(EspSessions::new(
+                Self::get_random,
+                Self::get_current_time,
+                conf.max_sessions,
+                conf.session_timeout,
+            )),
         })
+    }
+
+    fn get_random() -> [u8; 16] {
+        let mut result = [0; 16];
+
+        unsafe {
+            esp_fill_random(
+                &mut result as *mut _ as *mut c_types::c_void,
+                result.len() as _,
+            )
+        }
+
+        result
+    }
+
+    fn get_current_time() -> Duration {
+        Duration::from_micros(unsafe { esp_timer_get_time() } as _)
     }
 
     fn unregister(&mut self, uri: CString, conf: esp_idf_sys::httpd_uri_t) -> Result<(), EspError> {
@@ -165,64 +207,65 @@ impl EspHttpServer {
         req: EspHttpRequest<'a>,
         resp: EspHttpResponse<'a>,
         handler: &H,
-    ) -> c_types::c_int
+    ) -> Result<(), E>
     where
         H: for<'b> Fn(EspHttpRequest<'b>, EspHttpResponse<'b>) -> Result<Completion, E>,
         E: fmt::Display + fmt::Debug,
     {
         info!("About to handle query string {:?}", req.query_string());
 
-        if let Err(_err) = handler(req, resp) {
-            // TODO
-            return 0;
-        }
+        handler(req, resp)?;
 
-        // let mut idf_request_response = IdfRequest(rd, PhantomData);
-
-        // log!(
-        //     if err { Level::Warn } else { Level::Info },
-        //     "Request handled with status {} ({:?})",
-        //     &response.status,
-        //     &response.status_message
-        // );
-
-        // match idf_request_response.send(response) {
-        //     Result::Ok(_) => esp_idf_sys::ESP_OK as _,
-        //     Result::Err(_) => esp_idf_sys::ESP_FAIL as _,
-        // }
-        0
+        Ok(())
     }
 
-    fn to_native_handler<H, E>(handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
+    fn handle_error<'a, E>(
+        raw_req: *mut httpd_req_t,
+        response_state: ResponseState,
+        error: E,
+    ) -> c_types::c_int
+    where
+        E: fmt::Display + fmt::Debug,
+    {
+        if response_state != ResponseState::New {
+            info!("About to handle error {:?}, request is complete", error);
+
+            1
+        } else {
+            info!("About to handle error {:?}, request is not complete", error);
+
+            1 // TODO
+        }
+    }
+
+    fn to_native_handler<H, E>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
     where
         H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
         E: fmt::Display + fmt::Debug,
     {
+        let sessions = self.sessions.clone();
+
         Box::new(move |raw_req| {
-            let req = EspHttpRequest {
-                raw_req,
-                _data: PhantomData,
-            };
+            let mut response_state = ResponseState::New;
 
-            let resp = EspHttpResponse {
-                raw_req,
-                status: 200,
-                status_message: None,
-                headers: BTreeMap::new(),
-                c_headers: None,
-                c_content_type: None,
-                c_status: None,
-            };
+            let result = Self::handle_request(
+                EspHttpRequest::new(raw_req, sessions.clone()),
+                EspHttpResponse::new(raw_req, &mut response_state),
+                &handler,
+            );
 
-            Self::handle_request(req, resp, &handler)
+            match result {
+                Ok(()) => 0,
+                Err(e) => Self::handle_error(raw_req, response_state, e),
+            }
         })
     }
 
     extern "C" fn handle(raw_req: *mut httpd_req_t) -> c_types::c_int {
-        let handler = unsafe {
-            ((*raw_req).user_ctx as *mut Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>).as_ref()
-        }
-        .unwrap();
+        let handler_ptr =
+            (unsafe { *raw_req }).user_ctx as *mut Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>;
+
+        let handler = unsafe { handler_ptr.as_ref() }.unwrap();
 
         (handler)(raw_req)
     }
@@ -236,8 +279,23 @@ impl Drop for EspHttpServer {
 
 impl Registry for EspHttpServer {
     type Request<'a> = EspHttpRequest<'a>;
-    type InlineResponse<'a> = EspHttpResponse<'a>;
+    type Response<'a> = EspHttpResponse<'a>;
     type Error = EspError;
+    type Root = Self;
+    type MiddlewareRegistry<'q, M>
+    where
+        Self: 'q,
+        M: middleware::Middleware<Self::Root> + Clone + 'static + 'q,
+    = middleware::MiddlewareRegistry<'q, Self::Root, M>;
+
+    fn with_middleware<M>(&mut self, middleware: M) -> Self::MiddlewareRegistry<'_, M>
+    where
+        M: middleware::Middleware<Self::Root> + Clone + 'static,
+        M::Error: 'static,
+        Self: Sized,
+    {
+        middleware::MiddlewareRegistry::new(self, middleware)
+    }
 
     fn set_inline_handler<H, E>(
         &mut self,
@@ -246,17 +304,15 @@ impl Registry for EspHttpServer {
         handler: H,
     ) -> Result<&mut Self, Self::Error>
     where
-        H: for<'a> Fn(Self::Request<'a>, Self::InlineResponse<'a>) -> Result<Completion, E>
-            + 'static,
+        H: for<'a> Fn(Self::Request<'a>, Self::Response<'a>) -> Result<Completion, E> + 'static,
         E: fmt::Display + fmt::Debug,
     {
         let c_str = CString::new(uri).unwrap();
 
-        //let handler = |req: EspHttpRequest
         let conf = esp_idf_sys::httpd_uri_t {
             uri: c_str.as_ptr() as _,
             method: Newtype::<c_types::c_uint>::from(method).0,
-            user_ctx: Box::into_raw(Self::to_native_handler(handler)) as *mut _,
+            user_ctx: Box::into_raw(self.to_native_handler(handler)) as *mut _,
             handler: Some(EspHttpServer::handle),
         };
 
@@ -276,7 +332,55 @@ impl Registry for EspHttpServer {
 
 pub struct EspHttpRequest<'a> {
     raw_req: *mut httpd_req_t,
-    _data: PhantomData<&'a httpd_req_t>,
+    _ptr: PhantomData<&'a httpd_req_t>,
+    attributes: RefCell<attr::RequestScopedAttributes>,
+    session: RefCell<EspRequestScopedSession>,
+}
+
+impl<'a> EspHttpRequest<'a> {
+    fn new(raw_req: *mut httpd_req_t, sessions: Arc<EspSessions>) -> Self {
+        let session = RefCell::new(EspRequestScopedSession::new(
+            sessions,
+            EspSessions::get_session_id(Self::header(raw_req, "cookies")),
+        ));
+
+        Self {
+            raw_req,
+            _ptr: PhantomData,
+            attributes: RefCell::new(attr::RequestScopedAttributes::new()),
+            session,
+        }
+    }
+
+    fn header<'b>(raw_req: *mut httpd_req_t, name: impl AsRef<str>) -> Option<Cow<'b, str>> {
+        let c_name = CString::new(name.as_ref()).unwrap();
+
+        unsafe {
+            match esp_idf_sys::httpd_req_get_hdr_value_len(raw_req, c_name.as_ptr() as _) as usize {
+                0 => None,
+                len => {
+                    // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
+                    // pointer to the header value that is in the scratch buffer
+                    //
+                    // Check if we can implement it ourselves vy traversing the scratch buffer manually
+
+                    let mut buf: vec::Vec<u8> = Vec::with_capacity(len + 1);
+
+                    esp_nofail!(esp_idf_sys::httpd_req_get_hdr_value_str(
+                        raw_req,
+                        c_name.as_ptr() as _,
+                        buf.as_mut_ptr() as *mut _,
+                        (len + 1) as esp_idf_sys::size_t
+                    ));
+
+                    buf.set_len(len + 1);
+
+                    // TODO: Replace with a proper conversion from ISO-8859-1 to UTF8
+                    Some(String::from_utf8_lossy(&buf[..len]).into_owned().into())
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Request<'a> for EspHttpRequest<'a> {
@@ -284,6 +388,16 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
     where
         'a: 'b,
     = &'b EspHttpRequest<'a>;
+
+    type Attributes<'b>
+    where
+        Self: 'b,
+    = attr::RequestScopedAttributesReference<'b>;
+
+    type Session<'b>
+    where
+        Self: 'b,
+    = session::RequestScopedSessionReference<'b, EspSessionsMutex, EspSessionMutex>;
 
     type Error = EspError;
 
@@ -314,6 +428,14 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
         }
     }
 
+    fn attrs<'r>(&'r self) -> Self::Attributes<'r> {
+        Self::Attributes::<'r>::new(&self.attributes)
+    }
+
+    fn session<'r>(&'r self) -> Self::Session<'r> {
+        Self::Session::<'r>::new(&self.session)
+    }
+
     fn reader(&self) -> Self::Read<'_> {
         self
     }
@@ -341,40 +463,22 @@ impl<'a> Read for &EspHttpRequest<'a> {
 
 impl<'a> Headers for EspHttpRequest<'a> {
     fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
-        let c_name = CString::new(name.as_ref()).unwrap();
-
-        unsafe {
-            match esp_idf_sys::httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _)
-                as usize
-            {
-                0 => None,
-                len => {
-                    // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
-                    // pointer to the header value that is in the scratch buffer
-                    //
-                    // Check if we can implement it ourselves vy traversing the scratch buffer manually
-
-                    let mut buf: vec::Vec<u8> = Vec::with_capacity(len + 1);
-
-                    esp_nofail!(esp_idf_sys::httpd_req_get_hdr_value_str(
-                        self.raw_req,
-                        c_name.as_ptr() as _,
-                        buf.as_mut_ptr() as *mut _,
-                        (len + 1) as esp_idf_sys::size_t
-                    ));
-
-                    buf.set_len(len + 1);
-
-                    // TODO: Replace with a proper conversion from ISO-8859-1 to UTF8
-                    Some(String::from_utf8_lossy(&buf[..len]).into_owned().into())
-                }
-            }
-        }
+        EspHttpRequest::header(self.raw_req, name)
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ResponseState {
+    New,
+    HeadersSent,
+    Opened,
+    Closed,
 }
 
 pub struct EspHttpResponse<'a> {
     raw_req: *mut httpd_req_t,
+    _ptr: PhantomData<&'a httpd_req_t>,
+    state: &'a mut ResponseState,
     status: u16,
     status_message: Option<Cow<'a, str>>,
     headers: BTreeMap<Cow<'a, str>, Cow<'a, str>>,
@@ -384,10 +488,38 @@ pub struct EspHttpResponse<'a> {
 }
 
 impl<'a> EspHttpResponse<'a> {
-    fn send_headers(&mut self) -> Result<(), EspError> {
+    fn new(raw_req: *mut httpd_req_t, state: &'a mut ResponseState) -> Self {
+        *state = ResponseState::New;
+
+        Self {
+            raw_req,
+            _ptr: PhantomData,
+            state,
+            status: 200,
+            status_message: None,
+            headers: BTreeMap::new(),
+            c_headers: None,
+            c_content_type: None,
+            c_status: None,
+        }
+    }
+
+    fn send_headers(&mut self, session_id: Option<impl AsRef<str>>) -> Result<(), EspError> {
+        *self.state = ResponseState::HeadersSent;
+
         // TODO: Would be much more effective if we are serializing the status line and headers directly
-        // Consider implement this, based on http_resp_send() - even though that would require implementing
+        // Consider implementing this on top of http_resp_send() - even though that would require implementing
         // chunking in Rust
+
+        if let Some(session_id) = session_id {
+            self.headers.insert(
+                Cow::Borrowed("cookies"),
+                Cow::Owned(EspSessions::insert_session_cookie(
+                    self.headers.get("cookies"),
+                    session_id,
+                )),
+            );
+        }
 
         let status = if let Some(ref status_message) = self.status_message {
             format!("{} {}", self.status, status_message)
@@ -468,17 +600,26 @@ impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
         H: Into<Cow<'a, str>>,
         V: Into<Cow<'a, str>>,
     {
+        // TODO: Optimize; convert everything to lower case (or make the map case insensitive)
         *self.headers.entry(name.into()).or_insert(Cow::Borrowed("")) = value.into();
         self
     }
 }
 
-impl<'a> InlineResponse<'a> for EspHttpResponse<'a> {
+impl<'a> Response<'a> for EspHttpResponse<'a> {
     type Write<'b> = EspHttpResponse<'b>;
     type Error = EspError;
 
-    fn into_writer(mut self, _request: impl Request<'a>) -> Result<Self::Write<'a>, Self::Error> {
-        self.send_headers()?;
+    fn into_writer(mut self, request: impl Request<'a>) -> Result<Self::Write<'a>, Self::Error> {
+        let session = request.session();
+        let valid = session.is_valid();
+
+        let session_id = session
+            .id()
+            .map(|session_id| session_id.to_owned()) // FIXME
+            .and_then(|session_id| if valid { Some(session_id) } else { None });
+
+        self.send_headers(session_id)?;
 
         Ok(self)
     }
@@ -489,6 +630,8 @@ impl<'a> ResponseWrite<'a> for EspHttpResponse<'a> {
         esp!(unsafe {
             esp_idf_sys::httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0)
         })?;
+
+        *self.state = ResponseState::Closed;
 
         Ok(unsafe { Completion::internal_new() })
     }
@@ -506,6 +649,8 @@ impl<'a> Write for EspHttpResponse<'a> {
                     buf.len() as esp_idf_sys::ssize_t,
                 )
             })?;
+
+            *self.state = ResponseState::Opened;
         }
 
         Ok(buf.len())

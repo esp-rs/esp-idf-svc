@@ -168,7 +168,7 @@ pub struct EspHttpRequest<'a> {
 }
 
 impl<'a> EspHttpRequest<'a> {
-    fn fetch_headers(&self) -> Result<BTreeMap<String, String>, EspError> {
+    fn fetch_headers(&mut self) -> Result<BTreeMap<String, String>, EspError> {
         let mut headers = BTreeMap::new();
 
         loop {
@@ -260,7 +260,7 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
 impl<'a> RequestWrite<'a> for EspHttpRequest<'a> {
     type Response = EspHttpResponse<'a>;
 
-    fn into_response(self) -> Result<Self::Response, Self::Error> {
+    fn into_response(mut self) -> Result<Self::Response, Self::Error> {
         let headers = self.fetch_headers()?;
 
         Ok(EspHttpResponse {
