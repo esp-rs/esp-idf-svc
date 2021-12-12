@@ -310,6 +310,12 @@ impl EspWifi {
                 Option::Some(Self::event_handler),
                 shared_ref as *mut c_types::c_void
             ))?;
+            esp!(esp_event_handler_register(
+                SC_EVENT,
+                ESP_EVENT_ANY_ID,
+                Option::Some(Self::event_handler),
+                shared_ref as *mut c_types::c_void
+            ))?;
 
             info!("Event handlers registered");
         }
@@ -596,6 +602,11 @@ impl EspWifi {
                 ESP_EVENT_ANY_ID as i32,
                 Option::Some(Self::event_handler)
             ))?;
+            esp!(esp_event_handler_unregister(
+                SC_EVENT,
+                ESP_EVENT_ANY_ID as i32,
+                Option::Some(Self::event_handler)
+            ))?;
 
             info!("Event handlers deregistered");
 
@@ -686,6 +697,8 @@ impl EspWifi {
                 Self::on_wifi_event(shared, event_id, event_data)
             } else if event_base == IP_EVENT {
                 Self::on_ip_event(shared, event_id, event_data)
+            } else if event_base == SC_EVENT {
+                Self::on_sc_event(shared, event_id, event_data)
             } else {
                 warn!("Got unknown event base");
 
