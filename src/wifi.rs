@@ -190,7 +190,7 @@ pub struct SmartConfigResult {
 
 enum SmartConfigStatus {
     Stopped,
-    Requested,
+    Requested(&'static [u8; 17]),
     Running,
     Done(SmartConfigResult),
 }
@@ -719,14 +719,15 @@ impl EspWifi {
 
         let handled = match event_id as u32 {
             wifi_event_t_WIFI_EVENT_STA_START => {
-                if let SmartConfigStatus::Requested = shared.smart_config_status {
-                    //esp!(unsafe { esp_smartconfig_set_type(smartconfig_type_t_SC_TYPE_ESPTOUCH_V2) })?;
-                    esp!(unsafe { esp_smartconfig_set_type(smartconfig_type_t_SC_TYPE_ESPTOUCH) })?;
+                if let SmartConfigStatus::Requested(key) = shared.smart_config_status {
+                    esp!(unsafe {
+                        esp_smartconfig_set_type(smartconfig_type_t_SC_TYPE_ESPTOUCH_V2)
+                    })?;
 
                     let cfg = smartconfig_start_config_t {
                         enable_log: true,
-                        esp_touch_v2_enable_crypt: false,
-                        esp_touch_v2_key: 0 as _,
+                        esp_touch_v2_enable_crypt: true,
+                        esp_touch_v2_key: key.as_ptr() as _,
                     };
 
                     shared.smart_config_status = SmartConfigStatus::Running;
@@ -896,7 +897,6 @@ impl EspWifi {
                     .to_str()
                     .unwrap()
                     .to_owned();
-                log::info!("Smartconfig SSID: {}, password: {}", ssid, password);
 
                 let bssid = if evt.bssid_set { Some(evt.bssid) } else { None };
 
@@ -906,16 +906,16 @@ impl EspWifi {
                 //     memcpy(wifi_config.sta.bssid, evt->bssid, sizeof(wifi_config.sta.bssid));
                 // }
 
-                if evt.type_ == smartconfig_type_t_SC_TYPE_ESPTOUCH_V2 {
-                    let mut rvd_data = Vec::with_capacity(33);
-                    unsafe { rvd_data.set_len(rvd_data.len()) };
+                // if evt.type_ == smartconfig_type_t_SC_TYPE_ESPTOUCH_V2 {
+                //     let mut rvd_data = Vec::with_capacity(33);
+                //     unsafe { rvd_data.set_len(rvd_data.len()) };
 
-                    esp!(unsafe {
-                        esp_smartconfig_get_rvd_data(rvd_data.as_mut_ptr(), rvd_data.len() as _)
-                    })?;
+                //     esp!(unsafe {
+                //         esp_smartconfig_get_rvd_data(rvd_data.as_mut_ptr(), rvd_data.len() as _)
+                //     })?;
 
-                    log::info!("Smartconfig rvd_data: {:?}", rvd_data);
-                }
+                //     log::info!("Smartconfig rvd_data: {:?}", rvd_data);
+                // }
 
                 shared.smart_config_status = SmartConfigStatus::Done(SmartConfigResult {
                     ssid,
@@ -957,11 +957,12 @@ impl EspWifi {
     pub fn scan_smart_config(
         &mut self,
         timeout: Duration,
+        key: &'static [u8; 17],
     ) -> Result<Option<SmartConfigResult>, EspError> {
         self.stop()?;
 
         self.shared.modify(|shared| {
-            shared.smart_config_status = SmartConfigStatus::Requested;
+            shared.smart_config_status = SmartConfigStatus::Requested(key);
 
             (false, ())
         });
