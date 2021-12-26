@@ -181,6 +181,20 @@ impl From<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
     }
 }
 
+#[derive(Clone)]
+pub struct SmartConfigResult {
+    pub ssid: String,
+    pub password: Option<String>,
+    pub bssid: Option<[u8; 6]>,
+}
+
+enum SmartConfigStatus {
+    Stopped,
+    Requested(&'static [u8; 17]),
+    Running,
+    Done(SmartConfigResult),
+}
+
 static mut TAKEN: EspMutex<bool> = EspMutex::new(false);
 
 struct Shared {
@@ -189,6 +203,7 @@ struct Shared {
 
     status: Status,
     operating: bool,
+    smart_config_status: SmartConfigStatus,
 
     sta_netif: Option<*mut esp_netif_t>,
     ap_netif: Option<*mut esp_netif_t>,
@@ -201,6 +216,7 @@ impl Default for Shared {
             router_ip_conf: None,
             status: Status(ClientStatus::Stopped, ApStatus::Stopped),
             operating: false,
+            smart_config_status: SmartConfigStatus::Stopped,
             sta_netif: None,
             ap_netif: None,
         }
@@ -290,6 +306,12 @@ impl EspWifi {
             ))?;
             esp!(esp_event_handler_register(
                 IP_EVENT,
+                ESP_EVENT_ANY_ID,
+                Option::Some(Self::event_handler),
+                shared_ref as *mut c_types::c_void
+            ))?;
+            esp!(esp_event_handler_register(
+                SC_EVENT,
                 ESP_EVENT_ANY_ID,
                 Option::Some(Self::event_handler),
                 shared_ref as *mut c_types::c_void
@@ -580,6 +602,11 @@ impl EspWifi {
                 ESP_EVENT_ANY_ID as i32,
                 Option::Some(Self::event_handler)
             ))?;
+            esp!(esp_event_handler_unregister(
+                SC_EVENT,
+                ESP_EVENT_ANY_ID as i32,
+                Option::Some(Self::event_handler)
+            ))?;
 
             info!("Event handlers deregistered");
 
@@ -670,6 +697,8 @@ impl EspWifi {
                 Self::on_wifi_event(shared, event_id, event_data)
             } else if event_base == IP_EVENT {
                 Self::on_ip_event(shared, event_id, event_data)
+            } else if event_base == SC_EVENT {
+                Self::on_sc_event(shared, event_id, event_data)
             } else {
                 warn!("Got unknown event base");
 
@@ -690,7 +719,24 @@ impl EspWifi {
 
         let handled = match event_id as u32 {
             wifi_event_t_WIFI_EVENT_STA_START => {
-                shared.status.0 = Self::reconnect_if_operating(shared.operating)?;
+                if let SmartConfigStatus::Requested(key) = shared.smart_config_status {
+                    esp!(unsafe {
+                        esp_smartconfig_set_type(smartconfig_type_t_SC_TYPE_ESPTOUCH_V2)
+                    })?;
+
+                    let cfg = smartconfig_start_config_t {
+                        enable_log: true,
+                        esp_touch_v2_enable_crypt: true,
+                        esp_touch_v2_key: key.as_ptr() as _,
+                    };
+
+                    shared.smart_config_status = SmartConfigStatus::Running;
+
+                    esp!(unsafe { esp_smartconfig_start(&cfg) })?;
+                } else {
+                    shared.status.0 = Self::reconnect_if_operating(shared.operating)?;
+                }
+
                 true
             }
             wifi_event_t_WIFI_EVENT_STA_STOP => {
@@ -823,6 +869,79 @@ impl EspWifi {
         Ok(handled)
     }
 
+    #[allow(non_upper_case_globals)]
+    fn on_sc_event(
+        shared: &mut Shared,
+        event_id: c_types::c_int,
+        event_data: *mut c_types::c_void,
+    ) -> Result<bool, EspError> {
+        info!("Got smartconfig event: {} ", event_id);
+
+        let handled = match event_id as u32 {
+            smartconfig_event_t_SC_EVENT_SCAN_DONE => {
+                log::info!("Smartconfig scan done");
+                true
+            }
+            smartconfig_event_t_SC_EVENT_FOUND_CHANNEL => {
+                log::info!("Smartconfig found channel");
+                true
+            }
+            smartconfig_event_t_SC_EVENT_GOT_SSID_PSWD => {
+                log::info!("Smartconfig got SSID and password");
+                let evt = unsafe { &*(event_data as *const smartconfig_event_got_ssid_pswd_t) };
+                let ssid = unsafe { std::ffi::CStr::from_ptr(evt.ssid.as_ptr() as _) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+                let password = unsafe { std::ffi::CStr::from_ptr(evt.password.as_ptr() as _) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+
+                let bssid = if evt.bssid_set { Some(evt.bssid) } else { None };
+
+                //uint8_t rvd_data[33] = { 0 };
+                //wifi_config.sta.bssid_set = evt->bssid_set;
+                // if (wifi_config.sta.bssid_set == true) {
+                //     memcpy(wifi_config.sta.bssid, evt->bssid, sizeof(wifi_config.sta.bssid));
+                // }
+
+                // if evt.type_ == smartconfig_type_t_SC_TYPE_ESPTOUCH_V2 {
+                //     let mut rvd_data = Vec::with_capacity(33);
+                //     unsafe { rvd_data.set_len(rvd_data.len()) };
+
+                //     esp!(unsafe {
+                //         esp_smartconfig_get_rvd_data(rvd_data.as_mut_ptr(), rvd_data.len() as _)
+                //     })?;
+
+                //     log::info!("Smartconfig rvd_data: {:?}", rvd_data);
+                // }
+
+                shared.smart_config_status = SmartConfigStatus::Done(SmartConfigResult {
+                    ssid,
+                    password: Some(password),
+                    bssid,
+                });
+
+                true
+            }
+            smartconfig_event_t_SC_EVENT_SEND_ACK_DONE => {
+                log::info!("Smartconfig ack done");
+                true
+            }
+            _ => false,
+        };
+
+        if handled {
+            info!(
+                "Smartconfig event {} handled, set status: {:?}",
+                event_id, shared.status
+            );
+        }
+
+        Ok(handled)
+    }
+
     fn reconnect_if_operating(operating: bool) -> Result<ClientStatus, EspError> {
         Ok(if operating {
             info!("Reconnecting");
@@ -833,6 +952,45 @@ impl EspWifi {
         } else {
             ClientStatus::Started(ClientConnectionStatus::Disconnected)
         })
+    }
+
+    pub fn scan_smart_config(
+        &mut self,
+        timeout: Duration,
+        key: &'static [u8; 17],
+    ) -> Result<Option<SmartConfigResult>, EspError> {
+        self.stop()?;
+
+        self.shared.modify(|shared| {
+            shared.smart_config_status = SmartConfigStatus::Requested(key);
+
+            (false, ())
+        });
+
+        unsafe {
+            esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
+            esp!(esp_wifi_start())?;
+        }
+
+        let res = self.shared.wait_timeout_while_and_get(
+            timeout,
+            |shared| !matches!(shared.smart_config_status, SmartConfigStatus::Done(_)),
+            |shared| {
+                if let SmartConfigStatus::Done(r) = &shared.smart_config_status {
+                    Some(r.clone())
+                } else {
+                    None
+                }
+            },
+        );
+
+        esp!(unsafe { esp_smartconfig_stop() })?;
+
+        if res.0 {
+            Ok(None)
+        } else {
+            Ok(res.1)
+        }
     }
 }
 
