@@ -425,6 +425,10 @@ impl EspEventLoop<User<Pinned>> {
     pub fn new(conf: &Configuration) -> Result<Self, EspError> {
         Ok(Self(Arc::new(EventLoopHandle::<User<Pinned>>::new(conf)?)))
     }
+
+    pub fn postbox(&self) -> Result<EspPostbox, EspError> {
+        EspPostbox::new(self)
+    }
 }
 
 impl event_bus::Postbox for EspEventLoop<System> {
@@ -504,8 +508,8 @@ unsafe impl Sync for EspEventLoop<User<Explicit>> {}
 pub struct EspPostbox(EspEventLoop<User<Pinned>>);
 
 impl EspPostbox {
-    pub fn new(event_loop: &EspEventLoop<User<Pinned>>) -> Self {
-        Self(event_loop.clone())
+    fn new(event_loop: &EspEventLoop<User<Pinned>>) -> Result<Self, EspError> {
+        Ok(Self(event_loop.clone()))
     }
 }
 
