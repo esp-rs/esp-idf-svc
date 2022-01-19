@@ -2,58 +2,60 @@ use core::fmt::{Debug, Display};
 use core::ptr;
 use core::result::Result;
 
-use embedded_svc::timer;
+use embedded_svc::timer::{self, Timer};
 
 use esp_idf_sys::*;
 
-struct EspTimerShared<'a> {
-    callback: Option<Box<dyn Fn() + 'a>>,
+struct UnsafeCallback(*mut Box<dyn FnMut() + 'static>);
+
+impl UnsafeCallback {
+    fn call(&self) {
+        (unsafe { self.0.as_mut().unwrap() })();
+    }
 }
 
-impl<'a> EspTimerShared<'a> {
-    extern "C" fn handle(arg: *mut c_types::c_void) {
-        let shared = unsafe { (arg as *const EspTimerShared).as_ref().unwrap() };
+unsafe impl Send for UnsafeCallback {}
 
-        if let Some(callback) = shared.callback.as_ref() {
-            callback();
+pub struct EspTimer {
+    handle: esp_timer_handle_t,
+    _callback: Box<Box<dyn FnMut() + 'static>>,
+}
+
+unsafe impl Send for EspTimer {}
+
+impl EspTimer {
+    extern "C" fn handle(arg: *mut c_types::c_void) {
+        let callback = unsafe { (arg as *const UnsafeCallback).as_ref().unwrap() };
+
+        callback.call();
+    }
+}
+
+impl Drop for EspTimer {
+    fn drop(&mut self) {
+        let _ = self.cancel();
+
+        while unsafe { esp_timer_delete(self.handle) } != ESP_OK {
+            // Timer is still running, busy-loop
         }
     }
 }
 
-pub struct EspTimer<'a> {
-    shared: Box<EspTimerShared<'a>>,
-    handle: esp_timer_handle_t,
-}
-
-impl<'a> Drop for EspTimer<'a> {
-    fn drop(&mut self) {
-        esp!(unsafe { esp_timer_delete(self.handle) }).unwrap();
-    }
-}
-
-impl<'a> timer::Timer<'a> for EspTimer<'a> {
+impl timer::Timer for EspTimer {
     type Error = EspError;
 
-    fn callback<E>(
-        &mut self,
-        callback: Option<impl Fn() -> Result<(), E> + 'a>,
-    ) -> Result<(), Self::Error>
-    where
-        E: Display + Debug,
-    {
-        self.shared.callback = callback.map(|callback| {
-            let boxed: Box<dyn for<'b> Fn() + 'a> = Box::new(move || callback().unwrap());
+    fn once(&mut self, after: std::time::Duration) -> Result<(), Self::Error> {
+        let _ = self.cancel();
 
-            boxed
-        });
+        esp!(unsafe { esp_timer_start_once(self.handle, after.as_micros() as _) })?;
 
         Ok(())
     }
 
-    fn schedule(&mut self, after: std::time::Duration) -> Result<(), Self::Error> {
-        self.cancel()?;
+    fn periodic(&mut self, after: std::time::Duration) -> Result<(), Self::Error> {
+        let _ = self.cancel();
 
-        esp!(unsafe { esp_timer_start_once(self.handle, after.as_micros() as _) })?;
+        esp!(unsafe { esp_timer_start_periodic(self.handle, after.as_micros() as _) })?;
 
         Ok(())
     }
@@ -69,8 +71,10 @@ impl<'a> timer::Timer<'a> for EspTimer<'a> {
     }
 }
 
+#[derive(Clone)]
 struct PrivateData;
 
+#[derive(Clone)]
 pub struct EspTimerService(PrivateData);
 
 impl EspTimerService {
@@ -79,33 +83,42 @@ impl EspTimerService {
     }
 }
 
-impl timer::TimerService<'static> for EspTimerService {
+impl timer::TimerService for EspTimerService {
     type Error = EspError;
 
-    type Timer<'b> = EspTimer<'b>;
+    type Timer = EspTimer;
 
-    fn timer(
+    fn timer<E>(
         &self,
-        _priority: timer::Priority,
-        _name: impl AsRef<str>,
-    ) -> Result<Self::Timer<'static>, Self::Error> {
+        conf: &timer::TimerConfiguration,
+        mut callback: impl FnMut() -> Result<(), E> + Send + 'static,
+    ) -> Result<Self::Timer, Self::Error>
+    where
+        E: Display + Debug + Send + Sync + 'static,
+    {
         let mut handle: esp_timer_handle_t = ptr::null_mut();
 
-        let shared = Box::new(EspTimerShared { callback: None });
+        let callback: Box<dyn FnMut() + 'static> = Box::new(move || callback().unwrap());
+        let mut callback = Box::new(callback);
+
+        let unsafe_callback = UnsafeCallback(&mut *callback as *mut _);
 
         esp!(unsafe {
             esp_timer_create(
                 &esp_timer_create_args_t {
-                    callback: Some(EspTimerShared::handle),
+                    callback: Some(EspTimer::handle),
                     name: b"rust\0" as *const _ as *const _, // TODO
-                    arg: &shared as *const _ as *mut _,
+                    arg: &unsafe_callback as *const _ as *mut _,
                     dispatch_method: esp_timer_dispatch_t_ESP_TIMER_TASK,
-                    skip_unhandled_events: false,
+                    skip_unhandled_events: conf.skip_unhandled_events,
                 },
                 &mut handle as *mut _,
             )
         })?;
 
-        Ok(EspTimer { shared, handle })
+        Ok(EspTimer {
+            handle,
+            _callback: callback,
+        })
     }
 }

@@ -50,6 +50,7 @@ pub mod ping;
 #[cfg(feature = "alloc")]
 pub mod sntp;
 pub mod sysloop;
+pub mod systime;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
 pub mod timer;
 #[cfg(feature = "alloc")] // TODO: Expose a subset which does not require "alloc"
