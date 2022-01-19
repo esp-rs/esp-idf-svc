@@ -17,7 +17,7 @@ default = ["std"]
 std = ["alloc", "anyhow/std", "log/std", "esp-idf-sys/std", "esp-idf-hal/std", "embedded-svc/std"]
 alloc = ["cstr_core/alloc", "anyhow", "embedded-svc/alloc"]
 
-experimental = ["embedded-svc/experimental"]
+experimental = ["embedded-svc/experimental", "esp-idf-hal/experimental"]
 
 [dependencies]
 enumset = { version = "1", default-features = false }
