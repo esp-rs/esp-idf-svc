@@ -18,7 +18,7 @@ extern crate alloc;
 ))]
 pub mod eth;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
-pub mod eventloop;
+pub mod event_bus;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
 pub mod http;
 #[cfg(all(feature = "std", esp_idf_comp_esp_http_server_enabled))]
@@ -27,8 +27,8 @@ pub mod httpd;
 #[cfg(feature = "alloc")]
 // TODO: Ideally should not need "alloc" (also for performance reasons)
 pub mod log;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
-pub mod mqtt;
+//#[cfg(all(feature = "experimental", feature = "alloc"))]
+//pub mod mqtt;
 #[cfg(esp_idf_config_lwip_ipv4_napt)]
 pub mod napt;
 #[cfg(feature = "alloc")]

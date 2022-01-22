@@ -73,7 +73,7 @@ impl<'a> From<&Configuration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
 
 pub struct EspMqttClient(
     esp_mqtt_client_handle_t,
-    Box<dyn Fn(esp_mqtt_event_handle_t)>,
+    Box<dyn FnMut(esp_mqtt_event_handle_t)>,
 );
 
 impl EspMqttClient {
@@ -107,7 +107,7 @@ impl EspMqttClient {
     pub fn new_with_callback<'a>(
         url: impl AsRef<str>,
         conf: &'a Configuration<'a>,
-        callback: impl for<'b> Fn(Result<client::Event<EspMessage<'b>>, EspError>) + 'static,
+        mut callback: impl for<'b> FnMut(Result<client::Event<EspMessage<'b>>, EspError>) + 'static,
     ) -> Result<Self, EspError>
     where
         Self: Sized,
@@ -126,7 +126,7 @@ impl EspMqttClient {
     fn new_with_raw_callback<'a>(
         url: impl AsRef<str>,
         conf: &'a Configuration<'a>,
-        raw_callback: Box<dyn Fn(esp_mqtt_event_handle_t)>,
+        raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
     ) -> Result<Self, EspError>
     where
         Self: Sized,

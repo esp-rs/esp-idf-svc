@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 
 use ::log::*;
 
-use embedded_svc::event_bus;
+use embedded_svc::{event_bus, service};
 
 use esp_idf_hal::cpu::Core;
 use esp_idf_hal::delay::TickType;
@@ -19,6 +19,11 @@ use esp_idf_hal::mutex;
 use esp_idf_sys::*;
 
 use crate::private::cstr::RawCstrs;
+
+pub type EspSystemEventBus = EspEventBus<System>;
+pub type EspBackgroundEventBus = EspEventBus<User<Background>>;
+pub type EspExplicitEventBus = EspEventBus<User<Explicit>>;
+pub type EspPinnedEventBus = EspEventBus<User<Pinned>>;
 
 #[derive(Debug)]
 pub struct BackgroundConfiguration<'a> {
@@ -90,56 +95,19 @@ pub struct Explicit;
 #[derive(Clone)]
 pub struct Pinned;
 
-pub trait EspEventLoopHandleOwner {
-    unsafe fn unsubscribe(
-        &self,
-        raw_source: *const c_types::c_char,
-        handler_instance: esp_event_handler_instance_t,
-    );
-    unsafe fn delete_event_loop(&mut self);
+pub trait EspEventBusType {
+    fn is_system() -> bool;
 }
 
-impl EspEventLoopHandleOwner for System {
-    unsafe fn unsubscribe(
-        &self,
-        raw_source: *const c_types::c_char,
-        handler_instance: esp_event_handler_instance_t,
-    ) {
-        esp!(esp_event_handler_instance_unregister(
-            raw_source,
-            ESP_EVENT_ANY_ID,
-            handler_instance
-        ))
-        .unwrap();
-    }
-
-    unsafe fn delete_event_loop(&mut self) {
-        let mut taken = TAKEN.lock();
-
-        esp!(esp_event_loop_delete_default()).unwrap();
-        *taken = false;
+impl EspEventBusType for System {
+    fn is_system() -> bool {
+        true
     }
 }
 
-impl<T> EspEventLoopHandleOwner for User<T> {
-    unsafe fn unsubscribe(
-        &self,
-        raw_source: *const c_types::c_char,
-        handler_instance: esp_event_handler_instance_t,
-    ) {
-        esp!(esp_event_handler_instance_unregister_with(
-            self.0,
-            raw_source,
-            ESP_EVENT_ANY_ID,
-            handler_instance
-        ))
-        .unwrap();
-    }
-
-    unsafe fn delete_event_loop(&mut self) {
-        esp!(esp_event_loop_delete(self.0)).unwrap();
-
-        info!("Dropped");
+impl<T> EspEventBusType for User<T> {
+    fn is_system() -> bool {
+        false
     }
 }
 
@@ -155,9 +123,9 @@ unsafe impl<P> Send for UnsafeCallback<P> {}
 
 pub struct EspSubscription<P, T>
 where
-    T: EspEventLoopHandleOwner,
+    T: EspEventBusType,
 {
-    event_loop_handle: Arc<EventLoopHandle<T>>,
+    event_loop_handle: Arc<EventBusHandle<T>>,
     handler_instance: esp_event_handler_instance_t,
     source: event_bus::Source<P>,
     _callback: Box<Box<dyn FnMut(&P) + 'static>>,
@@ -165,7 +133,7 @@ where
 
 impl<P, T> EspSubscription<P, T>
 where
-    T: EspEventLoopHandleOwner,
+    T: EspEventBusType,
 {
     extern "C" fn handle(
         event_handler_arg: *mut c_types::c_void,
@@ -191,26 +159,43 @@ unsafe impl<P> Send for EspSubscription<P, User<Explicit>> {}
 
 impl<P, T> Drop for EspSubscription<P, T>
 where
-    T: EspEventLoopHandleOwner,
+    T: EspEventBusType,
 {
     fn drop(&mut self) {
         let raw_source = as_raw_source_id(&self.source);
 
-        unsafe {
-            self.event_loop_handle
-                .0
-                .unsubscribe(raw_source, self.handler_instance);
+        if T::is_system() {
+            unsafe {
+                esp!(esp_event_handler_instance_unregister(
+                    raw_source,
+                    ESP_EVENT_ANY_ID,
+                    self.handler_instance
+                ))
+                .unwrap();
+            }
+        } else {
+            unsafe {
+                let user: &User<T> = mem::transmute(&*self.event_loop_handle);
+
+                esp!(esp_event_handler_instance_unregister_with(
+                    user.0,
+                    raw_source,
+                    ESP_EVENT_ANY_ID,
+                    self.handler_instance
+                ))
+                .unwrap();
+            }
         }
     }
 }
 
-impl<P, T> event_bus::Subscription<P> for EspSubscription<P, T> where T: EspEventLoopHandleOwner {}
+impl<P, T> event_bus::Subscription<P> for EspSubscription<P, T> where T: EspEventBusType {}
 
-struct EventLoopHandle<T>(T)
+struct EventBusHandle<T>(T)
 where
-    T: EspEventLoopHandleOwner;
+    T: EspEventBusType;
 
-impl EventLoopHandle<System> {
+impl EventBusHandle<System> {
     fn new() -> Result<Self, EspError> {
         let mut taken = TAKEN.lock();
 
@@ -226,7 +211,7 @@ impl EventLoopHandle<System> {
     }
 }
 
-impl<T> EventLoopHandle<User<T>> {
+impl<T> EventBusHandle<User<T>> {
     fn new_internal(conf: &esp_event_loop_args_t) -> Result<Self, EspError> {
         let mut handle: esp_event_loop_handle_t = ptr::null_mut();
 
@@ -236,7 +221,7 @@ impl<T> EventLoopHandle<User<T>> {
     }
 }
 
-impl EventLoopHandle<User<Background>> {
+impl EventBusHandle<User<Background>> {
     fn new(conf: &BackgroundConfiguration) -> Result<Self, EspError> {
         let (nconf, _rcs) = conf.into();
 
@@ -244,42 +229,58 @@ impl EventLoopHandle<User<Background>> {
     }
 }
 
-impl EventLoopHandle<User<Explicit>> {
+impl EventBusHandle<User<Explicit>> {
     fn new(conf: &Configuration) -> Result<Self, EspError> {
         Self::new_internal(&conf.into())
     }
 }
 
-impl EventLoopHandle<User<Pinned>> {
+impl EventBusHandle<User<Pinned>> {
     fn new(conf: &Configuration) -> Result<Self, EspError> {
         Self::new_internal(&conf.into())
     }
 }
 
-impl<T> Drop for EventLoopHandle<T>
+impl<T> Drop for EventBusHandle<T>
 where
-    T: EspEventLoopHandleOwner,
+    T: EspEventBusType,
 {
     fn drop(&mut self) {
-        unsafe {
-            self.0.delete_event_loop();
+        if T::is_system() {
+            let mut taken = TAKEN.lock();
+
+            unsafe {
+                esp!(esp_event_loop_delete_default()).unwrap();
+            }
+
+            *taken = false;
+        } else {
+            unsafe {
+                let user: &User<T> = mem::transmute(&mut self.0);
+
+                esp!(esp_event_loop_delete(user.0)).unwrap();
+            }
         }
+
+        info!("Dropped");
     }
 }
 
-pub type EspSystemEventLoop = EspEventLoop<System>;
-pub type EspBackgroundEventLoop = EspEventLoop<User<Background>>;
-pub type EspExplicitEventLoop = EspEventLoop<User<Explicit>>;
-pub type EspPinnedEventLoop = EspEventLoop<User<Pinned>>;
-
 #[derive(Clone)]
-pub struct EspEventLoop<T>(Arc<EventLoopHandle<T>>)
+pub struct EspEventBus<T>(Arc<EventBusHandle<T>>)
 where
-    T: EspEventLoopHandleOwner;
+    T: EspEventBusType;
 
-impl EspEventLoop<System> {
+impl<T> service::Service for EspEventBus<T>
+where
+    T: EspEventBusType,
+{
+    type Error = EspError;
+}
+
+impl EspEventBus<System> {
     pub fn new() -> Result<Self, EspError> {
-        Ok(Self(Arc::new(EventLoopHandle::<System>::new()?)))
+        Ok(Self(Arc::new(EventBusHandle::<System>::new()?)))
     }
 
     fn internal_subscribe<P, E>(
@@ -338,7 +339,7 @@ impl EspEventLoop<System> {
     }
 }
 
-impl<T> EspEventLoop<User<T>> {
+impl<T> EspEventBus<User<T>> {
     fn internal_subscribe<P, E>(
         &self,
         source: event_bus::Source<P>,
@@ -397,33 +398,29 @@ impl<T> EspEventLoop<User<T>> {
     }
 }
 
-impl<T> event_bus::Spin for EspEventLoop<User<T>> {
-    type Error = EspError;
-
+impl<T> event_bus::Spin for EspEventBus<User<T>> {
     fn spin(&self, duration: Option<Duration>) -> Result<(), EspError> {
         esp!(unsafe { esp_event_loop_run(self.0 .0 .0, TickType::from(duration).0,) })
     }
 }
 
-impl EspEventLoop<User<Background>> {
+impl EspEventBus<User<Background>> {
     pub fn new(conf: &BackgroundConfiguration) -> Result<Self, EspError> {
-        Ok(Self(Arc::new(EventLoopHandle::<User<Background>>::new(
+        Ok(Self(Arc::new(EventBusHandle::<User<Background>>::new(
             conf,
         )?)))
     }
 }
 
-impl EspEventLoop<User<Explicit>> {
+impl EspEventBus<User<Explicit>> {
     pub fn new(conf: &Configuration) -> Result<Self, EspError> {
-        Ok(Self(Arc::new(EventLoopHandle::<User<Explicit>>::new(
-            conf,
-        )?)))
+        Ok(Self(Arc::new(EventBusHandle::<User<Explicit>>::new(conf)?)))
     }
 }
 
-impl EspEventLoop<User<Pinned>> {
+impl EspEventBus<User<Pinned>> {
     pub fn new(conf: &Configuration) -> Result<Self, EspError> {
-        Ok(Self(Arc::new(EventLoopHandle::<User<Pinned>>::new(conf)?)))
+        Ok(Self(Arc::new(EventBusHandle::<User<Pinned>>::new(conf)?)))
     }
 
     pub fn postbox(&self) -> Result<EspPostbox, EspError> {
@@ -431,9 +428,7 @@ impl EspEventLoop<User<Pinned>> {
     }
 }
 
-impl event_bus::Postbox for EspEventLoop<System> {
-    type Error = EspError;
-
+impl event_bus::Postbox for EspEventBus<System> {
     fn post<P>(&self, source: &event_bus::Source<P>, payload: &P) -> Result<(), Self::Error>
     where
         P: Copy,
@@ -442,9 +437,7 @@ impl event_bus::Postbox for EspEventLoop<System> {
     }
 }
 
-impl<T> event_bus::Postbox for EspEventLoop<User<T>> {
-    type Error = EspError;
-
+impl<T> event_bus::Postbox for EspEventBus<User<T>> {
     fn post<P>(&self, source: &event_bus::Source<P>, payload: &P) -> Result<(), Self::Error>
     where
         P: Copy,
@@ -453,7 +446,7 @@ impl<T> event_bus::Postbox for EspEventLoop<User<T>> {
     }
 }
 
-impl event_bus::EventBus for EspEventLoop<System> {
+impl event_bus::EventBus for EspEventBus<System> {
     type Subscription<P> = EspSubscription<P, System>;
 
     fn subscribe<P, E>(
@@ -468,7 +461,7 @@ impl event_bus::EventBus for EspEventLoop<System> {
     }
 }
 
-impl event_bus::EventBus for EspEventLoop<User<Background>> {
+impl event_bus::EventBus for EspEventBus<User<Background>> {
     type Subscription<P> = EspSubscription<P, User<Background>>;
 
     fn subscribe<P, E>(
@@ -483,10 +476,10 @@ impl event_bus::EventBus for EspEventLoop<User<Background>> {
     }
 }
 
-unsafe impl Send for EspEventLoop<User<Background>> {}
-unsafe impl Sync for EspEventLoop<User<Background>> {}
+unsafe impl Send for EspEventBus<User<Background>> {}
+unsafe impl Sync for EspEventBus<User<Background>> {}
 
-impl event_bus::EventBus for EspEventLoop<User<Explicit>> {
+impl event_bus::EventBus for EspEventBus<User<Explicit>> {
     type Subscription<P> = EspSubscription<P, User<Explicit>>;
 
     fn subscribe<P, E>(
@@ -501,21 +494,23 @@ impl event_bus::EventBus for EspEventLoop<User<Explicit>> {
     }
 }
 
-unsafe impl Send for EspEventLoop<User<Explicit>> {}
-unsafe impl Sync for EspEventLoop<User<Explicit>> {}
+unsafe impl Send for EspEventBus<User<Explicit>> {}
+unsafe impl Sync for EspEventBus<User<Explicit>> {}
 
 #[derive(Clone)]
-pub struct EspPostbox(EspEventLoop<User<Pinned>>);
+pub struct EspPostbox(EspEventBus<User<Pinned>>);
 
 impl EspPostbox {
-    fn new(event_loop: &EspEventLoop<User<Pinned>>) -> Result<Self, EspError> {
+    fn new(event_loop: &EspEventBus<User<Pinned>>) -> Result<Self, EspError> {
         Ok(Self(event_loop.clone()))
     }
 }
 
-impl event_bus::Postbox for EspPostbox {
+impl service::Service for EspPostbox {
     type Error = EspError;
+}
 
+impl event_bus::Postbox for EspPostbox {
     fn post<P>(&self, source: &event_bus::Source<P>, payload: &P) -> Result<(), Self::Error>
     where
         P: Copy,
@@ -527,9 +522,7 @@ impl event_bus::Postbox for EspPostbox {
 unsafe impl Send for EspPostbox {}
 unsafe impl Sync for EspPostbox {}
 
-impl event_bus::PinnedEventBus for EspEventLoop<User<Pinned>> {
-    type Error = EspError;
-
+impl event_bus::PinnedEventBus for EspEventBus<User<Pinned>> {
     type Subscription<P> = EspSubscription<P, User<Pinned>>;
 
     fn subscribe<P, E>(
