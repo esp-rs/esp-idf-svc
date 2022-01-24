@@ -180,7 +180,7 @@ impl timer::Once for EspTimerService<Once> {
     type Timer = EspTimer<Once>;
 
     fn after<E>(
-        &self,
+        &mut self,
         duration: Duration,
         callback: impl FnOnce() -> Result<(), E> + Send + 'static,
     ) -> Result<Self::Timer, Self::Error>
@@ -198,7 +198,7 @@ impl timer::Periodic for EspTimerService<Periodic> {
     type Timer = EspTimer<Periodic>;
 
     fn every<E>(
-        &self,
+        &mut self,
         duration: Duration,
         mut callback: impl FnMut() -> Result<(), E> + Send + 'static,
     ) -> Result<Self::Timer, Self::Error>

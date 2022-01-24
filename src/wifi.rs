@@ -207,6 +207,8 @@ impl Default for Shared {
     }
 }
 
+unsafe impl Send for Shared {}
+
 pub struct EspWifi {
     netif_stack: Arc<EspNetifStack>,
     _sys_loop_stack: Arc<EspSysLoopStack>,

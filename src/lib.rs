@@ -18,7 +18,7 @@ extern crate alloc;
 ))]
 pub mod eth;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
-pub mod event_bus;
+pub mod eventloop;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
 pub mod http;
 #[cfg(all(feature = "std", esp_idf_comp_esp_http_server_enabled))]

@@ -127,6 +127,8 @@ impl Shared {
     }
 }
 
+unsafe impl Send for Shared {}
+
 pub struct EspEth<P> {
     netif_stack: Arc<EspNetifStack>,
     _sys_loop_stack: Arc<EspSysLoopStack>,
