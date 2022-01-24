@@ -1,5 +1,5 @@
+use core::convert::TryInto;
 use core::{ptr, slice, time};
-use std::convert::TryInto;
 
 extern crate alloc;
 use alloc::{borrow::Cow, sync::Arc};
@@ -313,9 +313,9 @@ impl<'a> EspMqttMessage<'a> {
             esp_mqtt_event_id_t_MQTT_EVENT_PUBLISHED => {
                 Ok(client::Event::Published(event.msg_id as _))
             }
-            esp_mqtt_event_id_t_MQTT_EVENT_DATA => {
-                Ok(client::Event::Received(EspMqttMessage::new(event, connection)))
-            }
+            esp_mqtt_event_id_t_MQTT_EVENT_DATA => Ok(client::Event::Received(
+                EspMqttMessage::new(event, connection),
+            )),
             esp_mqtt_event_id_t_MQTT_EVENT_DELETED => Ok(client::Event::Deleted(event.msg_id as _)),
             other => panic!("Unknown message type: {}", other),
         }
@@ -383,7 +383,7 @@ impl<'a> client::Message for EspMqttMessage<'a> {
 
         unsafe {
             let slice = slice::from_raw_parts(ptr as _, len.try_into().unwrap());
-            Cow::Borrowed(std::str::from_utf8(slice).unwrap())
+            Cow::Borrowed(core::str::from_utf8(slice).unwrap())
         }
     }
 

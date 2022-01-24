@@ -1,9 +1,9 @@
 use core::fmt::{Debug, Display};
+use core::marker::PhantomData;
+use core::mem;
 use core::ptr;
 use core::result::Result;
-use std::marker::PhantomData;
-use std::mem;
-use std::time::Duration;
+use core::time::Duration;
 
 use embedded_svc::service;
 use embedded_svc::timer::{self, Timer};
