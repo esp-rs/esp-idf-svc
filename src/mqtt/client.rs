@@ -74,6 +74,28 @@ impl<'a> From<&Configuration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
     }
 }
 
+struct UnsafeCallback(*mut Box<dyn FnMut(esp_mqtt_event_handle_t)>);
+
+impl UnsafeCallback {
+    fn from(boxed: &mut Box<Box<dyn FnMut(esp_mqtt_event_handle_t)>>) -> Self {
+        Self(boxed.as_mut())
+    }
+
+    unsafe fn from_ptr(ptr: *mut c_types::c_void) -> Self {
+        Self(ptr as *mut _)
+    }
+
+    fn as_ptr(&self) -> *mut c_types::c_void {
+        self.0 as *mut _
+    }
+
+    unsafe fn call(&self, data: esp_mqtt_event_handle_t) {
+        let reference = self.0.as_mut().unwrap();
+
+        (reference)(data);
+    }
+}
+
 pub struct EspMqttClient(
     esp_mqtt_client_handle_t,
     Box<dyn FnMut(esp_mqtt_event_handle_t)>,
@@ -137,6 +159,10 @@ impl EspMqttClient {
     where
         Self: Sized,
     {
+        let mut boxed_raw_callback = Box::new(raw_callback);
+
+        let unsafe_callback = UnsafeCallback::from(&mut boxed_raw_callback);
+
         let (c_conf, _cstrs) = conf.into();
 
         let client = unsafe { esp_mqtt_client_init(&c_conf as *const _) };
@@ -144,7 +170,7 @@ impl EspMqttClient {
             esp!(ESP_FAIL)?;
         }
 
-        let client = Self(client, Box::new(raw_callback));
+        let client = Self(client, boxed_raw_callback);
 
         let c_url = CString::new(url.as_ref()).unwrap();
 
@@ -155,7 +181,7 @@ impl EspMqttClient {
                 client.0,
                 esp_mqtt_event_id_t_MQTT_EVENT_ANY,
                 Some(Self::handle),
-                &*client.1 as *const _ as *mut _,
+                unsafe_callback.as_ptr(),
             )
         })?;
 
@@ -170,11 +196,9 @@ impl EspMqttClient {
         _event_id: i32,
         event_data: *mut c_types::c_void,
     ) {
-        let handler_ptr = event_handler_arg as *mut Box<dyn Fn(esp_mqtt_event_handle_t)>;
-
-        let handler = unsafe { handler_ptr.as_ref() }.unwrap();
-
-        (handler)(event_data as _);
+        unsafe {
+            UnsafeCallback::from_ptr(event_handler_arg).call(event_data as _);
+        }
     }
 
     fn check(result: i32) -> Result<client::MessageId, EspError> {

@@ -37,25 +37,37 @@ impl EspTimerType for Periodic {
 
 struct UnsafeCallback<T>(*mut T);
 
-impl UnsafeCallback<Once> {
-    fn call(&self) {
-        let unboxed = unsafe { self.0.as_mut().unwrap() };
+impl<T> UnsafeCallback<T> {
+    fn from(boxed: &mut Box<T>) -> Self {
+        Self(boxed.as_mut())
+    }
 
-        if let Some(cb) = mem::replace(&mut unboxed.0, None) {
+    unsafe fn from_ptr(ptr: *mut c_types::c_void) -> Self {
+        Self(ptr as *mut _)
+    }
+
+    fn as_ptr(&self) -> *mut c_types::c_void {
+        self.0 as *mut _
+    }
+}
+
+impl UnsafeCallback<Once> {
+    unsafe fn call(&self) {
+        let reference = self.0.as_mut().unwrap();
+
+        if let Some(cb) = mem::replace(&mut reference.0, None) {
             cb();
         }
     }
 }
 
 impl UnsafeCallback<Periodic> {
-    fn call(&self) {
-        let boxed = unsafe { self.0.as_mut().unwrap() };
+    unsafe fn call(&self) {
+        let reference = self.0.as_mut().unwrap();
 
-        (boxed.0)();
+        (reference.0)();
     }
 }
-
-unsafe impl<T> Send for UnsafeCallback<T> {}
 
 pub struct EspTimer<T>
 where
@@ -71,14 +83,12 @@ where
     T: EspTimerType,
 {
     extern "C" fn handle(arg: *mut c_types::c_void) {
-        if T::is_periodic() {
-            let callback = unsafe { (arg as *const UnsafeCallback<Periodic>).as_ref().unwrap() };
-
-            callback.call();
-        } else {
-            let callback = unsafe { (arg as *const UnsafeCallback<Once>).as_ref().unwrap() };
-
-            callback.call();
+        unsafe {
+            if T::is_periodic() {
+                UnsafeCallback::<Periodic>::from_ptr(arg).call();
+            } else {
+                UnsafeCallback::<Once>::from_ptr(arg).call();
+            }
         }
     }
 }
@@ -149,14 +159,14 @@ where
     fn timer(&self, duration: Duration, mut callback: Box<T>) -> Result<EspTimer<T>, EspError> {
         let mut handle: esp_timer_handle_t = ptr::null_mut();
 
-        let unsafe_callback = UnsafeCallback(&mut *callback as *mut _);
+        let unsafe_callback = UnsafeCallback::from(&mut callback);
 
         esp!(unsafe {
             esp_timer_create(
                 &esp_timer_create_args_t {
                     callback: Some(EspTimer::<T>::handle),
                     name: b"rust\0" as *const _ as *const _, // TODO
-                    arg: &unsafe_callback as *const _ as *mut _,
+                    arg: unsafe_callback.as_ptr(),
                     dispatch_method: esp_timer_dispatch_t_ESP_TIMER_TASK,
                     skip_unhandled_events: false, // TODO
                 },

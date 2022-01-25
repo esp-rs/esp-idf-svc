@@ -131,12 +131,24 @@ pub struct EspEventFetchData {
 struct UnsafeCallback(*mut Box<dyn FnMut(EspEventFetchData) + 'static>);
 
 impl UnsafeCallback {
-    fn call(&self, data: EspEventFetchData) {
-        (unsafe { self.0.as_mut().unwrap() })(data);
+    fn from(boxed: &mut Box<Box<dyn FnMut(EspEventFetchData) + 'static>>) -> Self {
+        Self(boxed.as_mut())
+    }
+
+    unsafe fn from_ptr(ptr: *mut c_types::c_void) -> Self {
+        Self(ptr as *mut _)
+    }
+
+    fn as_ptr(&self) -> *mut c_types::c_void {
+        self.0 as *mut _
+    }
+
+    unsafe fn call(&self, data: EspEventFetchData) {
+        let reference = self.0.as_mut().unwrap();
+
+        (reference)(data);
     }
 }
-
-unsafe impl Send for UnsafeCallback {}
 
 pub struct EspSubscription<T>
 where
@@ -159,19 +171,15 @@ where
         event_id: i32,
         event_data: *mut c_types::c_void,
     ) {
-        let callback = unsafe {
-            (event_handler_arg as *const UnsafeCallback)
-                .as_ref()
-                .unwrap()
-        };
-
         let data = EspEventFetchData {
             source: event_base,
             event_id,
             payload: event_data,
         };
 
-        callback.call(data);
+        unsafe {
+            UnsafeCallback::from_ptr(event_handler_arg).call(data);
+        }
     }
 }
 
@@ -307,7 +315,7 @@ where
             Box::new(move |data| callback(data).unwrap());
         let mut callback = Box::new(callback);
 
-        let unsafe_callback = UnsafeCallback(&mut *callback as *mut _);
+        let unsafe_callback = UnsafeCallback::from(&mut callback);
 
         if T::is_system() {
             esp!(unsafe {
@@ -315,7 +323,7 @@ where
                     source,
                     event_id,
                     Some(EspSubscription::<System>::handle),
-                    &unsafe_callback as *const _ as *mut _,
+                    unsafe_callback.as_ptr(),
                     &mut handler_instance as *mut _,
                 )
             })?;
