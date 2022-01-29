@@ -335,7 +335,7 @@ impl EspWifi {
         let mut wifi_config: wifi_config_t = Default::default();
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
 
-        let mut result: ClientConfiguration = unsafe { (&Newtype(wifi_config.sta)).into() };
+        let mut result: ClientConfiguration = unsafe { (Newtype(wifi_config.sta)).into() };
         result.ip_conf = self.shared.get(|shared| shared.client_ip_conf.clone());
 
         info!("Providing STA configuration: {:?}", &result);
