@@ -138,9 +138,9 @@ impl<'a> From<&MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCs
 
         if let Some(keep_alive_interval) = conf.keep_alive_interval {
             c_conf.keepalive = keep_alive_interval.as_secs() as _;
-            c_conf.keepalive = true as _;
+            c_conf.disable_keepalive = false as _;
         } else {
-            c_conf.keepalive = false as _;
+            c_conf.disable_keepalive = true as _;
         }
 
         if let Some(reconnect_timeout) = conf.reconnect_timeout {
