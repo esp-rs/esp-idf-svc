@@ -8,6 +8,8 @@ use core::time::Duration;
 use embedded_svc::service;
 use embedded_svc::timer::{self, Timer};
 
+use embedded_svc::utils::nonblocking::Asyncify;
+use esp_idf_hal::mutex::Mutex;
 use esp_idf_sys::*;
 
 pub type EspOnce = EspTimerService<Once>;
@@ -184,34 +186,22 @@ where
     }
 }
 
-impl EspTimerService<Periodic> {
-    pub fn into_async(
-        self,
-    ) -> embedded_svc::utils::nonblocking::timer::Periodic<
-        esp_idf_hal::mutex::Mutex<
-            embedded_svc::utils::nonblocking::timer::TimerState<EspTimer<Periodic>>,
-        >,
-        Self,
-    > {
-        embedded_svc::utils::nonblocking::timer::Periodic::new(self)
-    }
-}
-
-impl EspTimerService<Once> {
-    pub fn into_async(
-        self,
-    ) -> embedded_svc::utils::nonblocking::timer::Once<
-        esp_idf_hal::mutex::Mutex<
-            embedded_svc::utils::nonblocking::timer::OnceState<EspTimer<Once>>,
-        >,
-        Self,
-    > {
-        embedded_svc::utils::nonblocking::timer::Once::new(self)
-    }
-}
-
 impl<T> service::Service for EspTimerService<T> {
     type Error = EspError;
+}
+
+impl Asyncify for EspTimerService<Once> {
+    type AsyncWrapper<S> = embedded_svc::utils::nonblocking::timer::Once<
+        Mutex<embedded_svc::utils::nonblocking::timer::OnceState<EspOnceTimer>>,
+        S,
+    >;
+}
+
+impl Asyncify for EspTimerService<Periodic> {
+    type AsyncWrapper<S> = embedded_svc::utils::nonblocking::timer::Periodic<
+        Mutex<embedded_svc::utils::nonblocking::timer::TimerState<EspPeriodicTimer>>,
+        S,
+    >;
 }
 
 impl timer::Once for EspTimerService<Once> {

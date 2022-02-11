@@ -1,18 +1,27 @@
-use core::{convert::TryInto, ptr, time::Duration};
-
-extern crate alloc;
-use alloc::boxed::Box;
-use alloc::sync::Arc;
+use core::fmt::{Debug, Display};
+use core::ptr;
+use core::time::Duration;
 
 use ::log::*;
 
 use enumset::*;
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 use embedded_svc::eth::*;
+use embedded_svc::event_bus::{EventBus, Postbox};
 use embedded_svc::ipv4;
+use embedded_svc::service::Service;
+use embedded_svc::utils::nonblocking::event_bus::Channel;
+use embedded_svc::utils::nonblocking::Asyncify;
+
+use esp_idf_hal::mutex::Condvar;
 
 use esp_idf_sys::*;
 
+use crate::eventloop::EspSubscription;
+use crate::eventloop::System;
 use crate::private::waitable::*;
 
 #[cfg(any(
@@ -35,7 +44,106 @@ use esp_idf_hal::{spi, units::Hertz};
 use crate::netif::*;
 use crate::sysloop::*;
 
-use crate::private::common::*;
+#[cfg(feature = "experimental")]
+pub use events::*;
+
+mod events {
+    use esp_idf_sys::*;
+
+    use crate::eventloop::{
+        EspEventPostData, EspTypedEventDeserializer, EspTypedEventSerializer, EspTypedEventSource,
+    };
+
+    type EthHandle = *const core::ffi::c_void;
+
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub struct EthStatusChangedEvent(pub(crate) EthHandle);
+
+    impl EthStatusChangedEvent {
+        pub fn handle(&self) -> EthHandle {
+            self.0
+        }
+    }
+
+    impl EspTypedEventSource for EthStatusChangedEvent {
+        fn source() -> *const c_types::c_char {
+            b"ETH_STATUS_CHANGED\0" as *const _ as _
+        }
+    }
+
+    impl EspTypedEventDeserializer<EthStatusChangedEvent> for EthStatusChangedEvent {
+        fn deserialize<R>(
+            data: &crate::eventloop::EspEventFetchData,
+            f: &mut impl for<'a> FnMut(&'a EthStatusChangedEvent) -> R,
+        ) -> R {
+            let eth_handle = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() }.unwrap();
+
+            f(&EthStatusChangedEvent(*eth_handle))
+        }
+    }
+
+    impl EspTypedEventSerializer<EthStatusChangedEvent> for EthStatusChangedEvent {
+        fn serialize<R>(
+            payload: &EthStatusChangedEvent,
+            f: impl for<'a> FnOnce(&'a crate::eventloop::EspEventPostData) -> R,
+        ) -> R {
+            f(&unsafe {
+                EspEventPostData::new(EthStatusChangedEvent::source(), Some(0), &payload.0)
+            })
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub enum EthEvent {
+        Started(EthHandle),
+        Stopped(EthHandle),
+        Connected(EthHandle),
+        Disconnected(EthHandle),
+    }
+
+    impl EthEvent {
+        pub fn handle(&self) -> EthHandle {
+            match self {
+                Self::Started(handle) => *handle,
+                Self::Stopped(handle) => *handle,
+                Self::Connected(handle) => *handle,
+                Self::Disconnected(handle) => *handle,
+            }
+        }
+    }
+
+    impl EspTypedEventSource for EthEvent {
+        fn source() -> *const c_types::c_char {
+            unsafe { ETH_EVENT }
+        }
+    }
+
+    impl EspTypedEventDeserializer<EthEvent> for EthEvent {
+        #[allow(non_upper_case_globals, non_snake_case)]
+        fn deserialize<R>(
+            data: &crate::eventloop::EspEventFetchData,
+            f: &mut impl for<'a> FnMut(&'a EthEvent) -> R,
+        ) -> R {
+            let eth_handle_ref = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() };
+
+            let event_id = data.event_id as u32;
+
+            let event = if event_id == eth_event_t_ETHERNET_EVENT_START {
+                EthEvent::Started(*eth_handle_ref.unwrap() as _)
+            } else if event_id == eth_event_t_ETHERNET_EVENT_STOP {
+                EthEvent::Stopped(*eth_handle_ref.unwrap() as _)
+            } else if event_id == eth_event_t_ETHERNET_EVENT_CONNECTED {
+                EthEvent::Connected(*eth_handle_ref.unwrap() as _)
+            } else if event_id == eth_event_t_ETHERNET_EVENT_DISCONNECTED {
+                EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
+            } else {
+                panic!("Unknown event ID: {}", event_id);
+            };
+
+            f(&event)
+        }
+    }
+}
 
 #[cfg(all(esp32, esp_idf_eth_use_esp32_emac))]
 // TODO: #[derive(Debug)]
@@ -114,7 +222,7 @@ struct Shared {
     operating: bool,
 
     handle: esp_eth_handle_t,
-    netif: Option<*mut esp_netif_t>,
+    netif: Option<EspNetif>,
 }
 
 impl Shared {
@@ -134,16 +242,16 @@ unsafe impl Send for Shared {}
 
 pub struct EspEth<P> {
     netif_stack: Arc<EspNetifStack>,
-    _sys_loop_stack: Arc<EspSysLoopStack>,
+    sys_loop_stack: Arc<EspSysLoopStack>,
 
     peripherals: P,
 
-    handle: esp_eth_handle_t,
     glue_handle: *mut c_types::c_void,
 
-    netif: Option<EspNetif>,
+    waitable: Arc<Waitable<Shared>>,
 
-    shared: Box<Waitable<Shared>>,
+    _eth_subscription: EspSubscription<System>,
+    _ip_subscription: EspSubscription<System>,
 }
 
 #[cfg(all(esp32, esp_idf_eth_use_esp32_emac))]
@@ -490,37 +598,54 @@ impl<P> EspEth<P> {
 
         let glue_handle = unsafe { esp_eth_new_netif_glue(handle) };
 
-        let mut shared: Box<Waitable<Shared>> = Box::new(Waitable::new(Shared::new(handle)));
+        let waitable: Arc<Waitable<Shared>> = Arc::new(Waitable::new(Shared::new(handle)));
 
-        let shared_ref: *mut _ = &mut *shared;
+        let eth_waitable = waitable.clone();
+        let mut eth_postbox = sys_loop_stack.get_loop().clone();
 
-        esp!(unsafe {
-            esp_event_handler_register(
-                ETH_EVENT,
-                ESP_EVENT_ANY_ID,
-                Option::Some(Self::event_handler),
-                shared_ref as *mut c_types::c_void,
-            )
-        })?;
-        esp!(unsafe {
-            esp_event_handler_register(
-                IP_EVENT,
-                ESP_EVENT_ANY_ID,
-                Option::Some(Self::event_handler),
-                shared_ref as *mut c_types::c_void,
-            )
-        })?;
+        let eth_subscription =
+            sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |event: &EthEvent| {
+                    let mut shared = eth_waitable.state.lock();
+
+                    if Self::on_eth_event(&mut shared, event)? {
+                        eth_postbox.post(&EthStatusChangedEvent(shared.handle), None)?;
+                        eth_waitable.cvar.notify_all();
+                    }
+
+                    Result::<_, EspError>::Ok(())
+                })?;
+
+        let ip_waitable = waitable.clone();
+        let mut ip_postbox = sys_loop_stack.get_loop().clone();
+
+        let ip_subscription =
+            sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |event: &IpEvent| {
+                    let mut shared = ip_waitable.state.lock();
+
+                    if Self::on_ip_event(&mut shared, event)? {
+                        ip_postbox.post(&EthStatusChangedEvent(shared.handle), None)?;
+                        ip_waitable.cvar.notify_all();
+                    }
+
+                    Result::<_, EspError>::Ok(())
+                })?;
 
         info!("Event handlers registered");
 
         let eth = Self {
             netif_stack,
-            _sys_loop_stack: sys_loop_stack,
+            sys_loop_stack,
             peripherals,
-            handle,
             glue_handle: glue_handle as *mut _,
-            netif: None,
-            shared,
+            waitable,
+            _eth_subscription: eth_subscription,
+            _ip_subscription: ip_subscription,
         };
 
         info!("Initialization complete");
@@ -532,18 +657,20 @@ impl<P> EspEth<P> {
     where
         F: FnOnce(Option<&EspNetif>) -> T,
     {
-        f(self.netif.as_ref())
+        self.waitable.get(|shared| f(shared.netif.as_ref()))
     }
 
     pub fn with_netif_mut<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(Option<&mut EspNetif>) -> T,
     {
-        f(self.netif.as_mut())
+        self.waitable.get_mut(|shared| f(shared.netif.as_mut()))
     }
 
     fn set_ip_conf(&mut self, conf: &Configuration) -> Result<(), EspError> {
-        Self::netif_unbind(self.netif.as_mut())?;
+        let mut shared = self.waitable.state.lock();
+
+        Self::netif_unbind(shared.netif.as_mut())?;
 
         let iconf = match conf {
             Configuration::Client(conf) => {
@@ -565,28 +692,22 @@ impl<P> EspEth<P> {
             _ => None,
         };
 
-        if let Some(iconf) = iconf {
+        let netif = if let Some(iconf) = iconf {
             let netif = EspNetif::new(self.netif_stack.clone(), &iconf)?;
 
             esp!(unsafe { esp_netif_attach(netif.1, self.glue_handle) })?;
 
-            self.netif = Some(netif);
-
             info!("IP configuration done");
+
+            Some(netif)
         } else {
-            self.netif = None;
-
             info!("Skipping IP configuration (not configured)");
-        }
 
-        let netif_ptr = self.netif.as_ref().map(|netif| netif.1);
+            None
+        };
 
-        self.shared.modify(|shared| {
-            shared.conf = conf.clone();
-            shared.netif = netif_ptr;
-
-            (false, ())
-        });
+        shared.conf = conf.clone();
+        shared.netif = netif;
 
         Ok(())
     }
@@ -594,7 +715,7 @@ impl<P> EspEth<P> {
     fn wait_status(&self, matcher: impl Fn(&Status) -> bool) {
         info!("About to wait for status");
 
-        self.shared.wait_while(|shared| !matcher(&shared.status));
+        self.waitable.wait_while(|shared| !matcher(&shared.status));
 
         info!("Waiting for status done - success");
     }
@@ -606,7 +727,7 @@ impl<P> EspEth<P> {
     ) -> Result<(), Status> {
         info!("About to wait {:?} for status", dur);
 
-        let (timeout, status) = self.shared.wait_timeout_while_and_get(
+        let (timeout, status) = self.waitable.wait_timeout_while_and_get(
             dur,
             |shared| !matcher(&shared.status),
             |shared| shared.status.clone(),
@@ -624,17 +745,15 @@ impl<P> EspEth<P> {
     fn start(&mut self, status: Status) -> Result<(), EspError> {
         info!("Starting with status: {:?}", status);
 
-        self.shared.modify(|shared| {
-            shared.status = status.clone();
-            shared.operating = shared.status.is_operating();
+        let mut shared = self.waitable.state.lock();
 
-            (false, ())
-        });
+        shared.status = status.clone();
+        shared.operating = shared.status.is_operating();
 
         if status.is_operating() {
             info!("Status is of operating type, starting");
 
-            esp!(unsafe { esp_eth_start(self.handle) })?;
+            esp!(unsafe { esp_eth_start(shared.handle) })?;
 
             info!("Start requested");
 
@@ -649,7 +768,7 @@ impl<P> EspEth<P> {
 
             info!("Started");
 
-            Self::netif_info("ETH", self.netif.as_ref())?;
+            Self::netif_info("ETH", shared.netif.as_ref())?;
         } else {
             info!("Status is NOT of operating type, not starting");
         }
@@ -657,55 +776,43 @@ impl<P> EspEth<P> {
         Ok(())
     }
 
-    fn stop(&mut self) -> Result<(), EspError> {
+    fn stop(&mut self, wait: bool) -> Result<(), EspError> {
         info!("Stopping");
 
-        self.shared.modify(|shared| {
+        {
+            let mut shared = self.waitable.state.lock();
+
             shared.operating = false;
 
-            (false, ())
-        });
+            let err = unsafe { esp_eth_stop(shared.handle) };
+            if err != ESP_ERR_INVALID_STATE as i32 {
+                esp!(err)?;
+            }
 
-        let err = unsafe { esp_eth_stop(self.handle) };
-        if err != ESP_ERR_INVALID_STATE as i32 {
-            esp!(err)?;
+            info!("Stop requested");
         }
-        info!("Stop requested");
 
-        self.wait_status(|s| matches!(s, Status::Stopped));
-
-        info!("Stopped");
+        if wait {
+            self.wait_status(|s| matches!(s, Status::Stopped));
+        }
 
         Ok(())
     }
 
     fn clear_all(&mut self) -> Result<(), EspError> {
-        self.stop()?;
+        self.stop(true)?;
+
+        let mut shared = self.waitable.state.lock();
 
         unsafe {
-            Self::netif_unbind(self.netif.as_mut())?;
-            self.shared.modify(|shared| {
-                shared.netif = None;
-
-                (false, ())
-            });
+            Self::netif_unbind(shared.netif.as_mut())?;
+            shared.netif = None;
 
             esp!(esp_eth_del_netif_glue(self.glue_handle as *mut _))?;
 
-            esp!(esp_event_handler_unregister(
-                ETH_EVENT,
-                ESP_EVENT_ANY_ID,
-                Option::Some(Self::event_handler)
-            ))?;
-            esp!(esp_event_handler_unregister(
-                IP_EVENT,
-                ESP_EVENT_ANY_ID as i32,
-                Option::Some(Self::event_handler)
-            ))?;
-
             info!("Event handlers deregistered");
 
-            esp!(esp_eth_driver_uninstall(self.handle))?;
+            esp!(esp_eth_driver_uninstall(shared.handle))?;
 
             info!("Driver deinitialized");
         }
@@ -736,130 +843,72 @@ impl<P> EspEth<P> {
         Ok(())
     }
 
-    unsafe extern "C" fn event_handler(
-        arg: *mut c_types::c_void,
-        event_base: esp_event_base_t,
-        event_id: c_types::c_int,
-        event_data: *mut c_types::c_void,
-    ) {
-        let shared_ref = (arg as *mut Waitable<Shared>).as_mut().unwrap();
+    fn on_eth_event(shared: &mut Shared, event: &EthEvent) -> Result<bool, EspError> {
+        if shared.handle == event.handle() as _ {
+            info!("Got eth event: {:?} ", event);
 
-        shared_ref.modify(|shared| {
-            if event_base == ETH_EVENT {
-                Self::on_eth_event(shared, event_id, event_data)
-            } else if event_base == IP_EVENT {
-                Self::on_ip_event(shared, event_id, event_data)
+            shared.status = match event {
+                EthEvent::Started(_) => Status::Starting,
+                EthEvent::Stopped(_) => Status::Stopped,
+                EthEvent::Connected(_) => {
+                    Status::Started(ConnectionStatus::Connected(match shared.conf {
+                        Configuration::Client(ipv4::ClientConfiguration::DHCP(_)) => {
+                            IpStatus::Waiting
+                        }
+                        Configuration::Client(ipv4::ClientConfiguration::Fixed(ref status)) => {
+                            IpStatus::Done(Some(status.clone()))
+                        }
+                        Configuration::Router(_) => IpStatus::Done(None),
+                        _ => IpStatus::Disabled,
+                    }))
+                }
+                EthEvent::Disconnected(_) => Status::Started(ConnectionStatus::Disconnected),
+            };
+
+            info!(
+                "Eth event {:?} handled, set status: {:?}",
+                event, shared.status
+            );
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn on_ip_event(shared: &mut Shared, event: &IpEvent) -> Result<bool, EspError> {
+        if shared.netif.is_some()
+            && shared.netif.as_ref().map(|netif| netif.1)
+                == event.handle().map(|handle| handle as _)
+        {
+            info!("Got IP event: {:?}", event);
+
+            let status = match event {
+                IpEvent::DhcpIpAssigned(assignment) => Some(Status::Started(
+                    ConnectionStatus::Connected(IpStatus::Done(Some(assignment.ip_settings))),
+                )),
+                IpEvent::DhcpIpDeassigned(_) => Some(Status::Started(ConnectionStatus::Connected(
+                    IpStatus::Waiting,
+                ))),
+                _ => None,
+            };
+
+            if let Some(status) = status {
+                shared.status = status;
+                info!(
+                    "IP event {:?} handled, set status: {:?}",
+                    event, shared.status
+                );
+
+                Ok(true)
             } else {
-                warn!("Got unknown event base");
+                info!("IP event {:?} skipped", event);
 
                 Ok(false)
             }
-            .map(|notify| (notify, ()))
-            .unwrap()
-        });
-    }
-
-    #[allow(non_upper_case_globals)]
-    fn on_eth_event(
-        shared: &mut Shared,
-        event_id: c_types::c_int,
-        event_data: *mut c_types::c_void,
-    ) -> Result<bool, EspError> {
-        let eth_handle = unsafe { (event_data as *const esp_eth_handle_t).as_ref() };
-        let for_us = eth_handle
-            .map(|eth_handle| *eth_handle == shared.handle)
-            .unwrap_or(false);
-
-        if !for_us {
-            return Ok(false);
+        } else {
+            Ok(false)
         }
-
-        info!("Got eth event: {} ", event_id);
-
-        let handled = match event_id as u32 {
-            eth_event_t_ETHERNET_EVENT_START => {
-                shared.status = Status::Starting;
-                true
-            }
-            eth_event_t_ETHERNET_EVENT_STOP => {
-                shared.status = Status::Stopped;
-                true
-            }
-            eth_event_t_ETHERNET_EVENT_CONNECTED => {
-                shared.status = Status::Started(ConnectionStatus::Connected(match shared.conf {
-                    Configuration::Client(ipv4::ClientConfiguration::DHCP(_)) => IpStatus::Waiting,
-                    Configuration::Client(ipv4::ClientConfiguration::Fixed(ref status)) => {
-                        IpStatus::Done(Some(status.clone()))
-                    }
-                    Configuration::Router(_) => IpStatus::Done(None),
-                    _ => IpStatus::Disabled,
-                }));
-
-                true
-            }
-            eth_event_t_ETHERNET_EVENT_DISCONNECTED => {
-                shared.status = Status::Started(ConnectionStatus::Disconnected);
-
-                true
-            }
-            _ => false,
-        };
-
-        if handled {
-            info!(
-                "Eth event {} handled, set status: {:?}",
-                event_id, shared.status
-            );
-        }
-
-        Ok(handled)
-    }
-
-    #[allow(non_upper_case_globals)]
-    fn on_ip_event(
-        shared: &mut Shared,
-        event_id: c_types::c_int,
-        event_data: *mut c_types::c_void,
-    ) -> Result<bool, EspError> {
-        let event_id = event_id as u32;
-
-        let for_us = shared.netif.is_some()
-            && (event_id == ip_event_t_IP_EVENT_ETH_GOT_IP
-                || event_id == ip_event_t_IP_EVENT_STA_GOT_IP);
-        if !for_us {
-            return Ok(false);
-        }
-
-        let event = unsafe { (event_data as *const ip_event_got_ip_t).as_ref() };
-        if !event.is_some() {
-            return Ok(false);
-        }
-
-        let event = event.unwrap();
-        if event.esp_netif != shared.netif.unwrap() {
-            return Ok(false);
-        }
-
-        info!("Got IP event: {}", event_id);
-
-        shared.status = Status::Started(ConnectionStatus::Connected(IpStatus::Done(Some(
-            ipv4::ClientSettings {
-                ip: ipv4::Ipv4Addr::from(Newtype(event.ip_info.ip)),
-                subnet: ipv4::Subnet {
-                    gateway: ipv4::Ipv4Addr::from(Newtype(event.ip_info.gw)),
-                    mask: Newtype(event.ip_info.netmask).try_into()?,
-                },
-                dns: None,           // TODO
-                secondary_dns: None, // TODO
-            },
-        ))));
-
-        info!(
-            "IP event {} handled, set status: {:?}",
-            event_id, shared.status
-        );
-
-        Ok(true)
     }
 
     fn eth_default_config(mac: *mut esp_eth_mac_t, phy: *mut esp_eth_phy_t) -> esp_eth_config_t {
@@ -915,7 +964,7 @@ impl<P> Eth for EspEth<P> {
     }
 
     fn get_status(&self) -> Status {
-        let status = self.shared.get(|shared| shared.status.clone());
+        let status = self.waitable.get(|shared| shared.status.clone());
 
         info!("Providing status: {:?}", status);
 
@@ -926,7 +975,7 @@ impl<P> Eth for EspEth<P> {
     fn get_configuration(&self) -> Result<Configuration, Self::Error> {
         info!("Getting configuration");
 
-        let conf = self.shared.get(|shared| shared.conf.clone());
+        let conf = self.waitable.get(|shared| shared.conf.clone());
 
         info!("Configuration gotten: {:?}", &conf);
 
@@ -936,7 +985,7 @@ impl<P> Eth for EspEth<P> {
     fn set_configuration(&mut self, conf: &Configuration) -> Result<(), Self::Error> {
         info!("Setting configuration: {:?}", conf);
 
-        self.stop()?;
+        self.stop(false)?;
 
         self.set_ip_conf(conf)?;
 
@@ -951,5 +1000,39 @@ impl<P> Eth for EspEth<P> {
         info!("Configuration set");
 
         Ok(())
+    }
+}
+
+impl<P> Service for EspEth<P> {
+    type Error = EspError;
+}
+
+impl<P> Asyncify for EspEth<P> {
+    type AsyncWrapper<S> = Channel<Condvar, S>;
+}
+
+impl<P> EventBus<()> for EspEth<P> {
+    type Subscription = EspSubscription<System>;
+
+    fn subscribe<E>(
+        &mut self,
+        mut callback: impl for<'a> FnMut(&'a ()) -> Result<(), E> + Send + 'static,
+    ) -> Result<Self::Subscription, Self::Error>
+    where
+        E: Display + Debug + Send + Sync + 'static,
+    {
+        let handle = self.waitable.get(|shared| shared.handle as usize);
+
+        let subscription = self.sys_loop_stack.get_loop().clone().subscribe(
+            move |event: &EthStatusChangedEvent| {
+                if event.handle() == handle as _ {
+                    callback(&())?;
+                }
+
+                Result::<_, E>::Ok(())
+            },
+        )?;
+
+        Ok(subscription)
     }
 }
