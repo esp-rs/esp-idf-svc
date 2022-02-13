@@ -15,8 +15,8 @@ use enumset::*;
 use embedded_svc::event_bus::{EventBus, Postbox};
 use embedded_svc::ipv4;
 use embedded_svc::service::Service;
-use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::utils::nonblocking::event_bus::Channel;
+use embedded_svc::utils::nonblocking::Asyncify;
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::mutex::{self, Condvar};
