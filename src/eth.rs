@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
 use core::ptr;
 use core::time::Duration;
 
@@ -610,12 +610,10 @@ impl<P> EspEth<P> {
                 .subscribe(move |event: &EthEvent| {
                     let mut shared = eth_waitable.state.lock();
 
-                    if Self::on_eth_event(&mut shared, event)? {
-                        eth_postbox.post(&EthStatusChangedEvent(shared.handle), None)?;
+                    if Self::on_eth_event(&mut shared, event).unwrap() {
+                        eth_postbox.post(&EthStatusChangedEvent(shared.handle), None).unwrap();
                         eth_waitable.cvar.notify_all();
                     }
-
-                    Result::<_, EspError>::Ok(())
                 })?;
 
         let ip_waitable = waitable.clone();
@@ -628,12 +626,10 @@ impl<P> EspEth<P> {
                 .subscribe(move |event: &IpEvent| {
                     let mut shared = ip_waitable.state.lock();
 
-                    if Self::on_ip_event(&mut shared, event)? {
-                        ip_postbox.post(&EthStatusChangedEvent(shared.handle), None)?;
+                    if Self::on_ip_event(&mut shared, event).unwrap() {
+                        ip_postbox.post(&EthStatusChangedEvent(shared.handle), None).unwrap();
                         ip_waitable.cvar.notify_all();
                     }
-
-                    Result::<_, EspError>::Ok(())
                 })?;
 
         info!("Event handlers registered");
@@ -1014,22 +1010,14 @@ impl<P> Asyncify for EspEth<P> {
 impl<P> EventBus<()> for EspEth<P> {
     type Subscription = EspSubscription<System>;
 
-    fn subscribe<E>(
-        &mut self,
-        mut callback: impl for<'a> FnMut(&'a ()) -> Result<(), E> + Send + 'static,
-    ) -> Result<Self::Subscription, Self::Error>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+    fn subscribe(&mut self, mut callback: impl for<'a> FnMut(&'a ()) + Send + 'static) -> Result<Self::Subscription, Self::Error> {
         let handle = self.waitable.get(|shared| shared.handle as usize);
 
         let subscription = self.sys_loop_stack.get_loop().clone().subscribe(
             move |event: &EthStatusChangedEvent| {
                 if event.handle() == handle as _ {
-                    callback(&())?;
+                    callback(&());
                 }
-
-                Result::<_, E>::Ok(())
             },
         )?;
 

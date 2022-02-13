@@ -1,4 +1,4 @@
-use core::fmt::{Debug, Display};
+use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::mem;
 use core::ptr;
@@ -331,19 +331,16 @@ impl<T> EspEventLoop<T>
 where
     T: EspEventLoopType,
 {
-    pub fn subscribe_raw<E>(
+    pub fn subscribe_raw(
         &mut self,
         source: *const c_types::c_char,
         event_id: i32,
-        mut callback: impl for<'a> FnMut(&EspEventFetchData) -> Result<(), E> + 'static,
-    ) -> Result<EspSubscription<T>, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+        mut callback: impl for<'a> FnMut(&EspEventFetchData) + 'static,
+    ) -> Result<EspSubscription<T>, EspError> {
         let mut handler_instance: esp_event_handler_instance_t = ptr::null_mut();
 
         let callback: Box<dyn for<'a> FnMut(&EspEventFetchData) + 'static> =
-            Box::new(move |data| callback(data).unwrap());
+            Box::new(move |data| callback(data));
         let mut callback = Box::new(callback);
 
         let unsafe_callback = UnsafeCallback::from(&mut callback);
@@ -562,13 +559,10 @@ where
 {
     type Subscription = EspSubscription<T>;
 
-    fn subscribe<E>(
+    fn subscribe(
         &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + Send + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+        mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.subscribe_raw(
             P::source(),
             P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -598,13 +592,7 @@ where
 {
     type Subscription = EspSubscription<User<Pinned>>;
 
-    fn subscribe<E>(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+    fn subscribe(&mut self, mut callback: impl for<'b> FnMut(&'b P) + 'static) -> Result<Self::Subscription, EspError> {
         self.subscribe_raw(
             P::source(),
             P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -684,13 +672,10 @@ where
 {
     type Subscription = EspSubscription<T>;
 
-    fn subscribe<E>(
+    fn subscribe(
         &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + Send + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+        mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
             M::source(),
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -706,13 +691,10 @@ where
 {
     type Subscription = EspSubscription<T>;
 
-    fn subscribe<E>(
+    fn subscribe(
         &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + Send + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+        mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
             M::source(),
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -751,13 +733,7 @@ where
 {
     type Subscription = EspSubscription<User<Pinned>>;
 
-    fn subscribe<E>(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+    fn subscribe(&mut self, mut callback: impl for<'b> FnMut(&'b P) + 'static) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
             M::source(),
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -773,13 +749,10 @@ where
 {
     type Subscription = EspSubscription<User<Pinned>>;
 
-    fn subscribe<E>(
+    fn subscribe(
         &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) -> Result<(), E> + 'static,
-    ) -> Result<Self::Subscription, EspError>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+        mut callback: impl for<'b> FnMut(&'b P) + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
             M::source(),
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),

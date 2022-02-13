@@ -1,5 +1,4 @@
 use core::cmp;
-use core::fmt::{Debug, Display};
 use core::ptr;
 use core::time::Duration;
 
@@ -424,12 +423,10 @@ impl EspWifi {
                 .subscribe(move |event: &WifiEvent| {
                     let mut shared = wifi_waitable.state.lock();
 
-                    if Self::on_wifi_event(&mut shared, event)? {
-                        wifi_postbox.post(&WifiStatusChangedEvent, None)?;
+                    if Self::on_wifi_event(&mut shared, event).unwrap() {
+                        wifi_postbox.post(&WifiStatusChangedEvent, None).unwrap();
                         wifi_waitable.cvar.notify_all();
                     }
-
-                    Result::<_, EspError>::Ok(())
                 })?;
 
         let ip_waitable = waitable.clone();
@@ -442,12 +439,10 @@ impl EspWifi {
                 .subscribe(move |event: &IpEvent| {
                     let mut shared = ip_waitable.state.lock();
 
-                    if Self::on_ip_event(&mut shared, event)? {
-                        ip_postbox.post(&WifiStatusChangedEvent, None)?;
+                    if Self::on_ip_event(&mut shared, event).unwrap() {
+                        ip_postbox.post(&WifiStatusChangedEvent, None).unwrap();
                         ip_waitable.cvar.notify_all();
                     }
-
-                    Result::<_, EspError>::Ok(())
                 })?;
 
         info!("Event handlers registered");
@@ -1073,18 +1068,10 @@ impl Asyncify for EspWifi {
 impl EventBus<()> for EspWifi {
     type Subscription = EspSubscription<System>;
 
-    fn subscribe<E>(
-        &mut self,
-        mut callback: impl for<'a> FnMut(&'a ()) -> Result<(), E> + Send + 'static,
-    ) -> Result<Self::Subscription, Self::Error>
-    where
-        E: Display + Debug + Send + Sync + 'static,
-    {
+    fn subscribe(&mut self, mut callback: impl for<'a> FnMut(&'a ()) + Send + 'static) -> Result<Self::Subscription, Self::Error> {
         let subscription = self.sys_loop_stack.get_loop().clone().subscribe(
             move |_event: &WifiStatusChangedEvent| {
-                callback(&())?;
-
-                Result::<_, E>::Ok(())
+                callback(&());
             },
         )?;
 
