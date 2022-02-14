@@ -592,7 +592,10 @@ where
 {
     type Subscription = EspSubscription<User<Pinned>>;
 
-    fn subscribe(&mut self, mut callback: impl for<'b> FnMut(&'b P) + 'static) -> Result<Self::Subscription, EspError> {
+    fn subscribe(
+        &mut self,
+        mut callback: impl for<'b> FnMut(&'b P) + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.subscribe_raw(
             P::source(),
             P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
@@ -733,7 +736,10 @@ where
 {
     type Subscription = EspSubscription<User<Pinned>>;
 
-    fn subscribe(&mut self, mut callback: impl for<'b> FnMut(&'b P) + 'static) -> Result<Self::Subscription, EspError> {
+    fn subscribe(
+        &mut self,
+        mut callback: impl for<'b> FnMut(&'b P) + 'static,
+    ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
             M::source(),
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),

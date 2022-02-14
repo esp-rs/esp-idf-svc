@@ -48,7 +48,7 @@ unsafe impl Send for EspTimer {}
 
 impl Drop for EspTimer {
     fn drop(&mut self) {
-        let _ = self.cancel();
+        self.cancel().unwrap();
 
         while unsafe { esp_timer_delete(self.handle) } != ESP_OK {
             // Timer is still running, busy-loop

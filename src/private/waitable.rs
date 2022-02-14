@@ -50,7 +50,7 @@ where
         let mut state = self.state.lock();
 
         loop {
-            if condition(&state) {
+            if !condition(&state) {
                 return getter(&state);
             }
 
@@ -67,7 +67,7 @@ where
         let mut state = self.state.lock();
 
         loop {
-            if condition(&state) {
+            if !condition(&state) {
                 return (false, getter(&state));
             }
 

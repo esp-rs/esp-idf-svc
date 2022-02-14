@@ -10,13 +10,9 @@ extern crate alloc;
 use alloc::sync::Arc;
 
 use embedded_svc::eth::*;
-use embedded_svc::event_bus::{EventBus, Postbox};
+use embedded_svc::event_bus::EventBus;
 use embedded_svc::ipv4;
 use embedded_svc::service::Service;
-use embedded_svc::utils::nonblocking::event_bus::Channel;
-use embedded_svc::utils::nonblocking::Asyncify;
-
-use esp_idf_hal::mutex::Condvar;
 
 use esp_idf_sys::*;
 
@@ -47,51 +43,32 @@ use crate::sysloop::*;
 #[cfg(feature = "experimental")]
 pub use events::*;
 
+#[cfg(not(feature = "experimental"))]
+use events::*;
+
 mod events {
+    use core::cell::UnsafeCell;
+
+    extern crate alloc;
+    use alloc::sync::Arc;
+
+    use embedded_svc::eth::Eth;
+    use embedded_svc::event_bus::EventBus;
+    use embedded_svc::utils::nonblocking::{event_bus::Channel, Asyncify};
+
+    use esp_idf_hal::mutex::Condvar;
+
     use esp_idf_sys::*;
 
     use crate::eventloop::{
-        EspEventPostData, EspTypedEventDeserializer, EspTypedEventSerializer, EspTypedEventSource,
+        EspSubscription, EspTypedEventDeserializer, EspTypedEventSource, System,
     };
+    use crate::netif::IpEvent;
+    use crate::private::common::UnsafeCellSendSync;
+
+    use super::EspEth;
 
     type EthHandle = *const core::ffi::c_void;
-
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    pub struct EthStatusChangedEvent(pub(crate) EthHandle);
-
-    impl EthStatusChangedEvent {
-        pub fn handle(&self) -> EthHandle {
-            self.0
-        }
-    }
-
-    impl EspTypedEventSource for EthStatusChangedEvent {
-        fn source() -> *const c_types::c_char {
-            b"ETH_STATUS_CHANGED\0" as *const _ as _
-        }
-    }
-
-    impl EspTypedEventDeserializer<EthStatusChangedEvent> for EthStatusChangedEvent {
-        fn deserialize<R>(
-            data: &crate::eventloop::EspEventFetchData,
-            f: &mut impl for<'a> FnMut(&'a EthStatusChangedEvent) -> R,
-        ) -> R {
-            let eth_handle = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() }.unwrap();
-
-            f(&EthStatusChangedEvent(*eth_handle))
-        }
-    }
-
-    impl EspTypedEventSerializer<EthStatusChangedEvent> for EthStatusChangedEvent {
-        fn serialize<R>(
-            payload: &EthStatusChangedEvent,
-            f: impl for<'a> FnOnce(&'a crate::eventloop::EspEventPostData) -> R,
-        ) -> R {
-            f(&unsafe {
-                EspEventPostData::new(EthStatusChangedEvent::source(), Some(0), &payload.0)
-            })
-        }
-    }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub enum EthEvent {
@@ -141,6 +118,91 @@ mod events {
             };
 
             f(&event)
+        }
+    }
+
+    impl<P> Asyncify for EspEth<P> {
+        type AsyncWrapper<S> = Channel<Condvar, S>;
+    }
+
+    impl<P> EventBus<()> for EspEth<P> {
+        type Subscription = (EspSubscription<System>, EspSubscription<System>);
+
+        fn subscribe(
+            &mut self,
+            callback: impl for<'a> FnMut(&'a ()) + Send + 'static,
+        ) -> Result<Self::Subscription, Self::Error> {
+            let eth_cb = Arc::new(UnsafeCellSendSync(UnsafeCell::new(callback)));
+            let eth_last_status = Arc::new(UnsafeCellSendSync(UnsafeCell::new(self.get_status())));
+            let eth_waitable = self.waitable.clone();
+
+            let ip_cb = eth_cb.clone();
+            let ip_last_status = eth_last_status.clone();
+            let ip_waitable = eth_waitable.clone();
+
+            let subscription1 =
+                self.sys_loop_stack
+                    .get_loop()
+                    .clone()
+                    .subscribe(move |event: &EthEvent| {
+                        let notify = {
+                            let shared = eth_waitable.state.lock();
+
+                            if shared.is_our_eth_event(event) {
+                                let last_status_ref =
+                                    unsafe { eth_last_status.0.get().as_mut().unwrap() };
+
+                                if *last_status_ref != shared.status {
+                                    *last_status_ref = shared.status.clone();
+
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        if notify {
+                            let cb_ref = unsafe { eth_cb.0.get().as_mut().unwrap() };
+
+                            (cb_ref)(&());
+                        }
+                    })?;
+
+            let subscription2 =
+                self.sys_loop_stack
+                    .get_loop()
+                    .clone()
+                    .subscribe(move |event: &IpEvent| {
+                        let notify = {
+                            let shared = ip_waitable.state.lock();
+
+                            if shared.is_our_ip_event(event) {
+                                let last_status_ref =
+                                    unsafe { ip_last_status.0.get().as_mut().unwrap() };
+
+                                if *last_status_ref != shared.status {
+                                    *last_status_ref = shared.status.clone();
+
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        if notify {
+                            let cb_ref = unsafe { ip_cb.0.get().as_mut().unwrap() };
+
+                            (cb_ref)(&());
+                        }
+                    })?;
+
+            Ok((subscription1, subscription2))
         }
     }
 }
@@ -235,6 +297,15 @@ impl Shared {
             handle,
             netif: None,
         }
+    }
+
+    fn is_our_eth_event(&self, event: &EthEvent) -> bool {
+        self.handle as *const _ == event.handle()
+    }
+
+    fn is_our_ip_event(&self, event: &IpEvent) -> bool {
+        self.netif.is_some()
+            && self.netif.as_ref().map(|netif| netif.1) == event.handle().map(|handle| handle as _)
     }
 }
 
@@ -601,8 +672,6 @@ impl<P> EspEth<P> {
         let waitable: Arc<Waitable<Shared>> = Arc::new(Waitable::new(Shared::new(handle)));
 
         let eth_waitable = waitable.clone();
-        let mut eth_postbox = sys_loop_stack.get_loop().clone();
-
         let eth_subscription =
             sys_loop_stack
                 .get_loop()
@@ -611,14 +680,11 @@ impl<P> EspEth<P> {
                     let mut shared = eth_waitable.state.lock();
 
                     if Self::on_eth_event(&mut shared, event).unwrap() {
-                        eth_postbox.post(&EthStatusChangedEvent(shared.handle), None).unwrap();
                         eth_waitable.cvar.notify_all();
                     }
                 })?;
 
         let ip_waitable = waitable.clone();
-        let mut ip_postbox = sys_loop_stack.get_loop().clone();
-
         let ip_subscription =
             sys_loop_stack
                 .get_loop()
@@ -627,7 +693,6 @@ impl<P> EspEth<P> {
                     let mut shared = ip_waitable.state.lock();
 
                     if Self::on_ip_event(&mut shared, event).unwrap() {
-                        ip_postbox.post(&EthStatusChangedEvent(shared.handle), None).unwrap();
                         ip_waitable.cvar.notify_all();
                     }
                 })?;
@@ -664,9 +729,10 @@ impl<P> EspEth<P> {
     }
 
     fn set_ip_conf(&mut self, conf: &Configuration) -> Result<(), EspError> {
-        let mut shared = self.waitable.state.lock();
-
-        Self::netif_unbind(shared.netif.as_mut())?;
+        {
+            let mut shared = self.waitable.state.lock();
+            Self::netif_unbind(shared.netif.as_mut())?;
+        }
 
         let iconf = match conf {
             Configuration::Client(conf) => {
@@ -702,8 +768,11 @@ impl<P> EspEth<P> {
             None
         };
 
-        shared.conf = conf.clone();
-        shared.netif = netif;
+        {
+            let mut shared = self.waitable.state.lock();
+            shared.conf = conf.clone();
+            shared.netif = netif;
+        }
 
         Ok(())
     }
@@ -738,23 +807,30 @@ impl<P> EspEth<P> {
         }
     }
 
-    fn start(&mut self, status: Status) -> Result<(), EspError> {
+    fn start(&mut self, status: Status, wait: Option<Duration>) -> Result<(), EspError> {
         info!("Starting with status: {:?}", status);
 
-        let mut shared = self.waitable.state.lock();
+        {
+            let mut shared = self.waitable.state.lock();
 
-        shared.status = status.clone();
-        shared.operating = shared.status.is_operating();
+            shared.status = status.clone();
+            shared.operating = shared.status.is_operating();
 
-        if status.is_operating() {
-            info!("Status is of operating type, starting");
+            if status.is_operating() {
+                info!("Status is of operating type, starting");
 
-            esp!(unsafe { esp_eth_start(shared.handle) })?;
+                esp!(unsafe { esp_eth_start(shared.handle) })?;
 
-            info!("Start requested");
+                info!("Start requested");
 
-            let result =
-                self.wait_status_with_timeout(Duration::from_secs(10), |s| !s.is_transitional());
+                Self::netif_info("ETH", shared.netif.as_ref())?;
+            } else {
+                info!("Status is NOT of operating type, not starting");
+            }
+        }
+
+        if let Some(duration) = wait {
+            let result = self.wait_status_with_timeout(duration, |s| !s.is_transitional());
 
             if result.is_err() {
                 info!("Timeout while waiting for the requested state");
@@ -763,10 +839,6 @@ impl<P> EspEth<P> {
             }
 
             info!("Started");
-
-            Self::netif_info("ETH", shared.netif.as_ref())?;
-        } else {
-            info!("Status is NOT of operating type, not starting");
         }
 
         Ok(())
@@ -840,7 +912,7 @@ impl<P> EspEth<P> {
     }
 
     fn on_eth_event(shared: &mut Shared, event: &EthEvent) -> Result<bool, EspError> {
-        if shared.handle == event.handle() as _ {
+        if shared.is_our_eth_event(event) {
             info!("Got eth event: {:?} ", event);
 
             shared.status = match event {
@@ -873,10 +945,7 @@ impl<P> EspEth<P> {
     }
 
     fn on_ip_event(shared: &mut Shared, event: &IpEvent) -> Result<bool, EspError> {
-        if shared.netif.is_some()
-            && shared.netif.as_ref().map(|netif| netif.1)
-                == event.handle().map(|handle| handle as _)
-        {
+        if shared.is_our_ip_event(event) {
             info!("Got IP event: {:?}", event);
 
             let status = match event {
@@ -948,6 +1017,10 @@ impl<P> EspEth<P> {
     }
 }
 
+impl<P> Service for EspEth<P> {
+    type Error = EspError;
+}
+
 impl<P> Eth for EspEth<P> {
     type Error = EspError;
 
@@ -991,36 +1064,11 @@ impl<P> Eth for EspEth<P> {
             Status::Starting
         };
 
-        self.start(status)?;
+        // TODO: Remove the wait to make the API completely async
+        self.start(status, Some(Duration::from_secs(10)))?;
 
         info!("Configuration set");
 
         Ok(())
-    }
-}
-
-impl<P> Service for EspEth<P> {
-    type Error = EspError;
-}
-
-impl<P> Asyncify for EspEth<P> {
-    type AsyncWrapper<S> = Channel<Condvar, S>;
-}
-
-impl<P> EventBus<()> for EspEth<P> {
-    type Subscription = EspSubscription<System>;
-
-    fn subscribe(&mut self, mut callback: impl for<'a> FnMut(&'a ()) + Send + 'static) -> Result<Self::Subscription, Self::Error> {
-        let handle = self.waitable.get(|shared| shared.handle as usize);
-
-        let subscription = self.sys_loop_stack.get_loop().clone().subscribe(
-            move |event: &EthStatusChangedEvent| {
-                if event.handle() == handle as _ {
-                    callback(&());
-                }
-            },
-        )?;
-
-        Ok(subscription)
     }
 }
