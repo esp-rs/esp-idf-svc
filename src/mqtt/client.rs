@@ -2,10 +2,12 @@ use core::convert::TryInto;
 use core::ptr;
 use core::slice;
 use core::time;
+use std::mem::ManuallyDrop;
 
 extern crate alloc;
 use alloc::{borrow::Cow, sync::Arc};
 
+use embedded_svc::nonblocking::Unblocker;
 use embedded_svc::{mqtt::client, service};
 
 use esp_idf_hal::mutex::{Condvar, Mutex};
@@ -215,21 +217,25 @@ impl EspMqttClient {
         Ok((client, connection))
     }
 
-    pub fn new_async<'a>(
-        url: impl AsRef<str>,
+    pub fn new_async<'a, U, S>(
+        url: S,
         conf: &'a MqttClientConfiguration<'a>,
     ) -> Result<
         (
-            Self,
-            embedded_svc::utils::nonblocking::mqtt::client::Connection<
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient<U, Mutex<Self>>,
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection<
                 Condvar,
                 EspMqttMessage,
                 EspError,
             >,
         ),
         EspError,
-    > {
-        let connection = embedded_svc::utils::nonblocking::mqtt::client::Connection::<
+    >
+    where
+        U: Unblocker,
+        S: AsRef<str>,
+    {
+        let connection = embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection::<
             Condvar,
             _,
             EspError,
@@ -239,13 +245,16 @@ impl EspMqttClient {
 
         let client = Self::new_with_callback(url, conf, move |event| cb_connection.post(event))?;
 
-        Ok((client, connection))
+        Ok((
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient::new(client),
+            connection,
+        ))
     }
 
     pub fn new_with_callback<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
-        mut callback: impl for<'b> FnMut(Option<Result<client::Event<EspMqttMessage<'b>>, EspError>>)
+        mut callback: impl for<'b> FnMut(&'b Option<Result<client::Event<EspMqttMessage<'b>>, EspError>>)
             + 'static,
     ) -> Result<Self, EspError>
     where
@@ -258,9 +267,15 @@ impl EspMqttClient {
                 let event = unsafe { event_handle.as_ref() };
 
                 if let Some(event) = event {
-                    callback(Some(EspMqttMessage::new_event(event, None)))
+                    let mut event = ManuallyDrop::new(Some(EspMqttMessage::new_event(event, None)));
+
+                    callback(&mut event);
+
+                    unsafe {
+                        ManuallyDrop::drop(&mut event);
+                    }
                 } else {
-                    callback(None)
+                    callback(&None)
                 }
             }),
         )

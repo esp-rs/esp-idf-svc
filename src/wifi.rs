@@ -311,7 +311,7 @@ mod events {
     }
 
     impl Asyncify for EspWifi {
-        type AsyncWrapper<S> = Channel<Condvar, S>;
+        type AsyncWrapper<S> = Channel<(), Condvar, S>;
     }
 
     impl EventBus<()> for EspWifi {

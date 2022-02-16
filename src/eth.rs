@@ -122,7 +122,7 @@ mod events {
     }
 
     impl<P> Asyncify for EspEth<P> {
-        type AsyncWrapper<S> = Channel<Condvar, S>;
+        type AsyncWrapper<S> = Channel<(), Condvar, S>;
     }
 
     impl<P> EventBus<()> for EspEth<P> {

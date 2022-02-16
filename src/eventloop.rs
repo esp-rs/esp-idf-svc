@@ -4,6 +4,7 @@ use core::mem;
 use core::ptr;
 use core::result::Result;
 use core::time::Duration;
+use std::ptr::NonNull;
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -11,7 +12,7 @@ use alloc::sync::Arc;
 use ::log::*;
 use embedded_svc::utils::nonblocking::event_bus::Channel;
 
-use embedded_svc::utils::nonblocking::Asyncify;
+use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::{event_bus, service};
 
 use esp_idf_hal::cpu::Core;
@@ -151,7 +152,13 @@ pub struct EspEventFetchData {
 
 impl EspEventFetchData {
     pub unsafe fn as_payload<P: Copy>(&self) -> &P {
-        let payload: &P = (self.payload as *const P).as_ref().unwrap();
+        let payload: &P = if mem::size_of::<P>() > 0 {
+            self.payload as *const P
+        } else {
+            NonNull::dangling().as_ptr() as *const P
+        }
+        .as_ref()
+        .unwrap();
 
         payload
     }
@@ -539,7 +546,14 @@ impl<T> Asyncify for EspEventLoop<T>
 where
     T: EspEventLoopType,
 {
-    type AsyncWrapper<S> = Channel<Condvar, S>;
+    type AsyncWrapper<S> = Channel<(), Condvar, S>;
+}
+
+impl<T> UnblockingAsyncify for EspEventLoop<T>
+where
+    T: EspEventLoopType,
+{
+    type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
 }
 
 impl<P, T> event_bus::Postbox<P> for EspEventLoop<T>
@@ -641,7 +655,11 @@ where
 }
 
 impl<M, P, L> Asyncify for EspTypedEventLoop<M, P, L> {
-    type AsyncWrapper<S> = Channel<Condvar, S>;
+    type AsyncWrapper<S> = Channel<(), Condvar, S>;
+}
+
+impl<M, P, L> UnblockingAsyncify for EspTypedEventLoop<M, P, L> {
+    type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
 }
 
 impl<M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, EspEventLoop<T>>
