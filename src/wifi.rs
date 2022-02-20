@@ -12,9 +12,9 @@ use ::log::*;
 
 use enumset::*;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::event_bus::EventBus;
 use embedded_svc::ipv4;
-use embedded_svc::service::Service;
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::mutex;
@@ -798,7 +798,7 @@ impl Drop for EspWifi {
     }
 }
 
-impl Service for EspWifi {
+impl Errors for EspWifi {
     type Error = EspError;
 }
 

@@ -11,12 +11,12 @@ use log::{info, warn};
 
 use crate::private::cstr::CString;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::http::server::{
     attr, middleware, registry::*, session, Completion, Request, Response, ResponseWrite, Session,
 };
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
-use embedded_svc::service::Service;
 
 use esp_idf_hal::mutex;
 
@@ -330,7 +330,7 @@ impl Drop for EspHttpServer {
     }
 }
 
-impl Service for EspHttpServer {
+impl Errors for EspHttpServer {
     type Error = EspError;
 }
 
@@ -447,7 +447,7 @@ impl<'a> EspHttpRequest<'a> {
     }
 }
 
-impl<'a> Service for EspHttpRequest<'a> {
+impl<'a> Errors for EspHttpRequest<'a> {
     type Error = EspError;
 }
 
@@ -631,7 +631,7 @@ impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
     }
 }
 
-impl<'a> Service for EspHttpResponse<'a> {
+impl<'a> Errors for EspHttpResponse<'a> {
     type Error = EspError;
 }
 
@@ -770,7 +770,7 @@ impl<'a> ResponseWrite<'a> for EspHttpResponseWrite<'a> {
     }
 }
 
-impl<'a> Service for EspHttpResponseWrite<'a> {
+impl<'a> Errors for EspHttpResponseWrite<'a> {
     type Error = EspError;
 }
 

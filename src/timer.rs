@@ -5,7 +5,7 @@ use core::time::Duration;
 extern crate alloc;
 use alloc::boxed::Box;
 
-use embedded_svc::service;
+use embedded_svc::errors::Errors;
 use embedded_svc::timer::{self, OnceTimer, PeriodicTimer, Timer, TimerService};
 
 use esp_idf_sys::*;
@@ -60,7 +60,7 @@ impl Drop for EspTimer {
     }
 }
 
-impl service::Service for EspTimer {
+impl Errors for EspTimer {
     type Error = EspError;
 }
 
@@ -110,7 +110,7 @@ impl Clone for EspTimerService {
     }
 }
 
-impl service::Service for EspTimerService {
+impl Errors for EspTimerService {
     type Error = EspError;
 }
 

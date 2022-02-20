@@ -2,9 +2,9 @@ use core::{mem, ptr, time::Duration};
 
 use ::log::*;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::ipv4;
 use embedded_svc::ping::*;
-use embedded_svc::service::Service;
 
 use esp_idf_sys::*;
 
@@ -255,7 +255,7 @@ impl EspPing {
     }
 }
 
-impl Service for EspPing {
+impl Errors for EspPing {
     type Error = EspError;
 }
 

@@ -6,10 +6,10 @@ use alloc::string::ToString;
 
 use ::log::*;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::http::client::*;
 use embedded_svc::http::*;
 use embedded_svc::io::{Read, Write};
-use embedded_svc::service::Service;
 
 use esp_idf_sys::*;
 
@@ -140,7 +140,7 @@ impl Drop for EspHttpClient {
     }
 }
 
-impl Service for EspHttpClient {
+impl Errors for EspHttpClient {
     type Error = EspError;
 }
 
@@ -180,7 +180,7 @@ pub struct EspHttpRequest<'a> {
     follow_redirects: bool,
 }
 
-impl<'a> Service for EspHttpRequest<'a> {
+impl<'a> Errors for EspHttpRequest<'a> {
     type Error = EspError;
 }
 
@@ -313,7 +313,7 @@ impl<'a> RequestWrite<'a> for EspHttpRequestWrite<'a> {
     }
 }
 
-impl<'a> Service for EspHttpRequestWrite<'a> {
+impl<'a> Errors for EspHttpRequestWrite<'a> {
     type Error = EspError;
 }
 
@@ -334,7 +334,7 @@ pub struct EspHttpResponse<'a> {
     headers: BTreeMap<Uncased<'static>, String>,
 }
 
-impl<'a> Service for EspHttpResponse<'a> {
+impl<'a> Errors for EspHttpResponse<'a> {
     type Error = EspError;
 }
 

@@ -4,7 +4,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloc::vec;
 
-use embedded_svc::service::Service;
+use embedded_svc::errors::Errors;
 use embedded_svc::storage::Storage;
 
 use esp_idf_sys::*;
@@ -72,7 +72,7 @@ impl Drop for EspNvsStorage {
     }
 }
 
-impl Service for EspNvsStorage {
+impl Errors for EspNvsStorage {
     type Error = EspError;
 }
 

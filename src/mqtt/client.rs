@@ -7,7 +7,7 @@ use std::mem::ManuallyDrop;
 extern crate alloc;
 use alloc::{borrow::Cow, sync::Arc};
 
-use embedded_svc::{mqtt::client, service};
+use embedded_svc::{errors, mqtt::client};
 
 use esp_idf_hal::mutex::{Condvar, Mutex};
 
@@ -352,7 +352,7 @@ impl Drop for EspMqttClient {
     }
 }
 
-impl service::Service for EspMqttClient {
+impl errors::Errors for EspMqttClient {
     type Error = EspError;
 }
 
@@ -578,7 +578,7 @@ impl EspMqttConnection {
 
 unsafe impl Send for EspMqttConnection {}
 
-impl service::Service for EspMqttConnection {
+impl errors::Errors for EspMqttConnection {
     type Error = EspError;
 }
 

@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 
 use ::log::*;
 
-use embedded_svc::{event_bus, service};
+use embedded_svc::{errors, event_bus};
 
 use esp_idf_hal::cpu::Core;
 use esp_idf_hal::delay::TickType;
@@ -515,7 +515,7 @@ where
 unsafe impl<T> Send for EspEventLoop<T> where T: EspEventLoopType + Send {}
 unsafe impl<T> Sync for EspEventLoop<T> where T: EspEventLoopType + Sync {}
 
-impl<T> service::Service for EspEventLoop<T>
+impl<T> errors::Errors for EspEventLoop<T>
 where
     T: EspEventLoopType,
 {
@@ -635,9 +635,9 @@ where
     }
 }
 
-impl<M, P, L> service::Service for EspTypedEventLoop<M, P, L>
+impl<M, P, L> errors::Errors for EspTypedEventLoop<M, P, L>
 where
-    L: service::Service,
+    L: errors::Errors,
 {
     type Error = L::Error;
 }

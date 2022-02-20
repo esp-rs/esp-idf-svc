@@ -7,9 +7,9 @@ use alloc::vec;
 
 use ::log::*;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::io;
 use embedded_svc::ota;
-use embedded_svc::service::Service;
 
 use esp_idf_hal::mutex;
 
@@ -48,7 +48,7 @@ impl Default for EspFirmwareInfoLoader {
     }
 }
 
-impl Service for EspFirmwareInfoLoader {
+impl Errors for EspFirmwareInfoLoader {
     type Error = EspError;
 }
 
@@ -92,7 +92,7 @@ impl ota::FirmwareInfoLoader for EspFirmwareInfoLoader {
 
 pub struct EspSlot(esp_partition_t);
 
-impl Service for EspSlot {
+impl Errors for EspSlot {
     type Error = EspError;
 }
 
@@ -190,7 +190,7 @@ impl<MODE> Drop for EspOta<MODE> {
     }
 }
 
-impl Service for EspOta<Read> {
+impl Errors for EspOta<Read> {
     type Error = EspError;
 }
 
@@ -269,7 +269,7 @@ impl ota::OtaUpdate for EspOta<Update> {
     }
 }
 
-impl Service for EspOta<Update> {
+impl Errors for EspOta<Update> {
     type Error = EspError;
 }
 

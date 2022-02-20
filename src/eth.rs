@@ -10,10 +10,10 @@ use enumset::*;
 extern crate alloc;
 use alloc::sync::Arc;
 
+use embedded_svc::errors::Errors;
 use embedded_svc::eth::*;
 use embedded_svc::event_bus::EventBus;
 use embedded_svc::ipv4;
-use embedded_svc::service::Service;
 
 #[cfg(any(
     all(esp32, esp_idf_eth_use_esp32_emac),
@@ -852,7 +852,7 @@ impl<P> EspEth<P> {
     }
 }
 
-impl<P> Service for EspEth<P> {
+impl<P> Errors for EspEth<P> {
     type Error = EspError;
 }
 
