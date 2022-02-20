@@ -204,7 +204,7 @@ impl EspMqttClient {
             processed: Condvar::new(),
         });
 
-        let connection = EspMqttConnection(state.clone());
+        let connection = EspMqttConnection(state);
         let client_connection = connection.clone();
 
         let client = Self::new_with_raw_callback(
@@ -470,7 +470,7 @@ impl<'a> EspMqttMessage<'a> {
                 Ok(client::Event::Published(event.msg_id as _))
             }
             esp_mqtt_event_id_t_MQTT_EVENT_DATA => Ok(client::Event::Received(
-                EspMqttMessage::new(event, connection.map(|connection| connection.clone())),
+                EspMqttMessage::new(event, connection.cloned()),
             )),
             esp_mqtt_event_id_t_MQTT_EVENT_DELETED => Ok(client::Event::Deleted(event.msg_id as _)),
             other => panic!("Unknown message type: {}", other),
@@ -548,7 +548,7 @@ impl<'a> client::Message for EspMqttMessage<'a> {
     }
 }
 
-#[allow(clippy:suspicious_auto_trait_impls)]
+#[allow(clippy::suspicious_auto_trait_impls)]
 unsafe impl Send for Newtype<esp_mqtt_event_handle_t> {}
 
 struct EspMqttConnectionState {

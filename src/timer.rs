@@ -117,10 +117,10 @@ impl Errors for EspTimerService {
 impl TimerService for EspTimerService {
     type Timer = EspTimer;
 
-    fn timer(&mut self, mut callback: impl FnMut() + Send + 'static) -> Result<EspTimer, EspError> {
+    fn timer(&mut self, callback: impl FnMut() + Send + 'static) -> Result<EspTimer, EspError> {
         let mut handle: esp_timer_handle_t = ptr::null_mut();
 
-        let boxed_callback: Box<dyn FnMut()> = Box::new(move || callback());
+        let boxed_callback: Box<dyn FnMut()> = Box::new(callback);
 
         let mut callback = Box::new(boxed_callback);
         let unsafe_callback = UnsafeCallback::from(&mut callback);

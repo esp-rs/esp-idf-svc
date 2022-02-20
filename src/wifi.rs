@@ -397,7 +397,7 @@ impl EspWifi {
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
 
         let mut result: AccessPointConfiguration = unsafe { Newtype(wifi_config.ap).into() };
-        result.ip_conf = self.waitable.get(|shared| shared.router_ip_conf.clone());
+        result.ip_conf = self.waitable.get(|shared| shared.router_ip_conf);
 
         info!("Providing AP configuration: {:?}", &result);
 
@@ -468,7 +468,7 @@ impl EspWifi {
 
         let netif = if let Some(conf) = conf {
             let mut iconf = InterfaceConfiguration::wifi_default_router();
-            iconf.ip_configuration = InterfaceIpConfiguration::Router(conf.clone());
+            iconf.ip_configuration = InterfaceIpConfiguration::Router(*conf);
 
             info!("Setting AP interface configuration: {:?}", iconf);
 
@@ -488,7 +488,7 @@ impl EspWifi {
 
         {
             let mut shared = self.waitable.state.lock();
-            shared.router_ip_conf = conf.clone();
+            shared.router_ip_conf = *conf;
             shared.ap_netif = netif;
         }
 
@@ -693,7 +693,7 @@ impl EspWifi {
                         None => ClientIpStatus::Disabled,
                         Some(ipv4::ClientConfiguration::DHCP(_)) => ClientIpStatus::Waiting,
                         Some(ipv4::ClientConfiguration::Fixed(ref status)) => {
-                            ClientIpStatus::Done(status.clone())
+                            ClientIpStatus::Done(*status)
                         }
                     },
                 ))),

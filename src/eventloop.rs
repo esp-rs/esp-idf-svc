@@ -132,6 +132,10 @@ pub struct EspEventPostData {
 }
 
 impl<'a> EspEventPostData {
+    /// # Safety
+    ///
+    /// Care should be taken to only call this function with payload reference that lives at least as long as
+    /// the call that will post this data to the event loop
     pub unsafe fn new<P: Copy>(
         source: *const c_types::c_char,
         event_id: Option<i32>,
@@ -153,6 +157,10 @@ pub struct EspEventFetchData {
 }
 
 impl EspEventFetchData {
+    /// # Safety
+    ///
+    /// Care should be taken to only call this function on fetch data that one is certain to be
+    /// of type `P`
     pub unsafe fn as_payload<P: Copy>(&self) -> &P {
         let payload: &P = if mem::size_of::<P>() > 0 {
             self.payload as *const P
@@ -169,6 +177,7 @@ impl EspEventFetchData {
 struct UnsafeCallback(*mut Box<dyn for<'a> FnMut(&'a EspEventFetchData) + 'static>);
 
 impl UnsafeCallback {
+    #[allow(clippy::type_complexity)]
     fn from(boxed: &mut Box<Box<dyn for<'a> FnMut(&'a EspEventFetchData) + 'static>>) -> Self {
         Self(boxed.as_mut())
     }
@@ -196,6 +205,7 @@ where
     handler_instance: esp_event_handler_instance_t,
     source: *const c_types::c_char,
     event_id: i32,
+    #[allow(clippy::type_complexity)]
     _callback: Box<Box<dyn for<'a> FnMut(&'a EspEventFetchData) + 'static>>,
 }
 
@@ -340,6 +350,7 @@ impl<T> EspEventLoop<T>
 where
     T: EspEventLoopType,
 {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn subscribe_raw(
         &mut self,
         source: *const c_types::c_char,
