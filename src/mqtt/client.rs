@@ -548,6 +548,7 @@ impl<'a> client::Message for EspMqttMessage<'a> {
     }
 }
 
+#[allow("suspicious-auto-trait-impls")]
 unsafe impl Send for Newtype<esp_mqtt_event_handle_t> {}
 
 struct EspMqttConnectionState {
