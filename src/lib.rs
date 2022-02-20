@@ -17,10 +17,8 @@ extern crate alloc;
     esp_idf_eth_use_openeth
 ))]
 pub mod eth;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
+#[cfg(feature = "alloc")]
 pub mod eventloop;
-#[cfg(all(not(feature = "experimental"), feature = "alloc"))]
-mod eventloop;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
 pub mod http;
 #[cfg(all(feature = "std", esp_idf_comp_esp_http_server_enabled))]
@@ -29,7 +27,7 @@ pub mod httpd;
 #[cfg(feature = "alloc")]
 // TODO: Ideally should not need "alloc" (also for performance reasons)
 pub mod log;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
+#[cfg(all(feature = "alloc", esp_idf_comp_mqtt_enabled))]
 pub mod mqtt;
 #[cfg(esp_idf_config_lwip_ipv4_napt)]
 pub mod napt;
@@ -53,7 +51,7 @@ pub mod ping;
 pub mod sntp;
 pub mod sysloop;
 pub mod systime;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
+#[cfg(feature = "alloc")]
 pub mod timer;
 #[cfg(feature = "alloc")] // TODO: Expose a subset which does not require "alloc"
 pub mod wifi;

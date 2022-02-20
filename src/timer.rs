@@ -2,12 +2,16 @@ use core::ptr;
 use core::result::Result;
 use core::time::Duration;
 
+extern crate alloc;
+use alloc::boxed::Box;
+
 use embedded_svc::service;
 use embedded_svc::timer::{self, OnceTimer, PeriodicTimer, Timer, TimerService};
-use embedded_svc::utils::nonblocking::timer::AsyncTimerService;
-use embedded_svc::utils::nonblocking::Asyncify;
 
 use esp_idf_sys::*;
+
+#[cfg(feature = "experimental")]
+pub use nonblocking::*;
 
 struct UnsafeCallback(*mut Box<dyn FnMut()>);
 
@@ -94,16 +98,20 @@ impl PeriodicTimer for EspTimer {
 
 pub struct EspTimerService(());
 
+impl EspTimerService {
+    pub fn new() -> Result<Self, EspError> {
+        Ok(Self(()))
+    }
+}
+
 impl Clone for EspTimerService {
     fn clone(&self) -> Self {
         Self(())
     }
 }
 
-impl EspTimerService {
-    pub fn new() -> Result<Self, EspError> {
-        Ok(Self(()))
-    }
+impl service::Service for EspTimerService {
+    type Error = EspError;
 }
 
 impl TimerService for EspTimerService {
@@ -137,10 +145,12 @@ impl TimerService for EspTimerService {
     }
 }
 
-impl service::Service for EspTimerService {
-    type Error = EspError;
-}
+#[cfg(feature = "experimental")]
+mod nonblocking {
+    use embedded_svc::utils::nonblocking::timer::AsyncTimerService;
+    use embedded_svc::utils::nonblocking::Asyncify;
 
-impl Asyncify for EspTimerService {
-    type AsyncWrapper<S> = AsyncTimerService<S>;
+    impl Asyncify for super::EspTimerService {
+        type AsyncWrapper<S> = AsyncTimerService<S>;
+    }
 }

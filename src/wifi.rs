@@ -1,3 +1,4 @@
+use core::cell::UnsafeCell;
 use core::cmp;
 use core::ptr;
 use core::time::Duration;
@@ -20,15 +21,16 @@ use esp_idf_hal::mutex;
 
 use esp_idf_sys::*;
 
-use crate::eventloop::EspSubscription;
-use crate::eventloop::System;
+use crate::eventloop::{EspSubscription, EspTypedEventDeserializer, EspTypedEventSource, System};
 use crate::netif::*;
 use crate::nvs::EspDefaultNvs;
-use crate::sysloop::*;
-
 use crate::private::common::*;
 use crate::private::cstr::*;
 use crate::private::waitable::*;
+use crate::sysloop::*;
+
+#[cfg(feature = "experimental")]
+pub use nonblocking::*;
 
 const MAX_AP: usize = 20;
 
@@ -183,212 +185,6 @@ impl From<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
             signal_strength: a.rssi as u8,
             protocols: EnumSet::<Protocol>::empty(), // TODO
             auth_method: AuthMethod::from(Newtype::<wifi_auth_mode_t>(a.authmode)),
-        }
-    }
-}
-
-#[cfg(feature = "experimental")]
-pub use events::*;
-
-#[cfg(not(feature = "experimental"))]
-use events::*;
-
-mod events {
-    use core::cell::UnsafeCell;
-
-    extern crate alloc;
-    use alloc::sync::Arc;
-
-    use embedded_svc::event_bus::EventBus;
-    use embedded_svc::utils::nonblocking::{event_bus::Channel, Asyncify};
-    use embedded_svc::wifi::Wifi;
-
-    use esp_idf_hal::mutex::Condvar;
-
-    use esp_idf_sys::*;
-
-    use crate::eventloop::{
-        EspSubscription, EspTypedEventDeserializer, EspTypedEventSource, System,
-    };
-    use crate::netif::IpEvent;
-    use crate::private::common::UnsafeCellSendSync;
-
-    use super::EspWifi;
-
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    pub enum WifiEvent {
-        Ready,
-
-        ScanStarted,
-        ScanDone,
-
-        StaStarted,
-        StaStopped,
-        StaConnected,
-        StaDisconnected,
-        StaAuthmodeChanged,
-        StaBssRssiLow,
-        StaBeaconTimeout,
-        StaWpsSuccess,
-        StaWpsFailed,
-        StaWpsTimeout,
-        StaWpsPin,
-        StaWpsPbcOverlap,
-
-        ApStarted,
-        ApStopped,
-        ApStaConnected,
-        ApStaDisconnected,
-        ApProbeRequestReceived,
-
-        FtmReport,
-        ActionTxStatus,
-        RocDone,
-    }
-
-    impl EspTypedEventSource for WifiEvent {
-        fn source() -> *const c_types::c_char {
-            unsafe { WIFI_EVENT }
-        }
-    }
-
-    impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
-        #[allow(non_upper_case_globals, non_snake_case)]
-        fn deserialize<R>(
-            data: &crate::eventloop::EspEventFetchData,
-            f: &mut impl for<'a> FnMut(&'a WifiEvent) -> R,
-        ) -> R {
-            let event_id = data.event_id as u32;
-
-            let event = if event_id == wifi_event_t_WIFI_EVENT_WIFI_READY {
-                WifiEvent::Ready
-            } else if event_id == wifi_event_t_WIFI_EVENT_SCAN_DONE {
-                WifiEvent::ScanDone
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_START {
-                WifiEvent::StaStarted
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_STOP {
-                WifiEvent::StaStopped
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_CONNECTED {
-                WifiEvent::StaConnected
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_DISCONNECTED {
-                WifiEvent::StaDisconnected
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE {
-                WifiEvent::StaAuthmodeChanged
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS {
-                WifiEvent::StaWpsSuccess
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
-                WifiEvent::StaWpsFailed
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT {
-                WifiEvent::StaWpsTimeout
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN {
-                WifiEvent::StaWpsPin
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
-                WifiEvent::StaWpsPbcOverlap
-            } else if event_id == wifi_event_t_WIFI_EVENT_AP_START {
-                WifiEvent::ApStarted
-            } else if event_id == wifi_event_t_WIFI_EVENT_AP_STOP {
-                WifiEvent::ApStopped
-            } else if event_id == wifi_event_t_WIFI_EVENT_AP_STACONNECTED {
-                WifiEvent::ApStaConnected
-            } else if event_id == wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED {
-                WifiEvent::ApStaDisconnected
-            } else if event_id == wifi_event_t_WIFI_EVENT_AP_PROBEREQRECVED {
-                WifiEvent::ApProbeRequestReceived
-            } else if event_id == wifi_event_t_WIFI_EVENT_FTM_REPORT {
-                WifiEvent::FtmReport
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_BSS_RSSI_LOW {
-                WifiEvent::StaBssRssiLow
-            } else if event_id == wifi_event_t_WIFI_EVENT_ACTION_TX_STATUS {
-                WifiEvent::ActionTxStatus
-            } else if event_id == wifi_event_t_WIFI_EVENT_STA_BEACON_TIMEOUT {
-                WifiEvent::StaBeaconTimeout
-            } else {
-                panic!("Unknown event ID: {}", event_id);
-            };
-
-            f(&event)
-        }
-    }
-
-    impl Asyncify for EspWifi {
-        type AsyncWrapper<S> = Channel<(), Condvar, S>;
-    }
-
-    impl EventBus<()> for EspWifi {
-        type Subscription = (EspSubscription<System>, EspSubscription<System>);
-
-        fn subscribe(
-            &mut self,
-            callback: impl for<'a> FnMut(&'a ()) + Send + 'static,
-        ) -> Result<Self::Subscription, Self::Error> {
-            let wifi_cb = Arc::new(UnsafeCellSendSync(UnsafeCell::new(callback)));
-            let wifi_last_status = Arc::new(UnsafeCellSendSync(UnsafeCell::new(self.get_status())));
-            let wifi_waitable = self.waitable.clone();
-
-            let ip_cb = wifi_cb.clone();
-            let ip_last_status = wifi_last_status.clone();
-            let ip_waitable = wifi_waitable.clone();
-
-            let subscription1 =
-                self.sys_loop_stack
-                    .get_loop()
-                    .clone()
-                    .subscribe(move |_event: &WifiEvent| {
-                        let notify = {
-                            let shared = wifi_waitable.state.lock();
-
-                            let last_status_ref =
-                                unsafe { wifi_last_status.0.get().as_mut().unwrap() };
-
-                            if *last_status_ref != shared.status {
-                                *last_status_ref = shared.status.clone();
-
-                                true
-                            } else {
-                                false
-                            }
-                        };
-
-                        if notify {
-                            let cb_ref = unsafe { wifi_cb.0.get().as_mut().unwrap() };
-
-                            (cb_ref)(&());
-                        }
-                    })?;
-
-            let subscription2 =
-                self.sys_loop_stack
-                    .get_loop()
-                    .clone()
-                    .subscribe(move |event: &IpEvent| {
-                        let notify = {
-                            let shared = ip_waitable.state.lock();
-
-                            if shared.is_our_sta_ip_event(event) || shared.is_our_ap_ip_event(event)
-                            {
-                                let last_status_ref =
-                                    unsafe { ip_last_status.0.get().as_mut().unwrap() };
-
-                                if *last_status_ref != shared.status {
-                                    *last_status_ref = shared.status.clone();
-
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        };
-
-                        if notify {
-                            let cb_ref = unsafe { ip_cb.0.get().as_mut().unwrap() };
-
-                            (cb_ref)(&());
-                        }
-                    })?;
-
-            Ok((subscription1, subscription2))
         }
     }
 }
@@ -1007,8 +803,6 @@ impl Service for EspWifi {
 }
 
 impl Wifi for EspWifi {
-    type Error = EspError;
-
     fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
         let caps = Capability::Client | Capability::AccessPoint | Capability::Mixed;
 
@@ -1143,5 +937,187 @@ impl Wifi for EspWifi {
         info!("Configuration set");
 
         Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum WifiEvent {
+    Ready,
+
+    ScanStarted,
+    ScanDone,
+
+    StaStarted,
+    StaStopped,
+    StaConnected,
+    StaDisconnected,
+    StaAuthmodeChanged,
+    StaBssRssiLow,
+    StaBeaconTimeout,
+    StaWpsSuccess,
+    StaWpsFailed,
+    StaWpsTimeout,
+    StaWpsPin,
+    StaWpsPbcOverlap,
+
+    ApStarted,
+    ApStopped,
+    ApStaConnected,
+    ApStaDisconnected,
+    ApProbeRequestReceived,
+
+    FtmReport,
+    ActionTxStatus,
+    RocDone,
+}
+
+impl EspTypedEventSource for WifiEvent {
+    fn source() -> *const c_types::c_char {
+        unsafe { WIFI_EVENT }
+    }
+}
+
+impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
+    #[allow(non_upper_case_globals, non_snake_case)]
+    fn deserialize<R>(
+        data: &crate::eventloop::EspEventFetchData,
+        f: &mut impl for<'a> FnMut(&'a WifiEvent) -> R,
+    ) -> R {
+        let event_id = data.event_id as u32;
+
+        let event = if event_id == wifi_event_t_WIFI_EVENT_WIFI_READY {
+            WifiEvent::Ready
+        } else if event_id == wifi_event_t_WIFI_EVENT_SCAN_DONE {
+            WifiEvent::ScanDone
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_START {
+            WifiEvent::StaStarted
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_STOP {
+            WifiEvent::StaStopped
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_CONNECTED {
+            WifiEvent::StaConnected
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_DISCONNECTED {
+            WifiEvent::StaDisconnected
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE {
+            WifiEvent::StaAuthmodeChanged
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS {
+            WifiEvent::StaWpsSuccess
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
+            WifiEvent::StaWpsFailed
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT {
+            WifiEvent::StaWpsTimeout
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN {
+            WifiEvent::StaWpsPin
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
+            WifiEvent::StaWpsPbcOverlap
+        } else if event_id == wifi_event_t_WIFI_EVENT_AP_START {
+            WifiEvent::ApStarted
+        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STOP {
+            WifiEvent::ApStopped
+        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STACONNECTED {
+            WifiEvent::ApStaConnected
+        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED {
+            WifiEvent::ApStaDisconnected
+        } else if event_id == wifi_event_t_WIFI_EVENT_AP_PROBEREQRECVED {
+            WifiEvent::ApProbeRequestReceived
+        } else if event_id == wifi_event_t_WIFI_EVENT_FTM_REPORT {
+            WifiEvent::FtmReport
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_BSS_RSSI_LOW {
+            WifiEvent::StaBssRssiLow
+        } else if event_id == wifi_event_t_WIFI_EVENT_ACTION_TX_STATUS {
+            WifiEvent::ActionTxStatus
+        } else if event_id == wifi_event_t_WIFI_EVENT_STA_BEACON_TIMEOUT {
+            WifiEvent::StaBeaconTimeout
+        } else {
+            panic!("Unknown event ID: {}", event_id);
+        };
+
+        f(&event)
+    }
+}
+
+impl EventBus<()> for EspWifi {
+    type Subscription = (EspSubscription<System>, EspSubscription<System>);
+
+    fn subscribe(
+        &mut self,
+        callback: impl for<'a> FnMut(&'a ()) + Send + 'static,
+    ) -> Result<Self::Subscription, Self::Error> {
+        let wifi_cb = Arc::new(UnsafeCellSendSync(UnsafeCell::new(callback)));
+        let wifi_last_status = Arc::new(UnsafeCellSendSync(UnsafeCell::new(self.get_status())));
+        let wifi_waitable = self.waitable.clone();
+
+        let ip_cb = wifi_cb.clone();
+        let ip_last_status = wifi_last_status.clone();
+        let ip_waitable = wifi_waitable.clone();
+
+        let subscription1 =
+            self.sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |_event: &WifiEvent| {
+                    let notify = {
+                        let shared = wifi_waitable.state.lock();
+
+                        let last_status_ref = unsafe { wifi_last_status.0.get().as_mut().unwrap() };
+
+                        if *last_status_ref != shared.status {
+                            *last_status_ref = shared.status.clone();
+
+                            true
+                        } else {
+                            false
+                        }
+                    };
+
+                    if notify {
+                        let cb_ref = unsafe { wifi_cb.0.get().as_mut().unwrap() };
+
+                        (cb_ref)(&());
+                    }
+                })?;
+
+        let subscription2 =
+            self.sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |event: &IpEvent| {
+                    let notify = {
+                        let shared = ip_waitable.state.lock();
+
+                        if shared.is_our_sta_ip_event(event) || shared.is_our_ap_ip_event(event) {
+                            let last_status_ref =
+                                unsafe { ip_last_status.0.get().as_mut().unwrap() };
+
+                            if *last_status_ref != shared.status {
+                                *last_status_ref = shared.status.clone();
+
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    if notify {
+                        let cb_ref = unsafe { ip_cb.0.get().as_mut().unwrap() };
+
+                        (cb_ref)(&());
+                    }
+                })?;
+
+        Ok((subscription1, subscription2))
+    }
+}
+
+#[cfg(feature = "experimental")]
+mod nonblocking {
+    use embedded_svc::utils::nonblocking::{event_bus::Channel, Asyncify};
+
+    use esp_idf_hal::mutex::Condvar;
+
+    impl Asyncify for super::EspWifi {
+        type AsyncWrapper<S> = Channel<(), Condvar, S>;
     }
 }

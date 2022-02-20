@@ -1,3 +1,4 @@
+use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::ptr;
 use core::time::Duration;
@@ -14,12 +15,6 @@ use embedded_svc::event_bus::EventBus;
 use embedded_svc::ipv4;
 use embedded_svc::service::Service;
 
-use esp_idf_sys::*;
-
-use crate::eventloop::EspSubscription;
-use crate::eventloop::System;
-use crate::private::waitable::*;
-
 #[cfg(any(
     all(esp32, esp_idf_eth_use_esp32_emac),
     any(
@@ -29,7 +24,6 @@ use crate::private::waitable::*;
     )
 ))]
 use esp_idf_hal::gpio;
-
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
     esp_idf_eth_spi_ethernet_w5500,
@@ -37,175 +31,16 @@ use esp_idf_hal::gpio;
 ))]
 use esp_idf_hal::{spi, units::Hertz};
 
+use esp_idf_sys::*;
+
+use crate::eventloop::{EspSubscription, EspTypedEventDeserializer, EspTypedEventSource, System};
 use crate::netif::*;
+use crate::private::common::UnsafeCellSendSync;
+use crate::private::waitable::*;
 use crate::sysloop::*;
 
 #[cfg(feature = "experimental")]
-pub use events::*;
-
-#[cfg(not(feature = "experimental"))]
-use events::*;
-
-mod events {
-    use core::cell::UnsafeCell;
-
-    extern crate alloc;
-    use alloc::sync::Arc;
-
-    use embedded_svc::eth::Eth;
-    use embedded_svc::event_bus::EventBus;
-    use embedded_svc::utils::nonblocking::{event_bus::Channel, Asyncify};
-
-    use esp_idf_hal::mutex::Condvar;
-
-    use esp_idf_sys::*;
-
-    use crate::eventloop::{
-        EspSubscription, EspTypedEventDeserializer, EspTypedEventSource, System,
-    };
-    use crate::netif::IpEvent;
-    use crate::private::common::UnsafeCellSendSync;
-
-    use super::EspEth;
-
-    type EthHandle = *const core::ffi::c_void;
-
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    pub enum EthEvent {
-        Started(EthHandle),
-        Stopped(EthHandle),
-        Connected(EthHandle),
-        Disconnected(EthHandle),
-    }
-
-    impl EthEvent {
-        pub fn handle(&self) -> EthHandle {
-            match self {
-                Self::Started(handle) => *handle,
-                Self::Stopped(handle) => *handle,
-                Self::Connected(handle) => *handle,
-                Self::Disconnected(handle) => *handle,
-            }
-        }
-    }
-
-    impl EspTypedEventSource for EthEvent {
-        fn source() -> *const c_types::c_char {
-            unsafe { ETH_EVENT }
-        }
-    }
-
-    impl EspTypedEventDeserializer<EthEvent> for EthEvent {
-        #[allow(non_upper_case_globals, non_snake_case)]
-        fn deserialize<R>(
-            data: &crate::eventloop::EspEventFetchData,
-            f: &mut impl for<'a> FnMut(&'a EthEvent) -> R,
-        ) -> R {
-            let eth_handle_ref = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() };
-
-            let event_id = data.event_id as u32;
-
-            let event = if event_id == eth_event_t_ETHERNET_EVENT_START {
-                EthEvent::Started(*eth_handle_ref.unwrap() as _)
-            } else if event_id == eth_event_t_ETHERNET_EVENT_STOP {
-                EthEvent::Stopped(*eth_handle_ref.unwrap() as _)
-            } else if event_id == eth_event_t_ETHERNET_EVENT_CONNECTED {
-                EthEvent::Connected(*eth_handle_ref.unwrap() as _)
-            } else if event_id == eth_event_t_ETHERNET_EVENT_DISCONNECTED {
-                EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
-            } else {
-                panic!("Unknown event ID: {}", event_id);
-            };
-
-            f(&event)
-        }
-    }
-
-    impl<P> Asyncify for EspEth<P> {
-        type AsyncWrapper<S> = Channel<(), Condvar, S>;
-    }
-
-    impl<P> EventBus<()> for EspEth<P> {
-        type Subscription = (EspSubscription<System>, EspSubscription<System>);
-
-        fn subscribe(
-            &mut self,
-            callback: impl for<'a> FnMut(&'a ()) + Send + 'static,
-        ) -> Result<Self::Subscription, Self::Error> {
-            let eth_cb = Arc::new(UnsafeCellSendSync(UnsafeCell::new(callback)));
-            let eth_last_status = Arc::new(UnsafeCellSendSync(UnsafeCell::new(self.get_status())));
-            let eth_waitable = self.waitable.clone();
-
-            let ip_cb = eth_cb.clone();
-            let ip_last_status = eth_last_status.clone();
-            let ip_waitable = eth_waitable.clone();
-
-            let subscription1 =
-                self.sys_loop_stack
-                    .get_loop()
-                    .clone()
-                    .subscribe(move |event: &EthEvent| {
-                        let notify = {
-                            let shared = eth_waitable.state.lock();
-
-                            if shared.is_our_eth_event(event) {
-                                let last_status_ref =
-                                    unsafe { eth_last_status.0.get().as_mut().unwrap() };
-
-                                if *last_status_ref != shared.status {
-                                    *last_status_ref = shared.status.clone();
-
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        };
-
-                        if notify {
-                            let cb_ref = unsafe { eth_cb.0.get().as_mut().unwrap() };
-
-                            (cb_ref)(&());
-                        }
-                    })?;
-
-            let subscription2 =
-                self.sys_loop_stack
-                    .get_loop()
-                    .clone()
-                    .subscribe(move |event: &IpEvent| {
-                        let notify = {
-                            let shared = ip_waitable.state.lock();
-
-                            if shared.is_our_ip_event(event) {
-                                let last_status_ref =
-                                    unsafe { ip_last_status.0.get().as_mut().unwrap() };
-
-                                if *last_status_ref != shared.status {
-                                    *last_status_ref = shared.status.clone();
-
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        };
-
-                        if notify {
-                            let cb_ref = unsafe { ip_cb.0.get().as_mut().unwrap() };
-
-                            (cb_ref)(&());
-                        }
-                    })?;
-
-            Ok((subscription1, subscription2))
-        }
-    }
-}
+pub use nonblocking::*;
 
 #[cfg(all(esp32, esp_idf_eth_use_esp32_emac))]
 // TODO: #[derive(Debug)]
@@ -1022,8 +857,6 @@ impl<P> Service for EspEth<P> {
 }
 
 impl<P> Eth for EspEth<P> {
-    type Error = EspError;
-
     fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
         let caps = Capability::Client | Capability::Router;
 
@@ -1070,5 +903,148 @@ impl<P> Eth for EspEth<P> {
         info!("Configuration set");
 
         Ok(())
+    }
+}
+
+pub type EthHandle = *const core::ffi::c_void;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum EthEvent {
+    Started(EthHandle),
+    Stopped(EthHandle),
+    Connected(EthHandle),
+    Disconnected(EthHandle),
+}
+
+impl EthEvent {
+    pub fn handle(&self) -> EthHandle {
+        match self {
+            Self::Started(handle) => *handle,
+            Self::Stopped(handle) => *handle,
+            Self::Connected(handle) => *handle,
+            Self::Disconnected(handle) => *handle,
+        }
+    }
+}
+
+impl EspTypedEventSource for EthEvent {
+    fn source() -> *const c_types::c_char {
+        unsafe { ETH_EVENT }
+    }
+}
+
+impl EspTypedEventDeserializer<EthEvent> for EthEvent {
+    #[allow(non_upper_case_globals, non_snake_case)]
+    fn deserialize<R>(
+        data: &crate::eventloop::EspEventFetchData,
+        f: &mut impl for<'a> FnMut(&'a EthEvent) -> R,
+    ) -> R {
+        let eth_handle_ref = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() };
+
+        let event_id = data.event_id as u32;
+
+        let event = if event_id == eth_event_t_ETHERNET_EVENT_START {
+            EthEvent::Started(*eth_handle_ref.unwrap() as _)
+        } else if event_id == eth_event_t_ETHERNET_EVENT_STOP {
+            EthEvent::Stopped(*eth_handle_ref.unwrap() as _)
+        } else if event_id == eth_event_t_ETHERNET_EVENT_CONNECTED {
+            EthEvent::Connected(*eth_handle_ref.unwrap() as _)
+        } else if event_id == eth_event_t_ETHERNET_EVENT_DISCONNECTED {
+            EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
+        } else {
+            panic!("Unknown event ID: {}", event_id);
+        };
+
+        f(&event)
+    }
+}
+
+impl<P> EventBus<()> for EspEth<P> {
+    type Subscription = (EspSubscription<System>, EspSubscription<System>);
+
+    fn subscribe(
+        &mut self,
+        callback: impl for<'a> FnMut(&'a ()) + Send + 'static,
+    ) -> Result<Self::Subscription, Self::Error> {
+        let eth_cb = Arc::new(UnsafeCellSendSync(UnsafeCell::new(callback)));
+        let eth_last_status = Arc::new(UnsafeCellSendSync(UnsafeCell::new(self.get_status())));
+        let eth_waitable = self.waitable.clone();
+
+        let ip_cb = eth_cb.clone();
+        let ip_last_status = eth_last_status.clone();
+        let ip_waitable = eth_waitable.clone();
+
+        let subscription1 =
+            self.sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |event: &EthEvent| {
+                    let notify = {
+                        let shared = eth_waitable.state.lock();
+
+                        if shared.is_our_eth_event(event) {
+                            let last_status_ref =
+                                unsafe { eth_last_status.0.get().as_mut().unwrap() };
+
+                            if *last_status_ref != shared.status {
+                                *last_status_ref = shared.status.clone();
+
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    if notify {
+                        let cb_ref = unsafe { eth_cb.0.get().as_mut().unwrap() };
+
+                        (cb_ref)(&());
+                    }
+                })?;
+
+        let subscription2 =
+            self.sys_loop_stack
+                .get_loop()
+                .clone()
+                .subscribe(move |event: &IpEvent| {
+                    let notify = {
+                        let shared = ip_waitable.state.lock();
+
+                        if shared.is_our_ip_event(event) {
+                            let last_status_ref =
+                                unsafe { ip_last_status.0.get().as_mut().unwrap() };
+
+                            if *last_status_ref != shared.status {
+                                *last_status_ref = shared.status.clone();
+
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    if notify {
+                        let cb_ref = unsafe { ip_cb.0.get().as_mut().unwrap() };
+
+                        (cb_ref)(&());
+                    }
+                })?;
+
+        Ok((subscription1, subscription2))
+    }
+}
+
+#[cfg(feature = "experimental")]
+mod nonblocking {
+    use embedded_svc::utils::nonblocking::{event_bus::Channel, Asyncify};
+
+    impl<P> Asyncify for super::EspEth<P> {
+        type AsyncWrapper<S> = Channel<(), esp_idf_hal::mutex::Condvar, S>;
     }
 }

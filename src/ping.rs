@@ -4,6 +4,7 @@ use ::log::*;
 
 use embedded_svc::ipv4;
 use embedded_svc::ping::*;
+use embedded_svc::service::Service;
 
 use esp_idf_sys::*;
 
@@ -254,9 +255,11 @@ impl EspPing {
     }
 }
 
-impl Ping for EspPing {
+impl Service for EspPing {
     type Error = EspError;
+}
 
+impl Ping for EspPing {
     fn ping(&mut self, ip: ipv4::Ipv4Addr, conf: &Configuration) -> Result<Summary, Self::Error> {
         info!(
             "About to run a summary ping {} with configuration {:?}",

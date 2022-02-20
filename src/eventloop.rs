@@ -7,21 +7,23 @@ use core::time::Duration;
 use std::ptr::NonNull;
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use ::log::*;
-use embedded_svc::utils::nonblocking::event_bus::Channel;
 
-use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
 use embedded_svc::{event_bus, service};
 
 use esp_idf_hal::cpu::Core;
 use esp_idf_hal::delay::TickType;
-use esp_idf_hal::mutex::{self, Condvar};
+use esp_idf_hal::mutex;
 
 use esp_idf_sys::*;
 
 use crate::private::cstr::RawCstrs;
+
+#[cfg(feature = "experimental")]
+pub use nonblocking::*;
 
 pub type EspSystemSubscription = EspSubscription<System>;
 pub type EspBackgroundSubscription = EspSubscription<User<Background>>;
@@ -542,20 +544,6 @@ pub trait EspTypedEventDeserializer<P>: EspTypedEventSource {
     fn deserialize<R>(data: &EspEventFetchData, f: &mut impl for<'a> FnMut(&'a P) -> R) -> R;
 }
 
-impl<T> Asyncify for EspEventLoop<T>
-where
-    T: EspEventLoopType,
-{
-    type AsyncWrapper<S> = Channel<(), Condvar, S>;
-}
-
-impl<T> UnblockingAsyncify for EspEventLoop<T>
-where
-    T: EspEventLoopType,
-{
-    type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
-}
-
 impl<P, T> event_bus::Postbox<P> for EspEventLoop<T>
 where
     P: EspTypedEventSerializer<P>,
@@ -652,14 +640,6 @@ where
     L: service::Service,
 {
     type Error = L::Error;
-}
-
-impl<M, P, L> Asyncify for EspTypedEventLoop<M, P, L> {
-    type AsyncWrapper<S> = Channel<(), Condvar, S>;
-}
-
-impl<M, P, L> UnblockingAsyncify for EspTypedEventLoop<M, P, L> {
-    type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
 }
 
 impl<M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, EspEventLoop<T>>
@@ -782,5 +762,35 @@ where
             M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
             move |raw_event| M::deserialize(raw_event, &mut callback),
         )
+    }
+}
+
+#[cfg(feature = "experimental")]
+mod nonblocking {
+    use embedded_svc::utils::nonblocking::event_bus::Channel;
+    use embedded_svc::utils::nonblocking::{Asyncify, UnblockingAsyncify};
+
+    use esp_idf_hal::mutex::Condvar;
+
+    impl<T> Asyncify for super::EspEventLoop<T>
+    where
+        T: super::EspEventLoopType,
+    {
+        type AsyncWrapper<S> = Channel<(), Condvar, S>;
+    }
+
+    impl<T> UnblockingAsyncify for super::EspEventLoop<T>
+    where
+        T: super::EspEventLoopType,
+    {
+        type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
+    }
+
+    impl<M, P, L> Asyncify for super::EspTypedEventLoop<M, P, L> {
+        type AsyncWrapper<S> = Channel<(), Condvar, S>;
+    }
+
+    impl<M, P, L> UnblockingAsyncify for super::EspTypedEventLoop<M, P, L> {
+        type AsyncWrapper<U, S> = Channel<U, Condvar, S>;
     }
 }

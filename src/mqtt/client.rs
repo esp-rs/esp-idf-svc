@@ -7,7 +7,6 @@ use std::mem::ManuallyDrop;
 extern crate alloc;
 use alloc::{borrow::Cow, sync::Arc};
 
-use embedded_svc::nonblocking::Unblocker;
 use embedded_svc::{mqtt::client, service};
 
 use esp_idf_hal::mutex::{Condvar, Mutex};
@@ -217,40 +216,6 @@ impl EspMqttClient {
         Ok((client, connection))
     }
 
-    pub fn new_async<'a, U, S>(
-        url: S,
-        conf: &'a MqttClientConfiguration<'a>,
-    ) -> Result<
-        (
-            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient<U, Mutex<Self>>,
-            embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection<
-                Condvar,
-                EspMqttMessage,
-                EspError,
-            >,
-        ),
-        EspError,
-    >
-    where
-        U: Unblocker,
-        S: AsRef<str>,
-    {
-        let connection = embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection::<
-            Condvar,
-            _,
-            EspError,
-        >::new();
-
-        let cb_connection = connection.clone();
-
-        let client = Self::new_with_callback(url, conf, move |event| cb_connection.post(event))?;
-
-        Ok((
-            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient::new(client),
-            connection,
-        ))
-    }
-
     pub fn new_with_callback<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
@@ -337,6 +302,43 @@ impl EspMqttClient {
         }
 
         Ok(result as _)
+    }
+}
+
+#[cfg(feature = "experimental")]
+impl EspMqttClient {
+    pub fn new_async<'a, U, S>(
+        url: S,
+        conf: &'a MqttClientConfiguration<'a>,
+    ) -> Result<
+        (
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient<U, Mutex<Self>>,
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection<
+                Condvar,
+                EspMqttMessage,
+                EspError,
+            >,
+        ),
+        EspError,
+    >
+    where
+        U: embedded_svc::unblocker::nonblocking::Unblocker,
+        S: AsRef<str>,
+    {
+        let connection = embedded_svc::utils::nonblocking::mqtt::client::AsyncConnection::<
+            Condvar,
+            _,
+            EspError,
+        >::new();
+
+        let cb_connection = connection.clone();
+
+        let client = Self::new_with_callback(url, conf, move |event| cb_connection.post(event))?;
+
+        Ok((
+            embedded_svc::utils::nonblocking::mqtt::client::AsyncClient::new(client),
+            connection,
+        ))
     }
 }
 
