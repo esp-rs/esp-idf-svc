@@ -495,7 +495,7 @@ impl EspWifi {
         Ok(())
     }
 
-    fn wait_status(&self, matcher: impl Fn(&Status) -> bool) {
+    pub fn wait_status(&self, matcher: impl Fn(&Status) -> bool) {
         info!("About to wait for status");
 
         self.waitable.wait_while(|shared| !matcher(&shared.status));
@@ -503,7 +503,7 @@ impl EspWifi {
         info!("Waiting for status done - success");
     }
 
-    fn wait_status_with_timeout(
+    pub fn wait_status_with_timeout(
         &self,
         dur: Duration,
         matcher: impl Fn(&Status) -> bool,
@@ -931,8 +931,7 @@ impl Wifi for EspWifi {
             }
         };
 
-        // TODO: Remove the wait to make the API completely async
-        self.start(status, Some(Duration::from_secs(10)))?;
+        self.start(status, None)?;
 
         info!("Configuration set");
 
