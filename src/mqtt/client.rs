@@ -139,9 +139,9 @@ impl<'a> From<&MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCs
 
         if let Some(keep_alive_interval) = conf.keep_alive_interval {
             c_conf.keepalive = keep_alive_interval.as_secs() as _;
-            c_conf.disable_keepalive = false as _;
+            c_conf.disable_keepalive = false;
         } else {
-            c_conf.disable_keepalive = true as _;
+            c_conf.disable_keepalive = true;
         }
 
         if let Some(reconnect_timeout) = conf.reconnect_timeout {
@@ -548,7 +548,7 @@ impl<'a> client::Message for EspMqttMessage<'a> {
     }
 }
 
-#[allow(clippy::suspicious_auto_trait_impls)]
+#[allow(suspicious_auto_trait_impls)]
 unsafe impl Send for Newtype<esp_mqtt_event_handle_t> {}
 
 struct EspMqttConnectionState {
