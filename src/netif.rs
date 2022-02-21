@@ -359,10 +359,7 @@ impl EspNetif {
     pub fn get_mac(&self) -> Result<[u8; 6], EspError> {
         let mut mac = [0u8; 6];
 
-        match esp!(unsafe { esp_netif_get_mac(self.1, mac.as_mut_ptr() as *mut _) }) {
-            Ok(_) => {},
-            Err(err) => return Err(err)
-        }
+        esp!(unsafe { esp_netif_get_mac(self.1, mac.as_mut_ptr() as *mut _) })?;
         Ok(mac)
     }
 
