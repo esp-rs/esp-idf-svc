@@ -1,13 +1,12 @@
 use log::info;
 
-use esp_idf_sys::*;
 use esp_idf_hal::mutex::Mutex;
+use esp_idf_sys::*;
 
 static RECV_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], &[u8]) + Send>>> = Mutex::new(None);
 static SEND_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], SendStatus) + Send>>> = Mutex::new(None);
 
-
-pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; 
+pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -20,7 +19,7 @@ impl From<u32> for SendStatus {
         match val {
             0 => SendStatus::SUCCESS,
             1 => SendStatus::FAIL,
-            _ => panic!("Wrong status code")
+            _ => panic!("Wrong status code"),
         }
     }
 }
@@ -34,11 +33,10 @@ struct PrivateData;
 pub struct EspNowClient(PrivateData);
 
 impl EspNowClient {
-
     pub fn new() -> Result<Self, EspError> {
         // disable modem sleep, otherwise messages queue up and we're not able
         // to send any esp-now data after a few messages
-        // esp-idf bug report: https://github.com/espressif/esp-idf/issues/7496 
+        // esp-idf bug report: https://github.com/espressif/esp-idf/issues/7496
         esp!(unsafe { esp_wifi_set_ps(0) })?;
 
         info!("Initializing ESP NOW");
@@ -47,7 +45,7 @@ impl EspNowClient {
     }
 
     pub fn new_with_callback(
-        callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send
+        callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send,
     ) -> Result<Self, EspError> {
         let client = Self::new()?;
 
@@ -55,12 +53,14 @@ impl EspNowClient {
         Ok(client)
     }
 
-    pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {    
-        esp!(unsafe { esp_idf_sys::esp_now_send(
-            peer_addr.as_ptr() as *const u8,
-            data.as_ptr() as *const u8,
-            data.len() as size_t,
-        )})?;
+    pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_idf_sys::esp_now_send(
+                peer_addr.as_ptr() as *const u8,
+                data.as_ptr() as *const u8,
+                data.len() as size_t,
+            )
+        })?;
         Ok(())
     }
 
@@ -81,12 +81,17 @@ impl EspNowClient {
 
     pub fn get_peer(&self, peer_addr: [u8; 6]) -> Result<PeerInfo, EspError> {
         let mut peer_info = PeerInfo::default();
-        esp!(unsafe { esp_now_get_peer(&peer_addr as *const u8, &mut peer_info as *mut esp_now_peer_info_t) })?;
+        esp!(unsafe {
+            esp_now_get_peer(
+                &peer_addr as *const u8,
+                &mut peer_info as *mut esp_now_peer_info_t,
+            )
+        })?;
         Ok(peer_info)
     }
 
     pub fn peer_exists(peer_addr: [u8; 6]) -> Result<bool, EspError> {
-        Ok(unsafe{ esp_now_is_peer_exist(&peer_addr as *const u8) })
+        Ok(unsafe { esp_now_is_peer_exist(&peer_addr as *const u8) })
     }
 
     pub fn get_peers_number(&self) -> Result<(usize, usize), EspError> {
@@ -106,7 +111,10 @@ impl EspNowClient {
         Ok(version)
     }
 
-    pub fn register_recv_cb(&self, callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send) -> Result<(), EspError> {
+    pub fn register_recv_cb(
+        &self,
+        callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send,
+    ) -> Result<(), EspError> {
         *RECV_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_recv_cb(Some(Self::recv_callback)) })?;
         Ok(())
@@ -118,7 +126,10 @@ impl EspNowClient {
         Ok(())
     }
 
-    pub fn register_send_cb(&self, callback: impl for<'b, 'c> FnMut(&'b [u8], SendStatus) + 'static + Send) -> Result<(), EspError> {
+    pub fn register_send_cb(
+        &self,
+        callback: impl for<'b, 'c> FnMut(&'b [u8], SendStatus) + 'static + Send,
+    ) -> Result<(), EspError> {
         *SEND_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_send_cb(Some(Self::send_callback)) })?;
         Ok(())
@@ -140,7 +151,11 @@ impl EspNowClient {
         }
     }
 
-    extern "C" fn recv_callback(mac_addr: *const u8, data: *const u8, data_len: c_types::c_int) -> () {
+    extern "C" fn recv_callback(
+        mac_addr: *const u8,
+        data: *const u8,
+        data_len: c_types::c_int,
+    ) -> () {
         let c_mac = unsafe { std::slice::from_raw_parts(mac_addr, 6usize) };
         let c_data = unsafe { std::slice::from_raw_parts(data, data_len as usize) };
 
@@ -156,9 +171,13 @@ impl Drop for EspNowClient {
     fn drop(&mut self) {
         esp!(unsafe { esp_now_deinit() }).unwrap();
         let send_cb = &mut *SEND_CALLBACK.lock();
-        if let Some(_) = send_cb { *send_cb = None; }
-        
+        if let Some(_) = send_cb {
+            *send_cb = None;
+        }
+
         let recv_cb = &mut *RECV_CALLBACK.lock();
-        if let Some(_) = recv_cb { *recv_cb = None; }
+        if let Some(_) = recv_cb {
+            *recv_cb = None;
+        }
     }
 }
