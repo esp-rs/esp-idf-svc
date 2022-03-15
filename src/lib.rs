@@ -72,12 +72,6 @@ pub mod timer;
     esp_idf_comp_esp_netif_enabled
 ))]
 pub mod wifi;
-
-#[cfg(all(
-    feature = "alloc",
-    esp_idf_comp_esp_wifi_enabled,
-    esp_idf_comp_esp_espnow_enabled
-))]
 pub mod espnow;
 
 mod private;
