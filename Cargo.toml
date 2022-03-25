@@ -35,3 +35,8 @@ uncased = { version = "0.9.6", optional = true }
 [build-dependencies]
 embuild = "0.28"
 anyhow = "1"
+
+[patch.crates-io]
+esp-idf-sys = { git = "https://github.com/reitermarkus/esp-idf-sys", branch = "improve-codegen" }
+esp-idf-hal = { git = "https://github.com/reitermarkus/esp-idf-hal", branch = "improve-codegen" }
+ring = { git = "https://github.com/gear-tech/ring.git", branch = "v0.16.20-fix-nightly" }
