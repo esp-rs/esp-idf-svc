@@ -87,42 +87,42 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
     }
 }
 
-impl From<Method> for Newtype<c_types::c_uint> {
+impl From<Method> for Newtype<http_method> {
     fn from(method: Method) -> Self {
         Self(match method {
-            Method::Get => http_method_HTTP_GET,
-            Method::Post => http_method_HTTP_POST,
-            Method::Delete => http_method_HTTP_DELETE,
-            Method::Head => http_method_HTTP_HEAD,
-            Method::Put => http_method_HTTP_PUT,
-            Method::Connect => http_method_HTTP_CONNECT,
-            Method::Options => http_method_HTTP_OPTIONS,
-            Method::Trace => http_method_HTTP_TRACE,
-            Method::Copy => http_method_HTTP_COPY,
-            Method::Lock => http_method_HTTP_LOCK,
-            Method::MkCol => http_method_HTTP_MKCOL,
-            Method::Move => http_method_HTTP_MOVE,
-            Method::Propfind => http_method_HTTP_PROPFIND,
-            Method::Proppatch => http_method_HTTP_PROPPATCH,
-            Method::Search => http_method_HTTP_SEARCH,
-            Method::Unlock => http_method_HTTP_UNLOCK,
-            Method::Bind => http_method_HTTP_BIND,
-            Method::Rebind => http_method_HTTP_REBIND,
-            Method::Unbind => http_method_HTTP_UNBIND,
-            Method::Acl => http_method_HTTP_ACL,
-            Method::Report => http_method_HTTP_REPORT,
-            Method::MkActivity => http_method_HTTP_MKACTIVITY,
-            Method::Checkout => http_method_HTTP_CHECKOUT,
-            Method::Merge => http_method_HTTP_MERGE,
-            Method::MSearch => http_method_HTTP_MSEARCH,
-            Method::Notify => http_method_HTTP_NOTIFY,
-            Method::Subscribe => http_method_HTTP_SUBSCRIBE,
-            Method::Unsubscribe => http_method_HTTP_UNSUBSCRIBE,
-            Method::Patch => http_method_HTTP_PATCH,
-            Method::Purge => http_method_HTTP_PURGE,
-            Method::MkCalendar => http_method_HTTP_MKCALENDAR,
-            Method::Link => http_method_HTTP_LINK,
-            Method::Unlink => http_method_HTTP_UNLINK,
+            Method::Get => http_method::HTTP_GET,
+            Method::Post => http_method::HTTP_POST,
+            Method::Delete => http_method::HTTP_DELETE,
+            Method::Head => http_method::HTTP_HEAD,
+            Method::Put => http_method::HTTP_PUT,
+            Method::Connect => http_method::HTTP_CONNECT,
+            Method::Options => http_method::HTTP_OPTIONS,
+            Method::Trace => http_method::HTTP_TRACE,
+            Method::Copy => http_method::HTTP_COPY,
+            Method::Lock => http_method::HTTP_LOCK,
+            Method::MkCol => http_method::HTTP_MKCOL,
+            Method::Move => http_method::HTTP_MOVE,
+            Method::Propfind => http_method::HTTP_PROPFIND,
+            Method::Proppatch => http_method::HTTP_PROPPATCH,
+            Method::Search => http_method::HTTP_SEARCH,
+            Method::Unlock => http_method::HTTP_UNLOCK,
+            Method::Bind => http_method::HTTP_BIND,
+            Method::Rebind => http_method::HTTP_REBIND,
+            Method::Unbind => http_method::HTTP_UNBIND,
+            Method::Acl => http_method::HTTP_ACL,
+            Method::Report => http_method::HTTP_REPORT,
+            Method::MkActivity => http_method::HTTP_MKACTIVITY,
+            Method::Checkout => http_method::HTTP_CHECKOUT,
+            Method::Merge => http_method::HTTP_MERGE,
+            Method::MSearch => http_method::HTTP_MSEARCH,
+            Method::Notify => http_method::HTTP_NOTIFY,
+            Method::Subscribe => http_method::HTTP_SUBSCRIBE,
+            Method::Unsubscribe => http_method::HTTP_UNSUBSCRIBE,
+            Method::Patch => http_method::HTTP_PATCH,
+            Method::Purge => http_method::HTTP_PURGE,
+            Method::MkCalendar => http_method::HTTP_MKCALENDAR,
+            Method::Link => http_method::HTTP_LINK,
+            Method::Unlink => http_method::HTTP_UNLINK,
         })
     }
 }
@@ -406,7 +406,7 @@ impl Registry for EspHttpServer {
         #[allow(clippy::needless_update)]
         let conf = httpd_uri_t {
             uri: c_str.as_ptr() as _,
-            method: Newtype::<c_types::c_uint>::from(method).0,
+            method: Newtype::<http_method>::from(method).0,
             user_ctx: Box::into_raw(Box::new(self.to_native_handler(handler))) as *mut _,
             handler: Some(EspHttpServer::handle),
             ..Default::default()
@@ -861,12 +861,12 @@ pub mod ws {
         fn create_raw_frame(frame_type: FrameType, frame_data: Option<&[u8]>) -> httpd_ws_frame_t {
             httpd_ws_frame_t {
                 type_: match frame_type {
-                    FrameType::Text(_) => httpd_ws_type_t_HTTPD_WS_TYPE_TEXT,
-                    FrameType::Binary(_) => httpd_ws_type_t_HTTPD_WS_TYPE_BINARY,
-                    FrameType::Ping => httpd_ws_type_t_HTTPD_WS_TYPE_PING,
-                    FrameType::Pong => httpd_ws_type_t_HTTPD_WS_TYPE_PONG,
-                    FrameType::Close => httpd_ws_type_t_HTTPD_WS_TYPE_CLOSE,
-                    FrameType::Continue(_) => httpd_ws_type_t_HTTPD_WS_TYPE_CONTINUE,
+                    FrameType::Text(_) => httpd_ws_type_t::HTTPD_WS_TYPE_TEXT,
+                    FrameType::Binary(_) => httpd_ws_type_t::HTTPD_WS_TYPE_BINARY,
+                    FrameType::Ping => httpd_ws_type_t::HTTPD_WS_TYPE_PING,
+                    FrameType::Pong => httpd_ws_type_t::HTTPD_WS_TYPE_PONG,
+                    FrameType::Close => httpd_ws_type_t::HTTPD_WS_TYPE_CLOSE,
+                    FrameType::Continue(_) => httpd_ws_type_t::HTTPD_WS_TYPE_CONTINUE,
                     FrameType::SocketClose => panic!("Cannot send SocketClose as a frame"),
                 },
                 final_: frame_type.is_partial(),
@@ -952,24 +952,23 @@ pub mod ws {
     }
 
     impl EspHttpWsReceiver {
-        #[allow(non_upper_case_globals)]
         fn create_frame_type(raw_frame: &httpd_ws_frame_t) -> (FrameType, usize) {
             match raw_frame.type_ {
-                httpd_ws_type_t_HTTPD_WS_TYPE_TEXT => (
+                httpd_ws_type_t::HTTPD_WS_TYPE_TEXT => (
                     FrameType::Text(raw_frame.fragmented && !raw_frame.final_),
                     raw_frame.len as usize + 1,
                 ),
-                httpd_ws_type_t_HTTPD_WS_TYPE_BINARY => (
+                httpd_ws_type_t::HTTPD_WS_TYPE_BINARY => (
                     FrameType::Binary(raw_frame.fragmented && !raw_frame.final_),
                     raw_frame.len as _,
                 ),
-                httpd_ws_type_t_HTTPD_WS_TYPE_CONTINUE => (
+                httpd_ws_type_t::HTTPD_WS_TYPE_CONTINUE => (
                     FrameType::Continue(raw_frame.fragmented && !raw_frame.final_),
                     raw_frame.len as _,
                 ),
-                httpd_ws_type_t_HTTPD_WS_TYPE_PING => (FrameType::Ping, 0),
-                httpd_ws_type_t_HTTPD_WS_TYPE_PONG => (FrameType::Pong, 0),
-                httpd_ws_type_t_HTTPD_WS_TYPE_CLOSE => (FrameType::Close, 0),
+                httpd_ws_type_t::HTTPD_WS_TYPE_PING => (FrameType::Ping, 0),
+                httpd_ws_type_t::HTTPD_WS_TYPE_PONG => (FrameType::Pong, 0),
+                httpd_ws_type_t::HTTPD_WS_TYPE_CLOSE => (FrameType::Close, 0),
                 _ => panic!("Unknown frame type: {}", raw_frame.type_),
             }
         }
@@ -1148,7 +1147,7 @@ pub mod ws {
 
             let conf = httpd_uri_t {
                 uri: uri.as_ptr() as _,
-                method: Newtype::<c_types::c_uint>::from(Method::Get).0,
+                method: Newtype::<http_method>::from(Method::Get).0,
                 user_ctx: Box::into_raw(Box::new(req_handler)) as *mut _,
                 handler: Some(EspHttpServer::handle),
                 is_websocket: true,

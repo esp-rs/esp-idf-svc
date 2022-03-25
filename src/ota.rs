@@ -102,7 +102,7 @@ impl ota::OtaSlot for EspSlot {
     }
 
     fn get_state(&self) -> Result<ota::SlotState, Self::Error> {
-        let mut state: esp_ota_img_states_t = Default::default();
+        let mut state = esp_ota_img_states_t::ESP_OTA_IMG_UNDEFINED;
 
         let err = unsafe { esp_ota_get_state_partition(&self.0 as *const _, &mut state as *mut _) };
 
@@ -111,14 +111,13 @@ impl ota::OtaSlot for EspSlot {
         } else {
             esp!(err)?;
 
-            #[allow(non_upper_case_globals)]
             match state {
-                esp_ota_img_states_t_ESP_OTA_IMG_NEW
-                | esp_ota_img_states_t_ESP_OTA_IMG_PENDING_VERIFY => ota::SlotState::Unverified,
-                esp_ota_img_states_t_ESP_OTA_IMG_VALID => ota::SlotState::Valid,
-                esp_ota_img_states_t_ESP_OTA_IMG_INVALID
-                | esp_ota_img_states_t_ESP_OTA_IMG_ABORTED => ota::SlotState::Invalid,
-                esp_ota_img_states_t_ESP_OTA_IMG_UNDEFINED => ota::SlotState::Unknown,
+                esp_ota_img_states_t::ESP_OTA_IMG_NEW
+                | esp_ota_img_states_t::ESP_OTA_IMG_PENDING_VERIFY => ota::SlotState::Unverified,
+                esp_ota_img_states_t::ESP_OTA_IMG_VALID => ota::SlotState::Valid,
+                esp_ota_img_states_t::ESP_OTA_IMG_INVALID
+                | esp_ota_img_states_t::ESP_OTA_IMG_ABORTED => ota::SlotState::Invalid,
+                esp_ota_img_states_t::ESP_OTA_IMG_UNDEFINED => ota::SlotState::Unknown,
                 _ => ota::SlotState::Unknown,
             }
         })
@@ -164,8 +163,8 @@ impl EspOta<Read> {
     fn get_factory_partition(&self) -> Result<*const esp_partition_t, EspError> {
         let partition_iterator = unsafe {
             esp_partition_find(
-                esp_partition_type_t_ESP_PARTITION_TYPE_APP,
-                esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_APP_FACTORY,
+                esp_partition_type_t::ESP_PARTITION_TYPE_APP,
+                esp_partition_subtype_t::ESP_PARTITION_SUBTYPE_APP_FACTORY,
                 b"factory\0" as *const _ as *const _,
             )
         };

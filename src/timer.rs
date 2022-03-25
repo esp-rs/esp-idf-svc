@@ -131,7 +131,7 @@ impl TimerService for EspTimerService {
                     callback: Some(EspTimer::handle),
                     name: b"rust\0" as *const _ as *const _, // TODO
                     arg: unsafe_callback.as_ptr(),
-                    dispatch_method: esp_timer_dispatch_t_ESP_TIMER_TASK,
+                    dispatch_method: esp_timer_dispatch_t::ESP_TIMER_TASK,
                     skip_unhandled_events: false, // TODO
                 },
                 &mut handle as *mut _,

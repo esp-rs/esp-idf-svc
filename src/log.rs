@@ -5,16 +5,15 @@ use esp_idf_sys::*;
 use crate::private::common::*;
 use crate::private::cstr::*;
 
-#[allow(non_upper_case_globals)]
 impl From<Newtype<esp_log_level_t>> for LevelFilter {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
-            esp_log_level_t_ESP_LOG_NONE => LevelFilter::Off,
-            esp_log_level_t_ESP_LOG_ERROR => LevelFilter::Error,
-            esp_log_level_t_ESP_LOG_WARN => LevelFilter::Warn,
-            esp_log_level_t_ESP_LOG_INFO => LevelFilter::Info,
-            esp_log_level_t_ESP_LOG_DEBUG => LevelFilter::Debug,
-            esp_log_level_t_ESP_LOG_VERBOSE => LevelFilter::Trace,
+            esp_log_level_t::ESP_LOG_NONE => LevelFilter::Off,
+            esp_log_level_t::ESP_LOG_ERROR => LevelFilter::Error,
+            esp_log_level_t::ESP_LOG_WARN => LevelFilter::Warn,
+            esp_log_level_t::ESP_LOG_INFO => LevelFilter::Info,
+            esp_log_level_t::ESP_LOG_DEBUG => LevelFilter::Debug,
+            esp_log_level_t::ESP_LOG_VERBOSE => LevelFilter::Trace,
             _ => LevelFilter::Trace,
         }
     }
@@ -23,25 +22,24 @@ impl From<Newtype<esp_log_level_t>> for LevelFilter {
 impl From<LevelFilter> for Newtype<esp_log_level_t> {
     fn from(level: LevelFilter) -> Self {
         Newtype(match level {
-            LevelFilter::Off => esp_log_level_t_ESP_LOG_NONE,
-            LevelFilter::Error => esp_log_level_t_ESP_LOG_ERROR,
-            LevelFilter::Warn => esp_log_level_t_ESP_LOG_WARN,
-            LevelFilter::Info => esp_log_level_t_ESP_LOG_INFO,
-            LevelFilter::Debug => esp_log_level_t_ESP_LOG_DEBUG,
-            LevelFilter::Trace => esp_log_level_t_ESP_LOG_VERBOSE,
+            LevelFilter::Off => esp_log_level_t::ESP_LOG_NONE,
+            LevelFilter::Error => esp_log_level_t::ESP_LOG_ERROR,
+            LevelFilter::Warn => esp_log_level_t::ESP_LOG_WARN,
+            LevelFilter::Info => esp_log_level_t::ESP_LOG_INFO,
+            LevelFilter::Debug => esp_log_level_t::ESP_LOG_DEBUG,
+            LevelFilter::Trace => esp_log_level_t::ESP_LOG_VERBOSE,
         })
     }
 }
 
-#[allow(non_upper_case_globals)]
 impl From<Newtype<esp_log_level_t>> for Level {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
-            esp_log_level_t_ESP_LOG_ERROR => Level::Error,
-            esp_log_level_t_ESP_LOG_WARN => Level::Warn,
-            esp_log_level_t_ESP_LOG_INFO => Level::Info,
-            esp_log_level_t_ESP_LOG_DEBUG => Level::Debug,
-            esp_log_level_t_ESP_LOG_VERBOSE => Level::Trace,
+            esp_log_level_t::ESP_LOG_ERROR => Level::Error,
+            esp_log_level_t::ESP_LOG_WARN => Level::Warn,
+            esp_log_level_t::ESP_LOG_INFO => Level::Info,
+            esp_log_level_t::ESP_LOG_DEBUG => Level::Debug,
+            esp_log_level_t::ESP_LOG_VERBOSE => Level::Trace,
             _ => Level::Trace,
         }
     }
@@ -50,11 +48,11 @@ impl From<Newtype<esp_log_level_t>> for Level {
 impl From<Level> for Newtype<esp_log_level_t> {
     fn from(level: Level) -> Self {
         Newtype(match level {
-            Level::Error => esp_log_level_t_ESP_LOG_ERROR,
-            Level::Warn => esp_log_level_t_ESP_LOG_WARN,
-            Level::Info => esp_log_level_t_ESP_LOG_INFO,
-            Level::Debug => esp_log_level_t_ESP_LOG_DEBUG,
-            Level::Trace => esp_log_level_t_ESP_LOG_VERBOSE,
+            Level::Error => esp_log_level_t::ESP_LOG_ERROR,
+            Level::Warn => esp_log_level_t::ESP_LOG_WARN,
+            Level::Info => esp_log_level_t::ESP_LOG_INFO,
+            Level::Debug => esp_log_level_t::ESP_LOG_DEBUG,
+            Level::Trace => esp_log_level_t::ESP_LOG_VERBOSE,
         })
     }
 }
@@ -78,7 +76,7 @@ impl EspLogger {
     }
 
     pub fn get_max_level(&self) -> LevelFilter {
-        LevelFilter::from(Newtype(CONFIG_LOG_DEFAULT_LEVEL))
+        LevelFilter::from(Newtype(esp_log_level_t::default()))
     }
 
     pub fn set_target_level(&self, target: impl AsRef<str>, level_filter: LevelFilter) {
@@ -119,7 +117,7 @@ impl EspLogger {
 
 impl ::log::Log for EspLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= LevelFilter::from(Newtype(CONFIG_LOG_DEFAULT_LEVEL))
+        metadata.level() <= LevelFilter::from(Newtype(esp_log_level_t::default()))
     }
 
     fn log(&self, record: &Record) {

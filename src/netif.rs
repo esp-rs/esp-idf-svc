@@ -208,12 +208,12 @@ impl EspNetif {
                 esp_netif_inherent_config_t {
                     flags: match ip_conf {
                         ipv4::ClientConfiguration::DHCP(_) => {
-                            esp_netif_flags_ESP_NETIF_DHCP_CLIENT
-                                | esp_netif_flags_ESP_NETIF_FLAG_GARP
-                                | esp_netif_flags_ESP_NETIF_FLAG_EVENT_IP_MODIFIED
+                            esp_netif_flags_t::ESP_NETIF_DHCP_CLIENT
+                                | esp_netif_flags_t::ESP_NETIF_FLAG_GARP
+                                | esp_netif_flags_t::ESP_NETIF_FLAG_EVENT_IP_MODIFIED
                         }
                         ipv4::ClientConfiguration::Fixed(_) => {
-                            esp_netif_flags_ESP_NETIF_FLAG_AUTOUP
+                            esp_netif_flags_t::ESP_NETIF_FLAG_AUTOUP
                         }
                     },
                     mac: [0; 6],
@@ -221,7 +221,7 @@ impl EspNetif {
                     get_ip_event: match ip_conf {
                         ipv4::ClientConfiguration::DHCP(_) => {
                             if conf.interface_stack == InterfaceStack::Sta {
-                                ip_event_t_IP_EVENT_STA_GOT_IP
+                                ip_event_t::IP_EVENT_STA_GOT_IP.0
                             } else {
                                 0
                             }
@@ -231,7 +231,7 @@ impl EspNetif {
                     lost_ip_event: match ip_conf {
                         ipv4::ClientConfiguration::DHCP(_) => {
                             if conf.interface_stack == InterfaceStack::Sta {
-                                ip_event_t_IP_EVENT_STA_LOST_IP
+                                ip_event_t::IP_EVENT_STA_LOST_IP.0
                             } else {
                                 0
                             }
@@ -266,11 +266,12 @@ impl EspNetif {
             ),
             InterfaceIpConfiguration::Router(ref ip_conf) => (
                 esp_netif_inherent_config_t {
-                    flags: (if ip_conf.dhcp_enabled {
-                        esp_netif_flags_ESP_NETIF_DHCP_SERVER
+                    flags: if ip_conf.dhcp_enabled {
+                        esp_netif_flags_t::ESP_NETIF_FLAG_AUTOUP
+                            | esp_netif_flags_t::ESP_NETIF_DHCP_SERVER
                     } else {
-                        0
-                    }) | esp_netif_flags_ESP_NETIF_FLAG_AUTOUP,
+                        esp_netif_flags_t::ESP_NETIF_FLAG_AUTOUP
+                    },
                     mac: [0; 6],
                     ip_info: ptr::null(),
                     get_ip_event: 0,
@@ -317,13 +318,13 @@ impl EspNetif {
             netif.set_dns(dns);
 
             if dhcps {
-                let mut dhcps_dns_value: dhcps_offer_t = dhcps_offer_option_OFFER_DNS as _;
+                let mut dhcps_dns_value: dhcps_offer_t = dhcps_offer_option::OFFER_DNS.0 as _;
 
                 esp!(unsafe {
                     esp_netif_dhcps_option(
                         netif.1,
-                        esp_netif_dhcp_option_mode_t_ESP_NETIF_OP_SET,
-                        esp_netif_dhcp_option_id_t_ESP_NETIF_DOMAIN_NAME_SERVER,
+                        esp_netif_dhcp_option_mode_t::ESP_NETIF_OP_SET,
+                        esp_netif_dhcp_option_id_t::ESP_NETIF_DOMAIN_NAME_SERVER,
                         &mut dhcps_dns_value as *mut _ as *mut _,
                         core::mem::size_of::<dhcps_offer_t>() as u32,
                     )
@@ -372,7 +373,7 @@ impl EspNetif {
         unsafe {
             esp!(esp_netif_get_dns_info(
                 self.1,
-                esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
+                esp_netif_dns_type_t::ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
             .unwrap();
@@ -387,7 +388,7 @@ impl EspNetif {
         unsafe {
             esp!(esp_netif_get_dns_info(
                 self.1,
-                esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
+                esp_netif_dns_type_t::ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
             .unwrap();
@@ -404,7 +405,7 @@ impl EspNetif {
 
             esp!(esp_netif_set_dns_info(
                 self.1,
-                esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
+                esp_netif_dns_type_t::ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
             .unwrap();
@@ -419,7 +420,7 @@ impl EspNetif {
 
             esp!(esp_netif_set_dns_info(
                 self.1,
-                esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
+                esp_netif_dns_type_t::ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
             .unwrap();
@@ -510,14 +511,14 @@ impl EspTypedEventSource for IpEvent {
 }
 
 impl EspTypedEventDeserializer<IpEvent> for IpEvent {
-    #[allow(non_upper_case_globals, non_snake_case)]
+    #[allow(non_snake_case)]
     fn deserialize<R>(
         data: &crate::eventloop::EspEventFetchData,
         f: &mut impl for<'a> FnMut(&'a IpEvent) -> R,
     ) -> R {
-        let event_id = data.event_id as u32;
+        let event_id = ip_event_t(data.event_id as u32);
 
-        let event = if event_id == ip_event_t_IP_EVENT_AP_STAIPASSIGNED {
+        let event = if event_id == ip_event_t::IP_EVENT_AP_STAIPASSIGNED {
             let event = unsafe {
                 (data.payload as *const ip_event_ap_staipassigned_t)
                     .as_ref()
@@ -529,9 +530,9 @@ impl EspTypedEventDeserializer<IpEvent> for IpEvent {
                 #[cfg(not(esp_idf_version_major = "4"))]
                 mac: event.mac,
             })
-        } else if event_id == ip_event_t_IP_EVENT_STA_GOT_IP
-            || event_id == ip_event_t_IP_EVENT_ETH_GOT_IP
-            || event_id == ip_event_t_IP_EVENT_PPP_GOT_IP
+        } else if event_id == ip_event_t::IP_EVENT_STA_GOT_IP
+            || event_id == ip_event_t::IP_EVENT_ETH_GOT_IP
+            || event_id == ip_event_t::IP_EVENT_PPP_GOT_IP
         {
             let event = unsafe { (data.payload as *const ip_event_got_ip_t).as_ref().unwrap() };
 
@@ -548,7 +549,7 @@ impl EspTypedEventDeserializer<IpEvent> for IpEvent {
                 },
                 ip_changed: event.ip_changed,
             })
-        } else if event_id == ip_event_t_IP_EVENT_GOT_IP6 {
+        } else if event_id == ip_event_t::IP_EVENT_GOT_IP6 {
             let event = unsafe {
                 (data.payload as *const ip_event_got_ip6_t)
                     .as_ref()
@@ -561,14 +562,14 @@ impl EspTypedEventDeserializer<IpEvent> for IpEvent {
                 ip_zone: event.ip6_info.ip.zone,
                 ip_index: event.ip_index as _,
             })
-        } else if event_id == ip_event_t_IP_EVENT_STA_LOST_IP
-            || event_id == ip_event_t_IP_EVENT_PPP_LOST_IP
+        } else if event_id == ip_event_t::IP_EVENT_STA_LOST_IP
+            || event_id == ip_event_t::IP_EVENT_PPP_LOST_IP
         {
             let netif_handle_ref = unsafe { (data.payload as *const *mut esp_netif_obj).as_ref() };
 
             IpEvent::DhcpIpDeassigned(*netif_handle_ref.unwrap() as _)
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {}", data.event_id);
         };
 
         f(&event)

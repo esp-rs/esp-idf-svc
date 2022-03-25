@@ -22,23 +22,23 @@ impl From<Method> for Newtype<(esp_http_client_method_t, ())> {
     fn from(method: Method) -> Self {
         Self((
             match method {
-                Method::Get => esp_http_client_method_t_HTTP_METHOD_GET,
-                Method::Post => esp_http_client_method_t_HTTP_METHOD_POST,
-                Method::Delete => esp_http_client_method_t_HTTP_METHOD_DELETE,
-                Method::Head => esp_http_client_method_t_HTTP_METHOD_HEAD,
-                Method::Put => esp_http_client_method_t_HTTP_METHOD_PUT,
-                Method::Options => esp_http_client_method_t_HTTP_METHOD_OPTIONS,
-                Method::Copy => esp_http_client_method_t_HTTP_METHOD_COPY,
-                Method::Lock => esp_http_client_method_t_HTTP_METHOD_LOCK,
-                Method::MkCol => esp_http_client_method_t_HTTP_METHOD_MKCOL,
-                Method::Move => esp_http_client_method_t_HTTP_METHOD_MOVE,
-                Method::Propfind => esp_http_client_method_t_HTTP_METHOD_PROPFIND,
-                Method::Proppatch => esp_http_client_method_t_HTTP_METHOD_PROPPATCH,
-                Method::Unlock => esp_http_client_method_t_HTTP_METHOD_UNLOCK,
-                Method::Notify => esp_http_client_method_t_HTTP_METHOD_NOTIFY,
-                Method::Subscribe => esp_http_client_method_t_HTTP_METHOD_SUBSCRIBE,
-                Method::Unsubscribe => esp_http_client_method_t_HTTP_METHOD_UNSUBSCRIBE,
-                Method::Patch => esp_http_client_method_t_HTTP_METHOD_PATCH,
+                Method::Get => esp_http_client_method_t::HTTP_METHOD_GET,
+                Method::Post => esp_http_client_method_t::HTTP_METHOD_POST,
+                Method::Delete => esp_http_client_method_t::HTTP_METHOD_DELETE,
+                Method::Head => esp_http_client_method_t::HTTP_METHOD_HEAD,
+                Method::Put => esp_http_client_method_t::HTTP_METHOD_PUT,
+                Method::Options => esp_http_client_method_t::HTTP_METHOD_OPTIONS,
+                Method::Copy => esp_http_client_method_t::HTTP_METHOD_COPY,
+                Method::Lock => esp_http_client_method_t::HTTP_METHOD_LOCK,
+                Method::MkCol => esp_http_client_method_t::HTTP_METHOD_MKCOL,
+                Method::Move => esp_http_client_method_t::HTTP_METHOD_MOVE,
+                Method::Propfind => esp_http_client_method_t::HTTP_METHOD_PROPFIND,
+                Method::Proppatch => esp_http_client_method_t::HTTP_METHOD_PROPPATCH,
+                Method::Unlock => esp_http_client_method_t::HTTP_METHOD_UNLOCK,
+                Method::Notify => esp_http_client_method_t::HTTP_METHOD_NOTIFY,
+                Method::Subscribe => esp_http_client_method_t::HTTP_METHOD_SUBSCRIBE,
+                Method::Unsubscribe => esp_http_client_method_t::HTTP_METHOD_UNSUBSCRIBE,
+                Method::Patch => esp_http_client_method_t::HTTP_METHOD_PATCH,
                 method => panic!("Method {:?} is not supported", method),
             },
             (),
@@ -233,7 +233,7 @@ impl<'a> EspHttpRequestWrite<'a> {
             let headers_ptr = &mut headers as *mut BTreeMap<Uncased, String>;
 
             let handler = move |event: &esp_http_client_event_t| {
-                if event.event_id == esp_http_client_event_id_t_HTTP_EVENT_ON_HEADER {
+                if event.event_id == esp_http_client_event_id_t::HTTP_EVENT_ON_HEADER as _ {
                     unsafe {
                         // TODO: Replace with a proper conversion from ISO-8859-1 to UTF8
 
@@ -270,7 +270,7 @@ impl<'a> EspHttpRequestWrite<'a> {
                     esp!(unsafe {
                         esp_http_client_set_method(
                             self.client.raw,
-                            esp_http_client_method_t_HTTP_METHOD_GET,
+                            esp_http_client_method_t::HTTP_METHOD_GET,
                         )
                     })?;
                     esp!(unsafe { esp_http_client_set_redirection(self.client.raw) })?;

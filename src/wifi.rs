@@ -37,33 +37,32 @@ const MAX_AP: usize = 20;
 impl From<AuthMethod> for Newtype<wifi_auth_mode_t> {
     fn from(method: AuthMethod) -> Self {
         Newtype(match method {
-            AuthMethod::None => wifi_auth_mode_t_WIFI_AUTH_OPEN,
-            AuthMethod::WEP => wifi_auth_mode_t_WIFI_AUTH_WEP,
-            AuthMethod::WPA => wifi_auth_mode_t_WIFI_AUTH_WPA_PSK,
-            AuthMethod::WPA2Personal => wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK,
-            AuthMethod::WPAWPA2Personal => wifi_auth_mode_t_WIFI_AUTH_WPA_WPA2_PSK,
-            AuthMethod::WPA2Enterprise => wifi_auth_mode_t_WIFI_AUTH_WPA2_ENTERPRISE,
-            AuthMethod::WPA3Personal => wifi_auth_mode_t_WIFI_AUTH_WPA3_PSK,
-            AuthMethod::WPA2WPA3Personal => wifi_auth_mode_t_WIFI_AUTH_WPA2_WPA3_PSK,
-            AuthMethod::WAPIPersonal => wifi_auth_mode_t_WIFI_AUTH_WAPI_PSK,
+            AuthMethod::None => wifi_auth_mode_t::WIFI_AUTH_OPEN,
+            AuthMethod::WEP => wifi_auth_mode_t::WIFI_AUTH_WEP,
+            AuthMethod::WPA => wifi_auth_mode_t::WIFI_AUTH_WPA_PSK,
+            AuthMethod::WPA2Personal => wifi_auth_mode_t::WIFI_AUTH_WPA2_PSK,
+            AuthMethod::WPAWPA2Personal => wifi_auth_mode_t::WIFI_AUTH_WPA_WPA2_PSK,
+            AuthMethod::WPA2Enterprise => wifi_auth_mode_t::WIFI_AUTH_WPA2_ENTERPRISE,
+            AuthMethod::WPA3Personal => wifi_auth_mode_t::WIFI_AUTH_WPA3_PSK,
+            AuthMethod::WPA2WPA3Personal => wifi_auth_mode_t::WIFI_AUTH_WPA2_WPA3_PSK,
+            AuthMethod::WAPIPersonal => wifi_auth_mode_t::WIFI_AUTH_WAPI_PSK,
         })
     }
 }
 
 impl From<Newtype<wifi_auth_mode_t>> for AuthMethod {
-    #[allow(non_upper_case_globals)]
     fn from(mode: Newtype<wifi_auth_mode_t>) -> Self {
         match mode.0 {
-            wifi_auth_mode_t_WIFI_AUTH_OPEN => AuthMethod::None,
-            wifi_auth_mode_t_WIFI_AUTH_WEP => AuthMethod::WEP,
-            wifi_auth_mode_t_WIFI_AUTH_WPA_PSK => AuthMethod::WPA,
-            wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK => AuthMethod::WPA2Personal,
-            wifi_auth_mode_t_WIFI_AUTH_WPA_WPA2_PSK => AuthMethod::WPAWPA2Personal,
-            wifi_auth_mode_t_WIFI_AUTH_WPA2_ENTERPRISE => AuthMethod::WPA2Enterprise,
-            wifi_auth_mode_t_WIFI_AUTH_WPA3_PSK => AuthMethod::WPA3Personal,
-            wifi_auth_mode_t_WIFI_AUTH_WPA2_WPA3_PSK => AuthMethod::WPA2WPA3Personal,
-            wifi_auth_mode_t_WIFI_AUTH_WAPI_PSK => AuthMethod::WAPIPersonal,
-            _ => panic!(),
+            wifi_auth_mode_t::WIFI_AUTH_OPEN => AuthMethod::None,
+            wifi_auth_mode_t::WIFI_AUTH_WEP => AuthMethod::WEP,
+            wifi_auth_mode_t::WIFI_AUTH_WPA_PSK => AuthMethod::WPA,
+            wifi_auth_mode_t::WIFI_AUTH_WPA2_PSK => AuthMethod::WPA2Personal,
+            wifi_auth_mode_t::WIFI_AUTH_WPA_WPA2_PSK => AuthMethod::WPAWPA2Personal,
+            wifi_auth_mode_t::WIFI_AUTH_WPA2_ENTERPRISE => AuthMethod::WPA2Enterprise,
+            wifi_auth_mode_t::WIFI_AUTH_WPA3_PSK => AuthMethod::WPA3Personal,
+            wifi_auth_mode_t::WIFI_AUTH_WPA2_WPA3_PSK => AuthMethod::WPA2WPA3Personal,
+            wifi_auth_mode_t::WIFI_AUTH_WAPI_PSK => AuthMethod::WAPIPersonal,
+            _ => unreachable!(),
         }
     }
 }
@@ -78,12 +77,12 @@ impl From<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
         let mut result = wifi_sta_config_t {
             ssid: [0; 32],
             password: [0; 64],
-            scan_method: wifi_scan_method_t_WIFI_FAST_SCAN,
+            scan_method: wifi_scan_method_t::WIFI_FAST_SCAN,
             bssid_set: conf.bssid.is_some(),
             bssid,
             channel: conf.channel.unwrap_or(0u8),
             listen_interval: 0,
-            sort_method: wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL,
+            sort_method: wifi_sort_method_t::WIFI_CONNECT_AP_BY_SIGNAL,
             threshold: wifi_scan_threshold_t {
                 rssi: 127,
                 authmode: Newtype::<wifi_auth_mode_t>::from(conf.auth_method).0,
@@ -168,7 +167,6 @@ impl From<Newtype<wifi_ap_config_t>> for AccessPointConfiguration {
 }
 
 impl From<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
-    #[allow(non_upper_case_globals)]
     fn from(ap_info: Newtype<&wifi_ap_record_t>) -> Self {
         let a = ap_info.0;
 
@@ -177,10 +175,10 @@ impl From<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
             bssid: a.bssid,
             channel: a.primary,
             secondary_channel: match a.second {
-                wifi_second_chan_t_WIFI_SECOND_CHAN_NONE => SecondaryChannel::None,
-                wifi_second_chan_t_WIFI_SECOND_CHAN_ABOVE => SecondaryChannel::Above,
-                wifi_second_chan_t_WIFI_SECOND_CHAN_BELOW => SecondaryChannel::Below,
-                _ => panic!(),
+                wifi_second_chan_t::WIFI_SECOND_CHAN_NONE => SecondaryChannel::None,
+                wifi_second_chan_t::WIFI_SECOND_CHAN_ABOVE => SecondaryChannel::Above,
+                wifi_second_chan_t::WIFI_SECOND_CHAN_BELOW => SecondaryChannel::Below,
+                _ => unreachable!(),
             },
             signal_strength: a.rssi as u8,
             protocols: EnumSet::<Protocol>::empty(), // TODO
@@ -265,29 +263,7 @@ impl EspWifi {
         sys_loop_stack: Arc<EspSysLoopStack>,
         nvs: Arc<EspDefaultNvs>,
     ) -> Result<Self, EspError> {
-        let cfg = wifi_init_config_t {
-            event_handler: Some(esp_event_send_internal),
-            osi_funcs: unsafe { &mut g_wifi_osi_funcs },
-            wpa_crypto_funcs: unsafe { g_wifi_default_wpa_crypto_funcs },
-            static_rx_buf_num: 10,
-            dynamic_rx_buf_num: 32,
-            tx_buf_type: 1,
-            static_tx_buf_num: 0,
-            dynamic_tx_buf_num: 32,
-            csi_enable: 0,
-            ampdu_rx_enable: 1,
-            ampdu_tx_enable: 1,
-            nvs_enable: 0,
-            nano_enable: 0,
-            //tx_ba_win: 6,
-            rx_ba_win: 6,
-            wifi_task_core_id: 0,
-            beacon_max_len: 752,
-            mgmt_sbuf_num: 32,
-            feature_caps: 1, // CONFIG_FEATURE_WPA3_SAE_BIT
-            magic: 0x1F2F3F4F,
-            ..Default::default()
-        };
+        let cfg = wifi_init_config_t::default();
         esp!(unsafe { esp_wifi_init(&cfg) })?;
 
         info!("Driver initialized");
@@ -366,7 +342,7 @@ impl EspWifi {
 
     fn get_client_conf(&self) -> Result<ClientConfiguration, EspError> {
         let mut wifi_config: wifi_config_t = Default::default();
-        esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
+        esp!(unsafe { esp_wifi_get_config(wifi_interface_t::WIFI_IF_STA, &mut wifi_config) })?;
 
         let mut result: ClientConfiguration = unsafe { Newtype(wifi_config.sta).into() };
         result.ip_conf = self.waitable.get(|shared| shared.client_ip_conf.clone());
@@ -383,7 +359,7 @@ impl EspWifi {
             sta: Newtype::<wifi_sta_config_t>::from(conf).0,
         };
 
-        esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
+        esp!(unsafe { esp_wifi_set_config(wifi_interface_t::WIFI_IF_STA, &mut wifi_config) })?;
 
         self.set_client_ip_conf(&conf.ip_conf)?;
 
@@ -394,7 +370,7 @@ impl EspWifi {
 
     fn get_ap_conf(&self) -> Result<AccessPointConfiguration, EspError> {
         let mut wifi_config: wifi_config_t = Default::default();
-        esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
+        esp!(unsafe { esp_wifi_get_config(wifi_interface_t::WIFI_IF_AP, &mut wifi_config) })?;
 
         let mut result: AccessPointConfiguration = unsafe { Newtype(wifi_config.ap).into() };
         result.ip_conf = self.waitable.get(|shared| shared.router_ip_conf);
@@ -411,7 +387,7 @@ impl EspWifi {
             ap: Newtype::<wifi_ap_config_t>::from(conf).0,
         };
 
-        esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
+        esp!(unsafe { esp_wifi_set_config(wifi_interface_t::WIFI_IF_AP, &mut wifi_config) })?;
         self.set_router_ip_conf(&conf.ip_conf)?;
 
         info!("AP configuration done");
@@ -617,14 +593,13 @@ impl EspWifi {
         Ok(())
     }
 
-    #[allow(non_upper_case_globals)]
     fn do_scan(&mut self) -> Result<usize, EspError> {
         info!("About to scan for access points");
 
         self.stop(true)?;
 
         unsafe {
-            esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
+            esp!(esp_wifi_set_mode(wifi_mode_t::WIFI_MODE_STA))?;
             esp!(esp_wifi_start())?;
 
             esp!(esp_wifi_scan_start(ptr::null_mut(), true))?;
@@ -638,7 +613,6 @@ impl EspWifi {
         Ok(found_ap as usize)
     }
 
-    #[allow(non_upper_case_globals)]
     fn do_get_scan_infos(
         &mut self,
         ap_infos_raw: &mut [wifi_ap_record_t],
@@ -819,7 +793,6 @@ impl Wifi for EspWifi {
         status
     }
 
-    #[allow(non_upper_case_globals)]
     fn scan_fill(&mut self, ap_infos: &mut [AccessPointInfo]) -> Result<usize, Self::Error> {
         let total_count = self.do_scan()?;
 
@@ -843,7 +816,6 @@ impl Wifi for EspWifi {
         Ok(cmp::min(total_count, MAX_AP))
     }
 
-    #[allow(non_upper_case_globals)]
     fn scan(&mut self) -> Result<vec::Vec<AccessPointInfo>, Self::Error> {
         let total_count = self.do_scan()?;
 
@@ -868,23 +840,21 @@ impl Wifi for EspWifi {
         Ok(result)
     }
 
-    #[allow(non_upper_case_globals)]
     fn get_configuration(&self) -> Result<Configuration, Self::Error> {
         info!("Getting configuration");
 
         unsafe {
-            let mut mode: wifi_mode_t = 0;
-
+            let mut mode = wifi_mode_t::WIFI_MODE_NULL;
             esp!(esp_wifi_get_mode(&mut mode))?;
 
             let conf = match mode {
-                wifi_mode_t_WIFI_MODE_NULL => Configuration::None,
-                wifi_mode_t_WIFI_MODE_AP => Configuration::AccessPoint(self.get_ap_conf()?),
-                wifi_mode_t_WIFI_MODE_STA => Configuration::Client(self.get_client_conf()?),
-                wifi_mode_t_WIFI_MODE_APSTA => {
+                wifi_mode_t::WIFI_MODE_NULL => Configuration::None,
+                wifi_mode_t::WIFI_MODE_AP => Configuration::AccessPoint(self.get_ap_conf()?),
+                wifi_mode_t::WIFI_MODE_STA => Configuration::Client(self.get_client_conf()?),
+                wifi_mode_t::WIFI_MODE_APSTA => {
                     Configuration::Mixed(self.get_client_conf()?, self.get_ap_conf()?)
                 }
-                _ => panic!(),
+                _ => unreachable!(),
             };
 
             info!("Configuration gotten: {:?}", &conf);
@@ -901,27 +871,27 @@ impl Wifi for EspWifi {
         let status = unsafe {
             match conf {
                 Configuration::None => {
-                    esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_NULL))?;
+                    esp!(esp_wifi_set_mode(wifi_mode_t::WIFI_MODE_NULL))?;
                     info!("Wifi mode NULL set");
 
                     Status(ClientStatus::Stopped, ApStatus::Stopped)
                 }
                 Configuration::AccessPoint(ap_conf) => {
-                    esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_AP))?;
+                    esp!(esp_wifi_set_mode(wifi_mode_t::WIFI_MODE_AP))?;
                     info!("Wifi mode AP set");
 
                     self.set_ap_conf(ap_conf)?;
                     Status(ClientStatus::Stopped, ApStatus::Starting)
                 }
                 Configuration::Client(client_conf) => {
-                    esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
+                    esp!(esp_wifi_set_mode(wifi_mode_t::WIFI_MODE_STA))?;
                     info!("Wifi mode STA set");
 
                     self.set_client_conf(client_conf)?;
                     Status(ClientStatus::Starting, ApStatus::Stopped)
                 }
                 Configuration::Mixed(client_conf, ap_conf) => {
-                    esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA))?;
+                    esp!(esp_wifi_set_mode(wifi_mode_t::WIFI_MODE_APSTA))?;
                     info!("Wifi mode APSTA set");
 
                     self.set_client_conf(client_conf)?;
@@ -977,57 +947,56 @@ impl EspTypedEventSource for WifiEvent {
 }
 
 impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
-    #[allow(non_upper_case_globals, non_snake_case)]
     fn deserialize<R>(
         data: &crate::eventloop::EspEventFetchData,
         f: &mut impl for<'a> FnMut(&'a WifiEvent) -> R,
     ) -> R {
-        let event_id = data.event_id as u32;
+        let event_id = wifi_event_t(data.event_id as u32);
 
-        let event = if event_id == wifi_event_t_WIFI_EVENT_WIFI_READY {
+        let event = if event_id == wifi_event_t::WIFI_EVENT_WIFI_READY {
             WifiEvent::Ready
-        } else if event_id == wifi_event_t_WIFI_EVENT_SCAN_DONE {
+        } else if event_id == wifi_event_t::WIFI_EVENT_SCAN_DONE {
             WifiEvent::ScanDone
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_START {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_START {
             WifiEvent::StaStarted
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_STOP {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_STOP {
             WifiEvent::StaStopped
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_CONNECTED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_CONNECTED {
             WifiEvent::StaConnected
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_DISCONNECTED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_DISCONNECTED {
             WifiEvent::StaDisconnected
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_AUTHMODE_CHANGE {
             WifiEvent::StaAuthmodeChanged
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_WPS_ER_SUCCESS {
             WifiEvent::StaWpsSuccess
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_WPS_ER_FAILED {
             WifiEvent::StaWpsFailed
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_WPS_ER_TIMEOUT {
             WifiEvent::StaWpsTimeout
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_WPS_ER_PIN {
             WifiEvent::StaWpsPin
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
             WifiEvent::StaWpsPbcOverlap
-        } else if event_id == wifi_event_t_WIFI_EVENT_AP_START {
+        } else if event_id == wifi_event_t::WIFI_EVENT_AP_START {
             WifiEvent::ApStarted
-        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STOP {
+        } else if event_id == wifi_event_t::WIFI_EVENT_AP_STOP {
             WifiEvent::ApStopped
-        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STACONNECTED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_AP_STACONNECTED {
             WifiEvent::ApStaConnected
-        } else if event_id == wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_AP_STADISCONNECTED {
             WifiEvent::ApStaDisconnected
-        } else if event_id == wifi_event_t_WIFI_EVENT_AP_PROBEREQRECVED {
+        } else if event_id == wifi_event_t::WIFI_EVENT_AP_PROBEREQRECVED {
             WifiEvent::ApProbeRequestReceived
-        } else if event_id == wifi_event_t_WIFI_EVENT_FTM_REPORT {
+        } else if event_id == wifi_event_t::WIFI_EVENT_FTM_REPORT {
             WifiEvent::FtmReport
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_BSS_RSSI_LOW {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_BSS_RSSI_LOW {
             WifiEvent::StaBssRssiLow
-        } else if event_id == wifi_event_t_WIFI_EVENT_ACTION_TX_STATUS {
+        } else if event_id == wifi_event_t::WIFI_EVENT_ACTION_TX_STATUS {
             WifiEvent::ActionTxStatus
-        } else if event_id == wifi_event_t_WIFI_EVENT_STA_BEACON_TIMEOUT {
+        } else if event_id == wifi_event_t::WIFI_EVENT_STA_BEACON_TIMEOUT {
             WifiEvent::StaBeaconTimeout
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {}", data.event_id);
         };
 
         f(&event)

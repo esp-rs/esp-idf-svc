@@ -101,7 +101,7 @@ impl EspPing {
         let mut seqno: c_types::c_ushort = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_SEQNO,
+            esp_ping_profile_t::ESP_PING_PROF_SEQNO,
             &mut seqno as *mut c_types::c_ushort as *mut c_types::c_void,
             mem::size_of_val(&seqno) as u32,
         );
@@ -109,7 +109,7 @@ impl EspPing {
         let mut ttl: c_types::c_uchar = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_TTL,
+            esp_ping_profile_t::ESP_PING_PROF_TTL,
             &mut ttl as *mut c_types::c_uchar as *mut c_types::c_void,
             mem::size_of_val(&ttl) as u32,
         );
@@ -119,7 +119,7 @@ impl EspPing {
 
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_IPADDR,
+            esp_ping_profile_t::ESP_PING_PROF_IPADDR,
             target_addr as *mut ip_addr_t as *mut c_types::c_void,
             mem::size_of::<ip_addr_t>() as _,
         );
@@ -127,7 +127,7 @@ impl EspPing {
         let mut elapsed_time: c_types::c_uint = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_TIMEGAP,
+            esp_ping_profile_t::ESP_PING_PROF_TIMEGAP,
             &mut elapsed_time as *mut c_types::c_uint as *mut c_types::c_void,
             mem::size_of_val(&elapsed_time) as u32,
         );
@@ -135,7 +135,7 @@ impl EspPing {
         let mut recv_len: c_types::c_uint = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_SIZE,
+            esp_ping_profile_t::ESP_PING_PROF_SIZE,
             &mut recv_len as *mut c_types::c_uint as *mut c_types::c_void,
             mem::size_of_val(&recv_len) as u32,
         );
@@ -175,7 +175,7 @@ impl EspPing {
         let mut seqno: c_types::c_ushort = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_SEQNO,
+            esp_ping_profile_t::ESP_PING_PROF_SEQNO,
             &mut seqno as *mut c_types::c_ushort as *mut c_types::c_void,
             mem::size_of_val(&seqno) as u32,
         );
@@ -185,7 +185,7 @@ impl EspPing {
 
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_IPADDR,
+            esp_ping_profile_t::ESP_PING_PROF_IPADDR,
             target_addr as *mut ip_addr_t as *mut c_types::c_void,
             mem::size_of::<ip_addr_t>() as _,
         );
@@ -228,7 +228,7 @@ impl EspPing {
         let mut transmitted: c_types::c_uint = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_REQUEST,
+            esp_ping_profile_t::ESP_PING_PROF_REQUEST,
             &mut transmitted as *mut c_types::c_uint as *mut c_types::c_void,
             mem::size_of_val(&transmitted) as u32,
         );
@@ -236,7 +236,7 @@ impl EspPing {
         let mut received: c_types::c_uint = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_REPLY,
+            esp_ping_profile_t::ESP_PING_PROF_REPLY,
             &mut received as *mut c_types::c_uint as *mut c_types::c_void,
             mem::size_of_val(&received) as u32,
         );
@@ -244,7 +244,7 @@ impl EspPing {
         let mut total_time: c_types::c_uint = 0;
         esp_ping_get_profile(
             handle,
-            esp_ping_profile_t_ESP_PING_PROF_DURATION,
+            esp_ping_profile_t::ESP_PING_PROF_DURATION,
             &mut total_time as *mut c_types::c_uint as *mut c_types::c_void,
             mem::size_of_val(&total_time) as u32,
         );

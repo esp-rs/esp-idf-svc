@@ -47,11 +47,10 @@ pub enum SyncMode {
 }
 
 impl From<sntp_sync_mode_t> for SyncMode {
-    #[allow(non_upper_case_globals)]
     fn from(from: sntp_sync_mode_t) -> Self {
         match from {
-            sntp_sync_mode_t_SNTP_SYNC_MODE_SMOOTH => SyncMode::Smooth,
-            sntp_sync_mode_t_SNTP_SYNC_MODE_IMMED => SyncMode::Immediate,
+            sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH => SyncMode::Smooth,
+            sntp_sync_mode_t::SNTP_SYNC_MODE_IMMED => SyncMode::Immediate,
             _ => unreachable!(),
         }
     }
@@ -60,8 +59,8 @@ impl From<sntp_sync_mode_t> for SyncMode {
 impl From<SyncMode> for sntp_sync_mode_t {
     fn from(from: SyncMode) -> Self {
         match from {
-            SyncMode::Smooth => sntp_sync_mode_t_SNTP_SYNC_MODE_SMOOTH,
-            SyncMode::Immediate => sntp_sync_mode_t_SNTP_SYNC_MODE_IMMED,
+            SyncMode::Smooth => sntp_sync_mode_t::SNTP_SYNC_MODE_SMOOTH,
+            SyncMode::Immediate => sntp_sync_mode_t::SNTP_SYNC_MODE_IMMED,
         }
     }
 }
@@ -76,12 +75,11 @@ pub enum SyncStatus {
 }
 
 impl From<sntp_sync_status_t> for SyncStatus {
-    #[allow(non_upper_case_globals)]
     fn from(from: sntp_sync_status_t) -> Self {
         match from {
-            sntp_sync_status_t_SNTP_SYNC_STATUS_RESET => SyncStatus::Reset,
-            sntp_sync_status_t_SNTP_SYNC_STATUS_COMPLETED => SyncStatus::Completed,
-            sntp_sync_status_t_SNTP_SYNC_STATUS_IN_PROGRESS => SyncStatus::InProgress,
+            sntp_sync_status_t::SNTP_SYNC_STATUS_RESET => SyncStatus::Reset,
+            sntp_sync_status_t::SNTP_SYNC_STATUS_COMPLETED => SyncStatus::Completed,
+            sntp_sync_status_t::SNTP_SYNC_STATUS_IN_PROGRESS => SyncStatus::InProgress,
             _ => unreachable!(),
         }
     }

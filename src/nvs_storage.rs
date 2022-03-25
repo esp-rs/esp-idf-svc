@@ -28,9 +28,9 @@ impl EspNvsStorage {
             nvs_open(
                 c_namespace.as_ptr(),
                 if read_write {
-                    nvs_open_mode_t_NVS_READWRITE
+                    nvs_open_mode_t::NVS_READWRITE
                 } else {
-                    nvs_open_mode_t_NVS_READONLY
+                    nvs_open_mode_t::NVS_READONLY
                 },
                 &mut handle as *mut _,
             )
@@ -52,9 +52,9 @@ impl EspNvsStorage {
                 nvs.0.as_ptr(),
                 c_namespace.as_ptr(),
                 if read_write {
-                    nvs_open_mode_t_NVS_READWRITE
+                    nvs_open_mode_t::NVS_READWRITE
                 } else {
-                    nvs_open_mode_t_NVS_READONLY
+                    nvs_open_mode_t::NVS_READONLY
                 },
                 &mut handle as *mut _,
             )

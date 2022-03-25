@@ -27,8 +27,8 @@ pub enum MqttProtocolVersion {
 impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
     fn from(pv: MqttProtocolVersion) -> Self {
         match pv {
-            MqttProtocolVersion::V3_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1,
-            MqttProtocolVersion::V3_1_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1_1,
+            MqttProtocolVersion::V3_1 => esp_mqtt_protocol_ver_t::MQTT_PROTOCOL_V_3_1,
+            MqttProtocolVersion::V3_1_1 => esp_mqtt_protocol_ver_t::MQTT_PROTOCOL_V_3_1_1,
         }
     }
 }
@@ -124,7 +124,7 @@ impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, Ra
             protocol_ver: if let Some(protocol_version) = conf.protocol_version {
                 protocol_version.into()
             } else {
-                esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_UNDEFINED
+                esp_mqtt_protocol_ver_t::MQTT_PROTOCOL_UNDEFINED
             },
             client_id: cstrs.as_nptr(conf.client_id),
 
@@ -286,7 +286,7 @@ impl EspMqttClient {
         esp!(unsafe {
             esp_mqtt_client_register_event(
                 client.0,
-                esp_mqtt_event_id_t_MQTT_EVENT_ANY,
+                esp_mqtt_event_id_t::MQTT_EVENT_ANY,
                 Some(Self::handle),
                 unsafe_callback.as_ptr(),
             )
@@ -460,32 +460,33 @@ pub struct EspMqttMessage<'a> {
 }
 
 impl<'a> EspMqttMessage<'a> {
-    #[allow(non_upper_case_globals)]
     fn new_event(
         event: &'a esp_mqtt_event_t,
         connection: Option<&Arc<EspMqttConnectionState>>,
     ) -> Result<client::Event<EspMqttMessage<'a>>, EspError> {
         match event.event_id {
-            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap()), // TODO
-            esp_mqtt_event_id_t_MQTT_EVENT_BEFORE_CONNECT => Ok(client::Event::BeforeConnect),
-            esp_mqtt_event_id_t_MQTT_EVENT_CONNECTED => {
+            esp_mqtt_event_id_t::MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap()), // TODO
+            esp_mqtt_event_id_t::MQTT_EVENT_BEFORE_CONNECT => Ok(client::Event::BeforeConnect),
+            esp_mqtt_event_id_t::MQTT_EVENT_CONNECTED => {
                 Ok(client::Event::Connected(event.session_present != 0))
             }
-            esp_mqtt_event_id_t_MQTT_EVENT_DISCONNECTED => Ok(client::Event::Disconnected),
-            esp_mqtt_event_id_t_MQTT_EVENT_SUBSCRIBED => {
+            esp_mqtt_event_id_t::MQTT_EVENT_DISCONNECTED => Ok(client::Event::Disconnected),
+            esp_mqtt_event_id_t::MQTT_EVENT_SUBSCRIBED => {
                 Ok(client::Event::Subscribed(event.msg_id as _))
             }
-            esp_mqtt_event_id_t_MQTT_EVENT_UNSUBSCRIBED => {
+            esp_mqtt_event_id_t::MQTT_EVENT_UNSUBSCRIBED => {
                 Ok(client::Event::Unsubscribed(event.msg_id as _))
             }
-            esp_mqtt_event_id_t_MQTT_EVENT_PUBLISHED => {
+            esp_mqtt_event_id_t::MQTT_EVENT_PUBLISHED => {
                 Ok(client::Event::Published(event.msg_id as _))
             }
-            esp_mqtt_event_id_t_MQTT_EVENT_DATA => Ok(client::Event::Received(
+            esp_mqtt_event_id_t::MQTT_EVENT_DATA => Ok(client::Event::Received(
                 EspMqttMessage::new(event, connection.cloned()),
             )),
-            esp_mqtt_event_id_t_MQTT_EVENT_DELETED => Ok(client::Event::Deleted(event.msg_id as _)),
-            other => panic!("Unknown message type: {}", other),
+            esp_mqtt_event_id_t::MQTT_EVENT_DELETED => {
+                Ok(client::Event::Deleted(event.msg_id as _))
+            }
+            other => panic!("Unknown message type: {:?}", other),
         }
     }
 

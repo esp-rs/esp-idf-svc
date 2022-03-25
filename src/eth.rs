@@ -494,7 +494,7 @@ impl<P> EspEth<P> {
             esp!(unsafe {
                 esp_eth_ioctl(
                     handle,
-                    esp_eth_io_cmd_t_ETH_CMD_S_MAC_ADDR,
+                    esp_eth_io_cmd_t::ETH_CMD_S_MAC_ADDR,
                     mac_addr.as_ptr() as *mut _,
                 )
             })?;
@@ -839,12 +839,12 @@ impl<P> EspEth<P> {
             smi_mdio_gpio_num: 18,
             flags: 0,
             #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
-            interface: eth_data_interface_t_EMAC_DATA_INTERFACE_RMII,
+            interface: eth_data_interface_t::EMAC_DATA_INTERFACE_RMII,
             #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
             clock_config: eth_mac_clock_config_t {
                 rmii: eth_mac_clock_config_t__bindgen_ty_2 {
-                    clock_mode: emac_rmii_clock_mode_t_EMAC_CLK_DEFAULT,
-                    clock_gpio: emac_rmii_clock_gpio_t_EMAC_CLK_IN_GPIO,
+                    clock_mode: emac_rmii_clock_mode_t::EMAC_CLK_DEFAULT,
+                    clock_gpio: emac_rmii_clock_gpio_t::EMAC_CLK_IN_GPIO,
                 },
             },
             ..Default::default()
@@ -873,7 +873,6 @@ impl<P> Eth for EspEth<P> {
         status
     }
 
-    #[allow(non_upper_case_globals)]
     fn get_configuration(&self) -> Result<Configuration, Self::Error> {
         info!("Getting configuration");
 
@@ -933,25 +932,25 @@ impl EspTypedEventSource for EthEvent {
 }
 
 impl EspTypedEventDeserializer<EthEvent> for EthEvent {
-    #[allow(non_upper_case_globals, non_snake_case)]
+    #[allow(non_snake_case)]
     fn deserialize<R>(
         data: &crate::eventloop::EspEventFetchData,
         f: &mut impl for<'a> FnMut(&'a EthEvent) -> R,
     ) -> R {
         let eth_handle_ref = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() };
 
-        let event_id = data.event_id as u32;
+        let event_id = eth_event_t(data.event_id as u32);
 
-        let event = if event_id == eth_event_t_ETHERNET_EVENT_START {
+        let event = if event_id == eth_event_t::ETHERNET_EVENT_START {
             EthEvent::Started(*eth_handle_ref.unwrap() as _)
-        } else if event_id == eth_event_t_ETHERNET_EVENT_STOP {
+        } else if event_id == eth_event_t::ETHERNET_EVENT_STOP {
             EthEvent::Stopped(*eth_handle_ref.unwrap() as _)
-        } else if event_id == eth_event_t_ETHERNET_EVENT_CONNECTED {
+        } else if event_id == eth_event_t::ETHERNET_EVENT_CONNECTED {
             EthEvent::Connected(*eth_handle_ref.unwrap() as _)
-        } else if event_id == eth_event_t_ETHERNET_EVENT_DISCONNECTED {
+        } else if event_id == eth_event_t::ETHERNET_EVENT_DISCONNECTED {
             EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {}", data.event_id);
         };
 
         f(&event)
