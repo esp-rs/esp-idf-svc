@@ -13,10 +13,12 @@ readme = "README.md"
 documentation = "https://esp-rs.github.io/esp-idf-svc/"
 
 [features]
-default = ["std"]
+default = ["std", "pio"]
 
 std = ["alloc", "anyhow/std", "log/std", "esp-idf-sys/std", "esp-idf-hal/std", "embedded-svc/std"]
 alloc = ["cstr_core/alloc", "anyhow", "embedded-svc/alloc"]
+pio = ["esp-idf-sys/pio"]
+native = ["esp-idf-sys/native"]
 
 experimental = ["embedded-svc/experimental", "esp-idf-hal/experimental", "uncased"]
 
@@ -26,7 +28,7 @@ log = { version = "0.4", default-features = false }
 cstr_core = "0.2"
 anyhow = { version = "1", default-features = false, optional = true }
 embedded-svc = { version = "0.17.4", default-features = false }
-esp-idf-sys = { version = "0.30", default-features = false, features = ["pio"] }
+esp-idf-sys = { version = "0.30", default-features = false }
 esp-idf-hal = { version = "0.33.1", default-features = false, features = ["esp-idf-sys", "embedded-svc"] }
 uncased = { version = "0.9.6", optional = true }
 
