@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use core::ptr;
 use core::time::Duration;
 
-use ::log::*;
+use log::*;
 
 use enumset::*;
 
@@ -44,7 +44,12 @@ pub use nonblocking::*;
 
 #[cfg(all(esp32, esp_idf_eth_use_esp32_emac))]
 // TODO: #[derive(Debug)]
-pub struct RmiiEthPeripherals<MDC, MDIO, RST: gpio::OutputPin = gpio::Gpio10<gpio::Unknown>> {
+pub struct RmiiEthPeripherals<
+    MDC,
+    MDIO,
+    CLK: gpio::RmiiClkPin = gpio::Gpio0<gpio::Unknown>,
+    RST: gpio::OutputPin = gpio::Gpio10<gpio::Unknown>,
+> {
     pub rmii_rdx0: gpio::Gpio25<gpio::Unknown>,
     pub rmii_rdx1: gpio::Gpio26<gpio::Unknown>,
     pub rmii_crs_dv: gpio::Gpio27<gpio::Unknown>,
@@ -53,7 +58,7 @@ pub struct RmiiEthPeripherals<MDC, MDIO, RST: gpio::OutputPin = gpio::Gpio10<gpi
     pub rmii_tx_en: gpio::Gpio21<gpio::Unknown>,
     pub rmii_txd0: gpio::Gpio19<gpio::Unknown>,
     pub rmii_mdio: MDIO,
-    pub rmii_ref_clk: gpio::Gpio0<gpio::Unknown>,
+    pub rmii_ref_clk: CLK,
     pub rst: Option<RST>,
 }
 
@@ -161,16 +166,17 @@ pub struct EspEth<P> {
 }
 
 #[cfg(all(esp32, esp_idf_eth_use_esp32_emac))]
-impl<MDC, MDIO, RST> EspEth<RmiiEthPeripherals<MDC, MDIO, RST>>
+impl<MDC, MDIO, CLK, RST> EspEth<RmiiEthPeripherals<MDC, MDIO, CLK, RST>>
 where
     MDC: gpio::OutputPin,
     MDIO: gpio::InputPin + gpio::OutputPin,
+    CLK: gpio::RmiiClkPin,
     RST: gpio::OutputPin,
 {
     pub fn new_rmii(
         netif_stack: Arc<EspNetifStack>,
         sys_loop_stack: Arc<EspSysLoopStack>,
-        peripherals: RmiiEthPeripherals<MDC, MDIO, RST>,
+        peripherals: RmiiEthPeripherals<MDC, MDIO, CLK, RST>,
         chipset: RmiiEthChipset,
         phy_addr: Option<u32>,
     ) -> Result<Self, EspError> {
@@ -188,7 +194,7 @@ where
         Ok(eth)
     }
 
-    pub fn release(mut self) -> Result<RmiiEthPeripherals<MDC, MDIO, RST>, EspError> {
+    pub fn release(mut self) -> Result<RmiiEthPeripherals<MDC, MDIO, CLK, RST>, EspError> {
         {
             let mut taken = TAKEN.lock();
 
@@ -206,8 +212,8 @@ where
         reset: &Option<RST>,
         phy_addr: Option<u32>,
     ) -> Result<(*mut esp_eth_mac_t, *mut esp_eth_phy_t), EspError> {
-        let mac_cfg = EspEth::<RmiiEthPeripherals<MDC, MDIO>>::eth_mac_default_config();
-        let phy_cfg = EspEth::<RmiiEthPeripherals<MDC, MDIO>>::eth_phy_default_config(
+        let mac_cfg = EspEth::<RmiiEthPeripherals<MDC, MDIO, CLK>>::eth_mac_rmii_config();
+        let phy_cfg = EspEth::<RmiiEthPeripherals<MDC, MDIO, CLK>>::eth_phy_default_config(
             reset.as_ref().map(|p| p.pin()),
             phy_addr,
         );
@@ -231,6 +237,17 @@ where
         };
 
         Ok((mac, phy))
+    }
+
+    fn eth_mac_rmii_config() -> eth_mac_config_t {
+        let mut config = Self::eth_mac_default_config();
+
+        #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
+        {
+            config.clock_config.rmii = CLK::clock_config();
+        }
+
+        config
     }
 }
 
