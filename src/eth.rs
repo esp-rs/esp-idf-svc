@@ -242,9 +242,9 @@ where
     fn eth_mac_rmii_config() -> eth_mac_config_t {
         let mut config = Self::eth_mac_default_config();
 
-        #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
+        #[cfg(not(esp_idf_version = "4.3"))]
         {
-            config.clock_config.rmii = CLK::clock_config();
+            config.clock_config = CLK::clock_config();
         }
 
         config
