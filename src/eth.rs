@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use core::ptr;
 use core::time::Duration;
 
-use log::*;
+use ::log::*;
 
 use enumset::*;
 
