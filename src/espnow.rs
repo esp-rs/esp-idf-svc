@@ -7,6 +7,7 @@ static RECV_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], &[u8]) + Send>>> = Mutex
 static SEND_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], SendStatus) + Send>>> = Mutex::new(None);
 
 pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+static TAKEN: Mutex<bool> = Mutex::new(false);
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -34,6 +35,12 @@ pub struct EspNowClient(PrivateData);
 
 impl EspNowClient {
     pub fn new() -> Result<Self, EspError> {
+        let mut taken = TAKEN.lock();
+
+        if *taken {
+            esp!(ESP_ERR_INVALID_STATE as i32)?;
+        }
+
         // disable modem sleep, otherwise messages queue up and we're not able
         // to send any esp-now data after a few messages
         // esp-idf bug report: https://github.com/espressif/esp-idf/issues/7496
@@ -41,6 +48,8 @@ impl EspNowClient {
 
         info!("Initializing ESP NOW");
         esp!(unsafe { esp_now_init() })?;
+
+        *taken = true;
         Ok(Self(PrivateData))
     }
 
