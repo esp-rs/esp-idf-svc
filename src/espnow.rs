@@ -53,15 +53,6 @@ impl EspNowClient {
         Ok(Self(PrivateData))
     }
 
-    pub fn new_with_callback(
-        callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send,
-    ) -> Result<Self, EspError> {
-        let client = Self::new()?;
-
-        client.register_recv_cb(callback)?;
-        Ok(client)
-    }
-
     pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {
         esp!(unsafe {
             esp_idf_sys::esp_now_send(
