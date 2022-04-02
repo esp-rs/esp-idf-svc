@@ -89,7 +89,7 @@ impl RmiiClockConfig {
     fn eth_mac_clock_config(&self) -> eth_mac_clock_config_t {
         let rmii = match self {
             Self::Input(_) => eth_mac_clock_config_t__bindgen_ty_2 {
-                clock_mode: emac_rmii_clock_mode_t_EMAC_CLK_DEFAULT,
+                clock_mode: emac_rmii_clock_mode_t_EMAC_CLK_EXT_IN,
                 clock_gpio: emac_rmii_clock_gpio_t_EMAC_CLK_IN_GPIO,
             },
             Self::OutputGpio0(_) => eth_mac_clock_config_t__bindgen_ty_2 {
