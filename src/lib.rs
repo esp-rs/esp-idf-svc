@@ -8,6 +8,7 @@
 #[macro_use]
 extern crate alloc;
 
+pub mod espnow;
 #[cfg(all(
     feature = "alloc",
     esp_idf_comp_esp_eth_enabled,
@@ -72,6 +73,5 @@ pub mod timer;
     esp_idf_comp_esp_netif_enabled
 ))]
 pub mod wifi;
-pub mod espnow;
 
 mod private;
