@@ -84,4 +84,7 @@ pub mod timer;
 ))]
 pub mod wifi;
 
+#[cfg(all(feature = "alloc"))]
+pub mod ws;
+
 mod private;
