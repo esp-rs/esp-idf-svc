@@ -3,8 +3,10 @@ use log::info;
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_sys::*;
 
-static RECV_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], &[u8]) + Send>>> = Mutex::new(None);
-static SEND_CALLBACK: Mutex<Option<Box<dyn FnMut(&[u8], SendStatus) + Send>>> = Mutex::new(None);
+type Singleton<T> = Mutex<Option<Box<T>>>;
+
+static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> = Mutex::new(None);
+static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> = Mutex::new(None);
 
 pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 static TAKEN: Mutex<bool> = Mutex::new(false);
@@ -141,7 +143,7 @@ impl EspNowClient {
         Ok(())
     }
 
-    extern "C" fn send_callback(mac_addr: *const u8, status: esp_now_send_status_t) -> () {
+    extern "C" fn send_callback(mac_addr: *const u8, status: esp_now_send_status_t) {
         let c_mac = unsafe { std::slice::from_raw_parts(mac_addr, 6usize) };
 
         if let Some(ref mut callback) = *SEND_CALLBACK.lock() {
@@ -155,7 +157,7 @@ impl EspNowClient {
         mac_addr: *const u8,
         data: *const u8,
         data_len: c_types::c_int,
-    ) -> () {
+    ) {
         let c_mac = unsafe { std::slice::from_raw_parts(mac_addr, 6usize) };
         let c_data = unsafe { std::slice::from_raw_parts(data, data_len as usize) };
 
@@ -171,12 +173,12 @@ impl Drop for EspNowClient {
     fn drop(&mut self) {
         esp!(unsafe { esp_now_deinit() }).unwrap();
         let send_cb = &mut *SEND_CALLBACK.lock();
-        if let Some(_) = send_cb {
+        if send_cb.is_some() {
             *send_cb = None;
         }
 
         let recv_cb = &mut *RECV_CALLBACK.lock();
-        if let Some(_) = recv_cb {
+        if recv_cb.is_some() {
             *recv_cb = None;
         }
     }
