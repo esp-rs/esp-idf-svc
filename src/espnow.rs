@@ -1,4 +1,4 @@
-use log::info;
+use ::log::info;
 
 use esp_idf_hal::mutex::Mutex;
 use esp_idf_sys::*;
