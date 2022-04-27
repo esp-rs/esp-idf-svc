@@ -1,5 +1,8 @@
 use alloc::sync::Arc;
-use core::time;
+use core::{
+    convert::{TryFrom, TryInto},
+    time,
+};
 
 use embedded_svc::{
     errors::Errors,
@@ -22,7 +25,7 @@ use esp_idf_sys::{
     esp_websocket_register_events, esp_websocket_transport_t,
     esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_SSL,
     esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_TCP,
-    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, EspError, TickType_t, ESP_FAIL,
+    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, ifreq, EspError, TickType_t, ESP_FAIL,
 };
 
 use crate::private::common::Newtype;
@@ -198,16 +201,16 @@ pub struct EspWebSocketClientConfig<'a> {
     pub reconnect_timeout_ms: time::Duration,
     pub network_timeout_ms: time::Duration,
     pub ping_interval_sec: time::Duration,
-    // TODO: pub if_name:
-
-    // TODO: implement
-    // pub cert_pem: Option<&'a str>,
-    // pub client_cert: Option<&'a str>,
-    // pub client_key: Option<&'a str>,
+    pub if_name: Option<&'a str>,
+    pub cert_pem: Option<&'a str>,
+    pub client_cert: Option<&'a str>,
+    pub client_key: Option<&'a str>,
 }
 
-impl<'a> From<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
-    fn from(conf: EspWebSocketClientConfig) -> Self {
+impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
+    type Error = anyhow::Error;
+
+    fn try_from(conf: EspWebSocketClientConfig) -> Result<Self, Self::Error> {
         let mut cstrs = RawCstrs::new();
 
         let mut c_conf = esp_websocket_client_config_t {
@@ -237,23 +240,36 @@ impl<'a> From<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, 
             use_global_ca_store: conf.use_global_ca_store,
             skip_cert_common_name_check: conf.skip_cert_common_name_check,
 
-            // default keep_alive_* values are listed later in this function, so they are not
-            // explicitly listed here
-
             ping_interval_sec: conf.ping_interval_sec.as_secs() as _,
 
-            // TODO if_name: *mut ifreq,
-            if_name: core::ptr::null_mut(),
+            cert_pem: cstrs.as_nptr(conf.cert_pem),
+            cert_len: conf.cert_pem.map(|c| c.len()).unwrap_or(0) as _,
+            client_cert: cstrs.as_nptr(conf.client_cert),
+            client_cert_len: conf.client_cert.map(|c| c.len()).unwrap_or(0) as _,
+            client_key: cstrs.as_nptr(conf.client_key),
+            client_key_len: conf.client_key.map(|c| c.len()).unwrap_or(0) as _,
 
+            // NOTE: default keep_alive_* values are set below, so they are not explicitly listed
+            // here
+            // some validation has to be done on if_name, so it is set to a default value first
+            // before overwriting it later after the validation
+            // to compile, the values are being set to a default value first before possibly
+            // overwriting them
             ..Default::default()
-            // For the following, not yet implemented fields
-            // pub cert_pem: *const c_types::c_char,
-            // pub cert_len: size_t,
-            // pub client_cert: *const c_types::c_char,
-            // pub client_cert_len: size_t,
-            // pub client_key: *const c_types::c_char,
-            // pub client_key_len: size_t,
         };
+
+        if let Some(if_name) = conf.if_name {
+            if !(if_name.len() == 6 && if_name.is_ascii()) {
+                bail!("if_name needs to be a 6 character long ASCII string");
+            }
+            let mut s: [c_types::c_char; 6] = [c_types::c_char::default(); 6];
+            for (i, c) in if_name.chars().enumerate() {
+                s[i] = c as _;
+            }
+
+            let mut ifreq = ifreq { ifr_name: s };
+            c_conf.if_name = &mut ifreq as *mut ifreq;
+        }
 
         if let Some(idle) = conf.keep_alive_idle {
             c_conf.keep_alive_enable = true;
@@ -275,7 +291,7 @@ impl<'a> From<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, 
             c_conf.keep_alive_idle = keep_alive_idle.as_secs() as _;
         }
 
-        (c_conf, cstrs)
+        Ok((c_conf, cstrs))
     }
 }
 
@@ -376,7 +392,7 @@ impl EspWebSocketClient {
     pub fn new(
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
-    ) -> Result<(Self, EspWebSocketConnection), EspError> {
+    ) -> Result<(Self, EspWebSocketConnection), anyhow::Error> {
         let connection = EspWebSocketConnection::default();
         let client_connection = connection.clone();
 
@@ -395,13 +411,13 @@ impl EspWebSocketClient {
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
         raw_callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>,
-    ) -> Result<Self, EspError> {
+    ) -> Result<Self, anyhow::Error> {
         let mut boxed_raw_callback = Box::new(raw_callback);
         let unsafe_callback = UnsafeCallback::from(&mut boxed_raw_callback);
 
         let t: TickType = timeout.into();
 
-        let (conf, _cstrs): (esp_websocket_client_config_t, RawCstrs) = config.into();
+        let (conf, _cstrs): (esp_websocket_client_config_t, RawCstrs) = config.try_into()?;
         let handle = unsafe { esp_websocket_client_init(&conf) };
 
         if handle.is_null() {
