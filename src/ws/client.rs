@@ -127,7 +127,7 @@ pub enum WebSocketEventType<'a> {
     Disconnected,
     Close(Option<WebSocketClosingReason>),
     Closed,
-    Text(alloc::borrow::Cow<'a, str>),
+    Text(&'a str),
     Binary(&'a [u8]),
 }
 
@@ -141,10 +141,18 @@ impl<'a> WebSocketEventType<'a> {
             esp_websocket_event_id_t_WEBSOCKET_EVENT_DATA => {
                 match event_data.op_code {
                     // Text frame
-                    1 => Ok(Self::Text(cstr::from_cstr_ptr(event_data.data_ptr))),
+                    1 => Ok(Self::Text({
+                        unsafe {
+                            let slice = core::slice::from_raw_parts(
+                                event_data.data_ptr as *const u8,
+                                event_data.data_len as usize,
+                            );
+                            core::str::from_utf8(slice)?
+                        }
+                    })),
                     // Binary frame
                     2 => Ok(Self::Binary(unsafe {
-                        std::slice::from_raw_parts(
+                        core::slice::from_raw_parts(
                             event_data.data_ptr as *const u8,
                             event_data.data_len as usize,
                         )
