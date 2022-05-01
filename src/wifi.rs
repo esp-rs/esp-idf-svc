@@ -336,6 +336,20 @@ impl EspWifi {
         Ok(wifi)
     }
 
+    pub fn get_mac_sta(&self) -> Result<Option<[u8; 6]>, EspError> {
+        match &self.waitable.state.lock().sta_netif {
+            Some(netif) => Ok(Some(netif.get_mac()?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_mac_ap(&self) -> Result<Option<[u8; 6]>, EspError> {
+        match &self.waitable.state.lock().ap_netif {
+            Some(netif) => Ok(Some(netif.get_mac()?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn with_client_netif<F, T>(&self, f: F) -> T
     where
         F: FnOnce(Option<&EspNetif>) -> T,
