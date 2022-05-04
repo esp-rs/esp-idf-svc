@@ -29,7 +29,7 @@ use esp_idf_sys::{
 };
 
 use crate::private::common::Newtype;
-use crate::private::cstr::{self, RawCstrs};
+use crate::private::cstr::RawCstrs;
 
 use ::anyhow::bail;
 
@@ -393,6 +393,7 @@ pub struct EspWebSocketClient {
     // used for the timeout in every call to a send method in the c lib as the
     // `send` method in the `Sender` trait in embedded_svc::ws does not take a timeout itself
     timeout: TickType_t,
+    #[allow(dead_code)]
     callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>,
 }
 
