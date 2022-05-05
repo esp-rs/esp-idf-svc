@@ -25,8 +25,11 @@ use esp_idf_sys::{
     esp_websocket_register_events, esp_websocket_transport_t,
     esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_SSL,
     esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_TCP,
-    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, ifreq, EspError, TickType_t, ESP_FAIL,
+    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, EspError, TickType_t, ESP_FAIL,
 };
+
+#[cfg(esp_idf_version = "4.4")]
+use esp_idf_sys::ifreq;
 
 use crate::private::common::Newtype;
 use crate::private::cstr::RawCstrs;
@@ -209,6 +212,7 @@ pub struct EspWebSocketClientConfig<'a> {
     pub reconnect_timeout_ms: time::Duration,
     pub network_timeout_ms: time::Duration,
     pub ping_interval_sec: time::Duration,
+    #[cfg(esp_idf_version = "4.4")]
     pub if_name: Option<&'a str>,
     pub cert_pem: Option<&'a str>,
     pub client_cert: Option<&'a str>,
@@ -238,9 +242,9 @@ impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_
 
             transport: Newtype::<esp_websocket_transport_t>::from(conf.transport).0,
 
-            subprotocol: cstrs.as_nptr(conf.subprotocol),
-            user_agent: cstrs.as_nptr(conf.user_agent),
-            headers: cstrs.as_nptr(conf.headers),
+            subprotocol: cstrs.as_nptr(conf.subprotocol) as _,
+            user_agent: cstrs.as_nptr(conf.user_agent) as _,
+            headers: cstrs.as_nptr(conf.headers) as _,
 
             pingpong_timeout_sec: conf.pingpong_timeout_sec.as_secs() as _,
             disable_pingpong_discon: conf.disable_pingpong_discon,
@@ -266,6 +270,7 @@ impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_
             ..Default::default()
         };
 
+        #[cfg(esp_idf_version = "4.4")]
         if let Some(if_name) = conf.if_name {
             if !(if_name.len() == 6 && if_name.is_ascii()) {
                 bail!("if_name needs to be a 6 character long ASCII string");
