@@ -384,13 +384,27 @@ impl EspWifi {
     fn set_client_conf(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
         info!("Setting STA configuration: {:?}", conf);
 
-        let mut wifi_config = wifi_config_t {
-            sta: Newtype::<wifi_sta_config_t>::from(conf).0,
+        let mut wifi_config = if conf.ssid.is_empty() {
+            // Empty config
+            unsafe { core::mem::zeroed() }
+        } else {
+            wifi_config_t {
+                sta: Newtype::<wifi_sta_config_t>::from(conf).0,
+            }
         };
 
         esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
 
-        self.set_client_ip_conf(&conf.ip_conf)?;
+        if conf.ssid.is_empty() {
+            // Only unbind, do not set ip
+            let mut shared = self.waitable.state.lock();
+            Self::netif_unbind(shared.sta_netif.as_mut())?;
+            shared.client_ip_conf = None;
+            shared.sta_netif = None;
+        }
+        else {
+            self.set_client_ip_conf(&conf.ip_conf)?;
+        }
 
         info!("STA configuration done");
 
@@ -537,7 +551,7 @@ impl EspWifi {
             let mut shared = self.waitable.state.lock();
 
             shared.status = status.clone();
-            shared.operating = status.is_operating();
+            shared.operating = status.0.is_operating();
 
             if status.is_operating() {
                 info!("Status is of operating type, starting");
@@ -931,7 +945,12 @@ impl Wifi for EspWifi {
 
                     self.set_client_conf(client_conf)?;
                     self.set_ap_conf(ap_conf)?;
-                    Status(ClientStatus::Starting, ApStatus::Starting)
+
+                    if client_conf.ssid.is_empty() {
+                        Status(ClientStatus::Stopped, ApStatus::Starting)
+                    } else {
+                        Status(ClientStatus::Starting, ApStatus::Starting)
+                    }
                 }
             }
         };
