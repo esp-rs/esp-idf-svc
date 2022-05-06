@@ -623,15 +623,18 @@ impl EspWifi {
     }
 
     #[allow(non_upper_case_globals)]
-    fn do_scan(&mut self) -> Result<usize, EspError> {
+    fn do_scan(&mut self, do_restart: bool) -> Result<usize, EspError> {
         info!("About to scan for access points");
 
-        self.stop(true)?;
+        if do_restart {
+            self.stop(true)?;
 
+            unsafe {
+                esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
+                esp!(esp_wifi_start())?;
+            }
+        }
         unsafe {
-            esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
-            esp!(esp_wifi_start())?;
-
             esp!(esp_wifi_scan_start(ptr::null_mut(), true))?;
         }
 
@@ -641,6 +644,30 @@ impl EspWifi {
         info!("Found {} access points", found_ap);
 
         Ok(found_ap as usize)
+    }
+
+    pub fn scan_with_optional_restart(&mut self, do_restart: bool) -> Result<vec::Vec<AccessPointInfo>, EspError> {
+        let total_count = self.do_scan(do_restart)?;
+
+        let mut ap_infos_raw: vec::Vec<wifi_ap_record_t> =
+            vec::Vec::with_capacity(total_count as usize);
+        #[allow(clippy::uninit_vec)]
+        // ... because we are filling it in on the next line and only reading the initialized members
+        unsafe {
+            ap_infos_raw.set_len(total_count as usize)
+        };
+
+        let real_count = self.do_get_scan_infos(&mut ap_infos_raw)?;
+
+        let mut result = vec::Vec::with_capacity(real_count);
+        for ap_info_raw in ap_infos_raw.iter().take(real_count) {
+            let ap_info: AccessPointInfo = Newtype(ap_info_raw).into();
+            info!("Found access point {:?}", ap_info);
+
+            result.push(ap_info);
+        }
+
+        Ok(result)
     }
 
     #[allow(non_upper_case_globals)]
@@ -826,7 +853,7 @@ impl Wifi for EspWifi {
 
     #[allow(non_upper_case_globals)]
     fn scan_fill(&mut self, ap_infos: &mut [AccessPointInfo]) -> Result<usize, Self::Error> {
-        let total_count = self.do_scan()?;
+        let total_count = self.do_scan(true)?;
 
         if !ap_infos.is_empty() {
             let mut ap_infos_raw: [wifi_ap_record_t; MAX_AP] = Default::default();
@@ -850,27 +877,7 @@ impl Wifi for EspWifi {
 
     #[allow(non_upper_case_globals)]
     fn scan(&mut self) -> Result<vec::Vec<AccessPointInfo>, Self::Error> {
-        let total_count = self.do_scan()?;
-
-        let mut ap_infos_raw: vec::Vec<wifi_ap_record_t> =
-            vec::Vec::with_capacity(total_count as usize);
-        #[allow(clippy::uninit_vec)]
-        // ... because we are filling it in on the next line and only reading the initialized members
-        unsafe {
-            ap_infos_raw.set_len(total_count as usize)
-        };
-
-        let real_count = self.do_get_scan_infos(&mut ap_infos_raw)?;
-
-        let mut result = vec::Vec::with_capacity(real_count);
-        for ap_info_raw in ap_infos_raw.iter().take(real_count) {
-            let ap_info: AccessPointInfo = Newtype(ap_info_raw).into();
-            info!("Found access point {:?}", ap_info);
-
-            result.push(ap_info);
-        }
-
-        Ok(result)
+        self.scan_with_optional_restart(true)
     }
 
     #[allow(non_upper_case_globals)]
