@@ -646,6 +646,15 @@ impl EspWifi {
         Ok(found_ap as usize)
     }
 
+    /// Scan for avaiable access points
+    ///
+    /// Scanning does put some requirements on the config and state of the ESP's Wifi interface(not a complete list):
+    /// * Needs to be in Client or Mixed mode
+    /// * Can not be in state "Connecting"
+    ///
+    /// Calling `EspWif::scan_with_optional_restart(self, true)` wich is the same as `Wifi::scan()` will restart
+    /// the wifi with the correct settings and state. However calling EspWif::scan_with_optional_restart(self, false)
+    /// will not restart the wifi instead putting this responsibility on the user.
     pub fn scan_with_optional_restart(&mut self, do_restart: bool) -> Result<vec::Vec<AccessPointInfo>, EspError> {
         let total_count = self.do_scan(do_restart)?;
 
