@@ -655,7 +655,10 @@ impl EspWifi {
     /// Calling `EspWif::scan_with_optional_restart(self, true)` wich is the same as `Wifi::scan()` will restart
     /// the wifi with the correct settings and state. However calling EspWif::scan_with_optional_restart(self, false)
     /// will not restart the wifi instead putting this responsibility on the user.
-    pub fn scan_with_optional_restart(&mut self, do_restart: bool) -> Result<vec::Vec<AccessPointInfo>, EspError> {
+    pub fn scan_with_optional_restart(
+        &mut self,
+        do_restart: bool,
+    ) -> Result<vec::Vec<AccessPointInfo>, EspError> {
         let total_count = self.do_scan(do_restart)?;
 
         let mut ap_infos_raw: vec::Vec<wifi_ap_record_t> =
