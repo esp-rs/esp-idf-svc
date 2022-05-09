@@ -401,8 +401,7 @@ impl EspWifi {
             Self::netif_unbind(shared.sta_netif.as_mut())?;
             shared.client_ip_conf = None;
             shared.sta_netif = None;
-        }
-        else {
+        } else {
             self.set_client_ip_conf(&conf.ip_conf)?;
         }
 
