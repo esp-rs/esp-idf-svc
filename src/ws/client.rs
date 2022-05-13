@@ -184,12 +184,8 @@ impl<'a> WebSocketEventType<'a> {
 
 #[derive(Default)]
 pub struct EspWebSocketClientConfig<'a> {
-    pub uri: Option<&'a str>,
-    pub host: Option<&'a str>,
-    pub port: u16,
     pub username: Option<&'a str>,
     pub password: Option<&'a str>,
-    pub path: Option<&'a str>,
     pub disable_auto_reconnect: bool,
     // TODO: pub user_context:
     pub task_prio: u8,
@@ -223,12 +219,8 @@ impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_
         let mut cstrs = RawCstrs::new();
 
         let mut c_conf = esp_websocket_client_config_t {
-            uri: cstrs.as_nptr(conf.uri),
-            host: cstrs.as_nptr(conf.host),
-            port: conf.port.into(),
             username: cstrs.as_nptr(conf.username),
             password: cstrs.as_nptr(conf.password),
-            path: cstrs.as_nptr(conf.path),
             disable_auto_reconnect: conf.disable_auto_reconnect,
             // TODO user_context: *mut c_types::c_void,
             user_context: core::ptr::null_mut(),
@@ -401,6 +393,7 @@ pub struct EspWebSocketClient {
 
 impl EspWebSocketClient {
     pub fn new_with_connection(
+        uri: impl AsRef<str>,
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
     ) -> Result<(Self, EspWebSocketConnection), EspError> {
@@ -408,6 +401,7 @@ impl EspWebSocketClient {
         let client_connection = connection.clone();
 
         let client = Self::new(
+            uri,
             config,
             timeout,
             Box::new(move |event_id, event_handle| {
@@ -419,6 +413,7 @@ impl EspWebSocketClient {
     }
 
     fn new(
+        uri: impl AsRef<str>,
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
         raw_callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>,
@@ -428,7 +423,9 @@ impl EspWebSocketClient {
 
         let t: TickType = timeout.into();
 
-        let (conf, _cstrs): (esp_websocket_client_config_t, RawCstrs) = config.try_into()?;
+        let (mut conf, mut cstrs): (esp_websocket_client_config_t, RawCstrs) = config.try_into()?;
+        conf.uri = cstrs.as_ptr(uri);
+
         let handle = unsafe { esp_websocket_client_init(&conf) };
 
         if handle.is_null() {
