@@ -188,8 +188,8 @@ pub struct EspWebSocketClientConfig<'a> {
     pub password: Option<&'a str>,
     pub disable_auto_reconnect: bool,
     // TODO: pub user_context:
-    pub task_prio: u8,
-    pub task_stack: u8,
+    pub task_prio: usize,
+    pub task_stack: usize,
     pub buffer_size: usize,
     pub transport: EspWebSocketTransport,
     pub subprotocol: Option<&'a str>,
