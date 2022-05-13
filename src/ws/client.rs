@@ -36,6 +36,7 @@ use crate::private::cstr::RawCstrs;
 
 use ::anyhow::bail;
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum EspWebSocketTransport {
     TransportUnknown,
     TransportOverTCP,
