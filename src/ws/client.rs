@@ -21,11 +21,11 @@ use esp_idf_sys::{
     esp_websocket_event_id_t_WEBSOCKET_EVENT_CONNECTED,
     esp_websocket_event_id_t_WEBSOCKET_EVENT_DATA,
     esp_websocket_event_id_t_WEBSOCKET_EVENT_DISCONNECTED,
-    esp_websocket_event_id_t_WEBSOCKET_EVENT_ERROR, esp_websocket_event_id_t_WEBSOCKET_EVENT_MAX,
-    esp_websocket_register_events, esp_websocket_transport_t,
-    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_SSL,
+    esp_websocket_event_id_t_WEBSOCKET_EVENT_ERROR, esp_websocket_register_events,
+    esp_websocket_transport_t, esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_SSL,
     esp_websocket_transport_t_WEBSOCKET_TRANSPORT_OVER_TCP,
-    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, EspError, TickType_t, ESP_FAIL,
+    esp_websocket_transport_t_WEBSOCKET_TRANSPORT_UNKNOWN, EspError, TickType_t,
+    ESP_ERR_INVALID_ARG, ESP_ERR_NOT_FOUND, ESP_ERR_NOT_SUPPORTED, ESP_FAIL,
 };
 
 #[cfg(esp_idf_version = "4.4")]
@@ -33,8 +33,6 @@ use esp_idf_sys::ifreq;
 
 use crate::private::common::Newtype;
 use crate::private::cstr::RawCstrs;
-
-use ::anyhow::bail;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum EspWebSocketTransport {
@@ -75,7 +73,7 @@ impl<'a> WebSocketEvent<'a> {
         event_id: i32,
         event_data: &'a esp_websocket_event_data_t,
         state: &Arc<EspWebSocketConnectionState>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, EspError> {
         Ok(Self {
             event_type: WebSocketEventType::new(event_id, event_data)?,
             state: state.clone(),
@@ -108,7 +106,7 @@ pub enum WebSocketClosingReason {
 }
 
 impl WebSocketClosingReason {
-    fn new(code: u16) -> anyhow::Result<Self> {
+    fn new(code: u16) -> Result<Self, EspError> {
         match code {
             1000 => Ok(Self::PurposeFulfilled),
             1001 => Ok(Self::GoingAway),
@@ -120,7 +118,7 @@ impl WebSocketClosingReason {
             1009 => Ok(Self::MessageTooBig),
             1010 => Ok(Self::ExtensionNotReturned),
             1011 => Ok(Self::UnexpectedCondition),
-            _ => bail!("Unsupported closing status code"),
+            _ => Err(EspError::from(ESP_ERR_NOT_SUPPORTED).unwrap()),
         }
     }
 }
@@ -136,24 +134,29 @@ pub enum WebSocketEventType<'a> {
 }
 
 impl<'a> WebSocketEventType<'a> {
-    pub fn new(event_id: i32, event_data: &'a esp_websocket_event_data_t) -> anyhow::Result<Self> {
+    pub fn new(
+        event_id: i32,
+        event_data: &'a esp_websocket_event_data_t,
+    ) -> Result<Self, EspError> {
         #[allow(non_upper_case_globals)]
         match event_id {
-            esp_websocket_event_id_t_WEBSOCKET_EVENT_ERROR => bail!("WebSocket Event Error"),
+            esp_websocket_event_id_t_WEBSOCKET_EVENT_ERROR => {
+                Err(EspError::from(ESP_FAIL).unwrap())
+            }
             esp_websocket_event_id_t_WEBSOCKET_EVENT_CONNECTED => Ok(Self::Connected),
             esp_websocket_event_id_t_WEBSOCKET_EVENT_DISCONNECTED => Ok(Self::Disconnected),
             esp_websocket_event_id_t_WEBSOCKET_EVENT_DATA => {
                 match event_data.op_code {
                     // Text frame
-                    1 => Ok(Self::Text({
-                        unsafe {
-                            let slice = core::slice::from_raw_parts(
-                                event_data.data_ptr as *const u8,
-                                event_data.data_len as usize,
-                            );
-                            core::str::from_utf8(slice)?
-                        }
-                    })),
+                    1 => unsafe {
+                        let slice = core::slice::from_raw_parts(
+                            event_data.data_ptr as *const u8,
+                            event_data.data_len as usize,
+                        );
+                        core::str::from_utf8(slice)
+                    }
+                    .map_err(|_| EspError::from(ESP_FAIL).unwrap())
+                    .map(Self::Text),
                     // Binary frame
                     2 => Ok(Self::Binary(unsafe {
                         core::slice::from_raw_parts(
@@ -170,18 +173,11 @@ impl<'a> WebSocketEventType<'a> {
                     } else {
                         None
                     })),
-                    _ => bail!(
-                        "WebSocket Data Event contains wrong OpCode: {}",
-                        event_data.op_code
-                    ),
+                    _ => Err(EspError::from(ESP_ERR_NOT_FOUND).unwrap()),
                 }
             }
             esp_websocket_event_id_t_WEBSOCKET_EVENT_CLOSED => Ok(Self::Closed),
-            esp_websocket_event_id_t_WEBSOCKET_EVENT_MAX => {
-                // TODO: is this the correct meaning of EVENT_MAX?
-                bail!("Exceeded maximum packet size")
-            }
-            default => bail!("Unrecognized WebSocket event: {}", default),
+            _ => Err(EspError::from(ESP_ERR_INVALID_ARG).unwrap()),
         }
     }
 }
@@ -221,7 +217,7 @@ pub struct EspWebSocketClientConfig<'a> {
 }
 
 impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
-    type Error = anyhow::Error;
+    type Error = EspError;
 
     fn try_from(conf: EspWebSocketClientConfig) -> Result<Self, Self::Error> {
         let mut cstrs = RawCstrs::new();
@@ -274,7 +270,7 @@ impl<'a> TryFrom<EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_
         #[cfg(esp_idf_version = "4.4")]
         if let Some(if_name) = conf.if_name {
             if !(if_name.len() == 6 && if_name.is_ascii()) {
-                bail!("if_name needs to be a 6 character long ASCII string");
+                return Err(EspError::from(ESP_ERR_INVALID_ARG).unwrap());
             }
             let mut s: [c_types::c_char; 6] = [c_types::c_char::default(); 6];
             for (i, c) in if_name.chars().enumerate() {
@@ -374,7 +370,7 @@ impl EspWebSocketConnection {
     // NOTE: cannot implement the `Iterator` trait as it requires that all the items can be alive
     // at the same time, which is not given here
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<anyhow::Result<WebSocketEvent>> {
+    pub fn next(&mut self) -> Option<Result<WebSocketEvent<'_>, EspError>> {
         let mut message = self.0.message.lock();
 
         // wait for new message to arrive
@@ -404,14 +400,14 @@ pub struct EspWebSocketClient {
 }
 
 impl EspWebSocketClient {
-    pub fn new(
+    pub fn new_with_connection(
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
-    ) -> Result<(Self, EspWebSocketConnection), anyhow::Error> {
+    ) -> Result<(Self, EspWebSocketConnection), EspError> {
         let connection = EspWebSocketConnection::default();
         let client_connection = connection.clone();
 
-        let client = Self::new_with_raw_callback(
+        let client = Self::new(
             config,
             timeout,
             Box::new(move |event_id, event_handle| {
@@ -422,11 +418,11 @@ impl EspWebSocketClient {
         Ok((client, connection))
     }
 
-    fn new_with_raw_callback(
+    fn new(
         config: EspWebSocketClientConfig,
         timeout: time::Duration,
         raw_callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, EspError> {
         let mut boxed_raw_callback = Box::new(raw_callback);
         let unsafe_callback = UnsafeCallback::from(&mut boxed_raw_callback);
 
@@ -509,7 +505,7 @@ impl EspWebSocketClient {
                 )
             },
             _ => {
-                panic!("Unsupported sending operation!");
+                panic!("Unsupported sending operation");
             }
         })
     }
@@ -542,18 +538,18 @@ impl Sender for EspWebSocketClient {
                 self.send_data(frame_type, frame_data)?
             }
             FrameType::Binary(true) | FrameType::Text(true) => {
-                panic!("Unsupported operation: Sending of fragmented data!")
+                panic!("Unsupported operation: Sending of fragmented data")
             }
             FrameType::Ping | FrameType::Pong => {
-                panic!("Unsupported operation: Sending of Ping/Pong frames!")
+                panic!("Unsupported operation: Sending of Ping/Pong frames")
             }
             FrameType::Close => {
-                panic!("Unsupported operation: Closing a connection manually (drop the client instead)!")
+                panic!("Unsupported operation: Closing a connection manually (drop the client instead)")
             }
             FrameType::SocketClose => {
-                panic!("Unsupported operation: Closing a connection manually (drop the client instead)!")
+                panic!("Unsupported operation: Closing a connection manually (drop the client instead)")
             }
-            FrameType::Continue(_) => panic!("Unsupported operation: Sending of fragmented data!"),
+            FrameType::Continue(_) => panic!("Unsupported operation: Sending of fragmented data"),
         };
 
         Ok(())
