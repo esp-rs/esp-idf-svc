@@ -86,7 +86,7 @@ impl<'a> Drop for WebSocketEvent<'a> {
         let mut message = self.state.message.lock();
 
         if message.take().is_some() {
-            self.state.processed.notify_all();
+            self.state.state_changed.notify_all();
         }
     }
 }
@@ -324,16 +324,14 @@ unsafe impl Send for Newtype<*mut esp_websocket_event_data_t> {}
 
 struct EspWebSocketConnectionState {
     message: Mutex<Option<(i32, Newtype<*mut esp_websocket_event_data_t>)>>,
-    posted: Condvar,
-    processed: Condvar,
+    state_changed: Condvar,
 }
 
 impl Default for EspWebSocketConnectionState {
     fn default() -> Self {
         Self {
             message: Mutex::new(None),
-            posted: Condvar::new(),
-            processed: Condvar::new(),
+            state_changed: Condvar::new(),
         }
     }
 }
@@ -351,12 +349,13 @@ impl EspWebSocketConnection {
     fn post(&self, event_id: i32, event: *mut esp_websocket_event_data_t) {
         let mut message = self.0.message.lock();
 
-        *message = Some((event_id, Newtype(event)));
-        self.0.posted.notify_all();
-
+        // wait for a previous message to be processed
         while message.is_some() {
-            message = self.0.processed.wait(message);
+            message = self.0.state_changed.wait(message);
         }
+
+        *message = Some((event_id, Newtype(event)));
+        self.0.state_changed.notify_all();
     }
 
     // NOTE: cannot implement the `Iterator` trait as it requires that all the items can be alive
@@ -367,13 +366,14 @@ impl EspWebSocketConnection {
 
         // wait for new message to arrive
         while message.is_none() {
-            message = self.0.posted.wait(message);
+            message = self.0.state_changed.wait(message);
         }
 
         let event_id = message.as_ref().unwrap().0;
         let event = unsafe { message.as_ref().unwrap().1 .0.as_ref() };
         if let Some(event) = event {
             let wse = WebSocketEvent::new(event_id, event, &self.0);
+            *message = None;
 
             Some(wse)
         } else {
