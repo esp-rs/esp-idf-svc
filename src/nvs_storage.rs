@@ -18,6 +18,8 @@ enum EspNvsRef {
     Nvs(Arc<EspNvs>),
 }
 
+pub type NvsStats = nvs_stats_t;
+
 pub struct EspNvsStorage(EspNvsRef, nvs_handle_t);
 
 impl EspNvsStorage {
@@ -66,6 +68,14 @@ impl EspNvsStorage {
         })?;
 
         Ok(Self(EspNvsRef::Nvs(nvs), handle))
+    }
+
+    pub fn stats(&self) -> Result<NvsStats, EspError> {
+        let mut nvs_stats = NvsStats::default();
+
+        esp!(unsafe { nvs_get_stats(ptr::null_mut(), &mut nvs_stats as *mut nvs_stats_t) })?;
+
+        Ok(nvs_stats)
     }
 }
 
