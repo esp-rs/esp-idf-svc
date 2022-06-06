@@ -16,12 +16,11 @@ use alloc::vec::Vec;
 
 use log::{info, warn};
 
-use embedded_svc::errors::Errors;
-use embedded_svc::http::server::{
-    attr, middleware, registry::*, session, Completion, Request, Response, ResponseWrite, Session,
-};
+use embedded_svc::{http::server::{
+    attr::{self, DynStorageRef}, middleware, registry::*, session, Completion, Request, Response, ResponseWrite, Session, Context,
+}, storage::DynStorageImpl};
 use embedded_svc::http::*;
-use embedded_svc::io::{Read, Write};
+use embedded_svc::io::{Io, Read, Write};
 
 use esp_idf_hal::mutex;
 
@@ -281,13 +280,13 @@ impl EspHttpServer {
         ESP_OK as _
     }
 
-    fn render_error<E>(raw_req: *mut httpd_req_t, error: E) -> Result<Completion, EspError>
+    fn render_error<'a, E>(req: EspHttpRequest<'a>, error: E) -> Result<Completion, EspError>
     where
-        E: fmt::Display + fmt::Debug,
+        E: fmt::Debug,
     {
         let mut response_state = ResponseState::New;
 
-        let mut writer = EspHttpResponse::new(raw_req, "", &mut response_state)
+        let mut writer = EspHttpResponse::new(req.raw_req, "", &mut response_state)
             .status(500)
             .content_type("text/html")
             .into_writer_noreq(None)?;
@@ -310,13 +309,13 @@ impl EspHttpServer {
             .as_bytes(),
         )?;
 
-        writer.complete()
+        writer.complete(req)
     }
 
     fn to_native_handler<H, E>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
     where
         H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
-        E: fmt::Display + fmt::Debug,
+        E: fmt::Debug,
     {
         let sessions = self.sessions.clone();
         let session_cookie_name = self.session_cookie_name;
@@ -371,14 +370,16 @@ impl Drop for EspHttpServer {
     }
 }
 
-impl Errors for EspHttpServer {
+impl Io for EspHttpServer {
     type Error = EspError;
 }
 
-impl Registry for EspHttpServer {
+impl Context for EspHttpServer {
     type Request<'a> = EspHttpRequest<'a>;
     type Response<'a> = EspHttpResponse<'a>;
-    type Root = Self;
+}
+
+impl Registry for EspHttpServer {
     type MiddlewareRegistry<'q, M>
     where
         Self: 'q,
@@ -432,7 +433,7 @@ impl Registry for EspHttpServer {
 pub struct EspHttpRequest<'a> {
     raw_req: *mut httpd_req_t,
     _ptr: PhantomData<&'a httpd_req_t>,
-    attributes: RefCell<attr::RequestScopedAttributes>,
+    attributes: RefCell<DynStorageImpl<'a, 64>>, // TODO
     session: RefCell<EspRequestScopedSession>,
 }
 
@@ -454,7 +455,7 @@ impl<'a> EspHttpRequest<'a> {
         Self {
             raw_req,
             _ptr: PhantomData,
-            attributes: RefCell::new(attr::RequestScopedAttributes::new()),
+            attributes: RefCell::new(DynStorageImpl::new()),
             session,
         }
     }
@@ -490,7 +491,7 @@ impl<'a> EspHttpRequest<'a> {
     }
 }
 
-impl<'a> Errors for EspHttpRequest<'a> {
+impl<'a> Io for EspHttpRequest<'a> {
     type Error = EspError;
 }
 
@@ -503,7 +504,7 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
     type Attributes<'b>
     where
         Self: 'b,
-    = attr::RequestScopedAttributesReference<'b>;
+    = DynStorageRef<'b, DynStorageImpl<'a, 64>>;
 
     type Session<'b>
     where
@@ -551,7 +552,7 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
 }
 
 impl<'a> Read for &EspHttpRequest<'a> {
-    fn do_read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         unsafe {
             let len = httpd_req_recv(
                 self.raw_req,
@@ -643,27 +644,20 @@ impl<'a> EspHttpResponse<'a> {
     }
 }
 
-impl<'a> SendStatus<'a> for EspHttpResponse<'a> {
+impl<'a> SendStatus for EspHttpResponse<'a> {
     fn set_status(&mut self, status: u16) -> &mut Self {
         self.headers.status = status;
         self
     }
 
-    fn set_status_message<M>(&mut self, message: M) -> &mut Self
-    where
-        M: Into<Cow<'a, str>>,
-    {
+    fn set_status_message(&mut self, message: &str) -> &mut Self {
         self.headers.status_message = Some(message.into());
         self
     }
 }
 
-impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
-    fn set_header<H, V>(&mut self, name: H, value: V) -> &mut Self
-    where
-        H: Into<Cow<'a, str>>,
-        V: Into<Cow<'a, str>>,
-    {
+impl<'a> SendHeaders for EspHttpResponse<'a> {
+    fn set_header<H, V>(&mut self, name: &str, value: &str) -> &mut Self {
         // TODO: Optimize; convert everything to lower case? (map is now case-insensitive)
         *self
             .headers
@@ -674,14 +668,14 @@ impl<'a> SendHeaders<'a> for EspHttpResponse<'a> {
     }
 }
 
-impl<'a> Errors for EspHttpResponse<'a> {
+impl<'a> Io for EspHttpResponse<'a> {
     type Error = EspError;
 }
 
 impl<'a> Response<'a> for EspHttpResponse<'a> {
     type Write<'b> = EspHttpResponseWrite<'b>;
 
-    fn into_writer(self, request: impl Request<'a>) -> Result<Self::Write<'a>, Self::Error> {
+    fn into_writer(self) -> Result<Self::Write<'a>, Self::Error> {
         let session_id: Option<Cow<'static, str>> = {
             let session = request.session();
 
@@ -803,12 +797,12 @@ impl<'a> ResponseWrite<'a> for EspHttpResponseWrite<'a> {
     }
 }
 
-impl<'a> Errors for EspHttpResponseWrite<'a> {
+impl<'a> Io for EspHttpResponseWrite<'a> {
     type Error = EspError;
 }
 
 impl<'a> Write for EspHttpResponseWrite<'a> {
-    fn do_write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         if !buf.is_empty() {
             self.send_headers()?;
 
@@ -834,8 +828,8 @@ pub mod ws {
 
     use log::*;
 
-    use embedded_svc::errors::*;
     use embedded_svc::http::Method;
+    use embedded_svc::io::Io;
     use embedded_svc::ws::server::registry::*;
     use embedded_svc::ws::server::*;
     use embedded_svc::ws::*;
@@ -880,7 +874,7 @@ pub mod ws {
         }
     }
 
-    impl Errors for EspHttpWsSender {
+    impl Io for EspHttpWsSender {
         type Error = EspError;
     }
 
@@ -977,7 +971,7 @@ pub mod ws {
         }
     }
 
-    impl Errors for EspHttpWsReceiver {
+    impl Io for EspHttpWsReceiver {
         type Error = EspError;
     }
 
@@ -1082,7 +1076,7 @@ pub mod ws {
         }
     }
 
-    impl Errors for EspHttpWsDetachedSender {
+    impl Io for EspHttpWsDetachedSender {
         type Error = EspError;
     }
 

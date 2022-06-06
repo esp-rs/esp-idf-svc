@@ -1,13 +1,13 @@
+use core::convert::TryFrom;
 use core::mem;
 use core::ptr;
 
 extern crate alloc;
-use alloc::borrow::Cow;
 use alloc::vec;
 
 use ::log::*;
 
-use embedded_svc::errors::Errors;
+use embedded_svc::errors::wrap::EitherError;
 use embedded_svc::io;
 use embedded_svc::ota;
 
@@ -19,18 +19,20 @@ use crate::private::{common::*, cstr::*};
 
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
-impl From<Newtype<&esp_app_desc_t>> for ota::FirmwareInfo {
-    fn from(app_desc: Newtype<&esp_app_desc_t>) -> Self {
+impl<'a, S> TryFrom<Newtype<&'a esp_app_desc_t>> for ota::FirmwareInfo<S> 
+where 
+    S: TryFrom<&'a str>,
+{
+    fn try_from(app_desc: Newtype<&'a esp_app_desc_t>) -> Result<Self, StrConvError> {
         let app_desc = app_desc.0;
 
-        Self {
-            version: from_cstr_ptr(&app_desc.version as *const _).into_owned(),
+        Ok(Self {
+            version: S::try_from(from_cstr_ptr(&app_desc.version as *const _)).map_err(|_| StrConvError)?,
             signature: Some(app_desc.app_elf_sha256.into()),
-            released: from_cstr_ptr(&app_desc.date as *const _).into_owned()
-                + from_cstr_ptr(&app_desc.time as *const _).as_ref(),
-            description: from_cstr_ptr(&app_desc.project_name as *const _).into_owned(),
+            released: S::try_from(from_cstr_ptr(&app_desc.date as *const _)).map_err(|_| StrConvError)?, // TODO: app_desc.time
+            description: S::try_from(from_cstr_ptr(&app_desc.project_name as *const _)).map_err(|_| StrConvError)?,
             download_id: None,
-        }
+        })
     }
 }
 
@@ -72,7 +74,10 @@ impl ota::FirmwareInfoLoader for EspFirmwareInfoLoader {
                 + mem::size_of::<esp_app_desc_t>()
     }
 
-    fn get_info(&self) -> Result<ota::FirmwareInfo, Self::Error> {
+    fn get_info<'a, S>(&'a self) -> Result<ota::FirmwareInfo<S>, EitherError<Self::Error, StrConvError>> 
+    where 
+        S: TryFrom<&'a str> + 'static,
+    {
         if self.is_loaded() {
             let app_desc_slice = &self.0[0..mem::size_of::<esp_image_header_t>()
                 + mem::size_of::<esp_image_segment_header_t>()];
@@ -83,9 +88,9 @@ impl ota::FirmwareInfoLoader for EspFirmwareInfoLoader {
                     .unwrap()
             };
 
-            Ok(ota::FirmwareInfo::from(Newtype(app_desc)))
+            Ok(ota::FirmwareInfo::try_from(Newtype(app_desc)).map_err(EitherError::E2)?)
         } else {
-            Err(EspError::from(ESP_ERR_INVALID_SIZE as _).unwrap())
+            Err(EspError::from(ESP_ERR_INVALID_SIZE as _).unwrap().map_err(EitherError::E1))
         }
     }
 }
@@ -97,8 +102,11 @@ impl Errors for EspSlot {
 }
 
 impl ota::OtaSlot for EspSlot {
-    fn get_label(&self) -> Result<Cow<'_, str>, Self::Error> {
-        Ok(from_cstr_ptr(&self.0.label as *const _ as *const _))
+    fn get_label<'a, S>(&'a self) -> Result<S, EitherError<Self::Error, StrConvError>> 
+    where 
+        S: TryFrom<&'a str> + 'static,
+    {
+        Ok(S::try_from(from_cstr_ptr(&self.0.label as *const _ as *const _)).map_err(EitherError::E2)?)
     }
 
     fn get_state(&self) -> Result<ota::SlotState, Self::Error> {
@@ -124,7 +132,10 @@ impl ota::OtaSlot for EspSlot {
         })
     }
 
-    fn get_firmware_info(&self) -> Result<Option<ota::FirmwareInfo>, Self::Error> {
+    fn get_firmware_info<'a, S>(&'a self) -> Result<Option<ota::FirmwareInfo<S>>, EitherError<Self::Error, StrConvError>> 
+    where 
+        S: TryFrom<&'a str> + 'static,
+    {
         let mut app_desc: esp_app_desc_t = Default::default();
 
         let err = unsafe { esp_ota_get_partition_description(&self.0 as *const _, &mut app_desc) };
@@ -132,9 +143,9 @@ impl ota::OtaSlot for EspSlot {
         Ok(if err == ESP_ERR_NOT_FOUND as i32 {
             None
         } else {
-            esp!(err)?;
+            esp!(err).map_err(EitherError::E1)?;
 
-            Some(ota::FirmwareInfo::from(Newtype(&app_desc)))
+            Some(ota::FirmwareInfo::try_from(Newtype(&app_desc)).map_err(EitherError::E2)?)
         })
     }
 }
@@ -274,7 +285,7 @@ impl Errors for EspOta<Update> {
 }
 
 impl io::Write for EspOta<Update> {
-    fn do_write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         esp!(unsafe { esp_ota_write(self.0.handle, buf.as_ptr() as _, buf.len() as _) })?;
 
         Ok(buf.len())
