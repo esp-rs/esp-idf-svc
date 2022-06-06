@@ -1258,7 +1258,7 @@ pub mod ws {
     }
 
     #[cfg(feature = "experimental")]
-    pub mod asyncs {
+    pub mod asynch {
         use embedded_svc::utils::asyncify::ws::server::{AsyncAcceptor, Processor};
 
         use super::{EspHttpWsDetachedSender, EspHttpWsReceiver, EspHttpWsSender};

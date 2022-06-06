@@ -1,4 +1,4 @@
-pub mod asyncs {
+pub mod asynch {
     #[cfg(all(feature = "isr-async-executor", feature = "alloc"))]
     pub mod isr {
         use core::sync::atomic::{AtomicPtr, Ordering};
