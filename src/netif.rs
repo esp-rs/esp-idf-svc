@@ -2,7 +2,6 @@ use core::convert::TryInto;
 use core::ptr;
 
 extern crate alloc;
-use alloc::string::String;
 use alloc::sync::Arc;
 
 use ::log::*;
@@ -56,8 +55,8 @@ pub enum InterfaceIpConfiguration {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
 pub struct InterfaceConfiguration {
-    pub key: String,
-    pub description: String,
+    pub key: heapless::String<32>,
+    pub description: heapless::String<8>,
     pub route_priority: u32,
     pub ip_configuration: InterfaceIpConfiguration,
     pub interface_stack: InterfaceStack,
@@ -346,7 +345,7 @@ impl EspNetif {
         Ok(netif)
     }
 
-    pub fn get_key(&self) -> heapless::String<4> {
+    pub fn get_key(&self) -> heapless::String<32> {
         from_cstr_ptr(unsafe { esp_netif_get_ifkey(self.1) }).into()
     }
 

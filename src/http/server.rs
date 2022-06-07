@@ -1,11 +1,9 @@
-use core::{
-    cell::RefCell,
-    fmt,
-    marker::PhantomData,
-    ptr,
-    sync::atomic::{AtomicBool, Ordering},
-    time::*,
-};
+use core::cell::RefCell;
+use core::fmt::{self, Debug};
+use core::marker::PhantomData;
+use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::time::*;
 
 extern crate alloc;
 use alloc::borrow::Cow;
@@ -16,11 +14,17 @@ use alloc::vec::Vec;
 
 use log::{info, warn};
 
-use embedded_svc::{http::server::{
-    attr::{self, DynStorageRef}, middleware, registry::*, session, Completion, Request, Response, ResponseWrite, Session, Context,
-}, storage::DynStorageImpl};
 use embedded_svc::http::*;
 use embedded_svc::io::{Io, Read, Write};
+use embedded_svc::{
+    http::server::{
+        attr::{self, DynStorageRef},
+        middleware,
+        registry::*,
+        session, Completion, Context, Request, Response, ResponseWrite, Session,
+    },
+    storage::DynStorageImpl,
+};
 
 use esp_idf_hal::mutex;
 
@@ -28,6 +32,7 @@ use esp_idf_sys::*;
 
 use uncased::{Uncased, UncasedStr};
 
+use crate::errors::EspIOError;
 use crate::private::common::Newtype;
 use crate::private::cstr::CString;
 
@@ -147,7 +152,7 @@ pub struct EspHttpServer {
 }
 
 impl EspHttpServer {
-    pub fn new(conf: &Configuration) -> Result<Self, EspError> {
+    pub fn new(conf: &Configuration) -> Result<Self, EspIOError> {
         let mut config: Newtype<httpd_config_t> = conf.into();
         config.0.close_fn = Some(Self::close_fn);
 
@@ -194,7 +199,7 @@ impl EspHttpServer {
         Duration::from_micros(unsafe { esp_timer_get_time() } as _)
     }
 
-    fn unregister(&mut self, uri: CString, conf: httpd_uri_t) -> Result<(), EspError> {
+    fn unregister(&mut self, uri: CString, conf: httpd_uri_t) -> Result<(), EspIOError> {
         unsafe {
             esp!(httpd_unregister_uri_handler(
                 self.sd,
@@ -214,7 +219,7 @@ impl EspHttpServer {
         Ok(())
     }
 
-    fn stop(&mut self) -> Result<(), EspError> {
+    fn stop(&mut self) -> Result<(), EspIOError> {
         if !self.sd.is_null() {
             while !self.registrations.is_empty() {
                 let (uri, registration) = self.registrations.pop().unwrap();
@@ -241,7 +246,7 @@ impl EspHttpServer {
     ) -> Result<(), E>
     where
         H: for<'b> Fn(EspHttpRequest<'b>, EspHttpResponse<'b>) -> Result<Completion, E>,
-        E: fmt::Display + fmt::Debug,
+        E: Debug,
     {
         info!("About to handle query string {:?}", req.query_string());
 
@@ -256,11 +261,11 @@ impl EspHttpServer {
         error: E,
     ) -> c_types::c_int
     where
-        E: fmt::Display + fmt::Debug,
+        E: Debug,
     {
         if response_state == ResponseState::New {
             info!(
-                "About to handle internal error [{}], response is pristine",
+                "About to handle internal error [{:?}], response is pristine",
                 error
             );
 
@@ -272,7 +277,7 @@ impl EspHttpServer {
             }
         } else {
             warn!(
-                "Unhandled internal error [{}], response is already sent or initiated:\n{:?}",
+                "Unhandled internal error [{:?}], response is already sent or initiated:\n{:?}",
                 error, error
             );
         }
@@ -280,9 +285,9 @@ impl EspHttpServer {
         ESP_OK as _
     }
 
-    fn render_error<'a, E>(req: EspHttpRequest<'a>, error: E) -> Result<Completion, EspError>
+    fn render_error<'a, E>(req: EspHttpRequest<'a>, error: E) -> Result<Completion, EspIOError>
     where
-        E: fmt::Debug,
+        E: Debug,
     {
         let mut response_state = ResponseState::New;
 
@@ -291,14 +296,14 @@ impl EspHttpServer {
             .content_type("text/html")
             .into_writer_noreq(None)?;
 
-        writer.do_write_all(
+        writer.write_all(
             format!(
                 r#"
                     <!DOCTYPE html5>
                     <html>
                         <body style="font-family: Verdana, Sans;">
                             <h1>INTERNAL ERROR</h1>
-                            <h2>{}</h2>
+                            <h2>{:?}</h2>
                             <hr>
                             <pre>{:?}</pre>
                         <body>
@@ -315,7 +320,7 @@ impl EspHttpServer {
     fn to_native_handler<H, E>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
     where
         H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
-        E: fmt::Debug,
+        E: Debug,
     {
         let sessions = self.sessions.clone();
         let session_cookie_name = self.session_cookie_name;
@@ -371,7 +376,7 @@ impl Drop for EspHttpServer {
 }
 
 impl Io for EspHttpServer {
-    type Error = EspError;
+    type Error = EspIOError;
 }
 
 impl Context for EspHttpServer {
@@ -383,12 +388,12 @@ impl Registry for EspHttpServer {
     type MiddlewareRegistry<'q, M>
     where
         Self: 'q,
-        M: middleware::Middleware<Self::Root> + Clone + 'static + 'q,
-    = middleware::MiddlewareRegistry<'q, Self::Root, M>;
+        M: middleware::Middleware<Self::Context> + Clone + 'static + 'q,
+    = middleware::MiddlewareRegistry<'q, Self::Context, M>;
 
     fn with_middleware<M>(&mut self, middleware: M) -> Self::MiddlewareRegistry<'_, M>
     where
-        M: middleware::Middleware<Self::Root> + Clone + 'static,
+        M: middleware::Middleware<Self::Context> + Clone + Send + Sync + 'static,
         M::Error: 'static,
         Self: Sized,
     {
@@ -402,8 +407,8 @@ impl Registry for EspHttpServer {
         handler: H,
     ) -> Result<&mut Self, Self::Error>
     where
-        H: for<'a> Fn(Self::Request<'a>, Self::Response<'a>) -> Result<Completion, E> + 'static,
-        E: fmt::Display + fmt::Debug,
+        H: Fn(Self::Request, Self::Response) -> Result<Completion, E> + 'static,
+        E: Debug,
     {
         let c_str = CString::new(uri).unwrap();
 
@@ -460,7 +465,7 @@ impl<'a> EspHttpRequest<'a> {
         }
     }
 
-    fn header<'b>(raw_req: *mut httpd_req_t, name: impl AsRef<str>) -> Option<Cow<'b, str>> {
+    fn header<'b>(raw_req: *mut httpd_req_t, name: &str) -> Option<&str> {
         let c_name = CString::new(name.as_ref()).unwrap();
 
         unsafe {
@@ -492,14 +497,14 @@ impl<'a> EspHttpRequest<'a> {
 }
 
 impl<'a> Io for EspHttpRequest<'a> {
-    type Error = EspError;
+    type Error = EspIOError;
 }
 
-impl<'a> Request<'a> for EspHttpRequest<'a> {
+impl<'a> Request for EspHttpRequest<'a> {
     type Read<'b>
     where
         'a: 'b,
-    = &'b EspHttpRequest<'a>;
+    = &'b mut EspHttpRequest<'a>;
 
     type Attributes<'b>
     where
@@ -511,7 +516,7 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
         Self: 'b,
     = session::RequestScopedSessionReference<'b, EspSessionsMutex, EspSessionMutex>;
 
-    fn query_string(&self) -> Cow<'a, str> {
+    fn query_string(&self) -> &str {
         unsafe {
             match httpd_req_get_url_query_len(self.raw_req) as usize {
                 0 => "".into(),
@@ -546,12 +551,12 @@ impl<'a> Request<'a> for EspHttpRequest<'a> {
         Self::Session::<'r>::new(&self.session)
     }
 
-    fn reader(&self) -> Self::Read<'_> {
+    fn reader(&mut self) -> Self::Read<'_> {
         self
     }
 }
 
-impl<'a> Read for &EspHttpRequest<'a> {
+impl<'a> Read for &mut EspHttpRequest<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         unsafe {
             let len = httpd_req_recv(
@@ -570,7 +575,7 @@ impl<'a> Read for &EspHttpRequest<'a> {
 }
 
 impl<'a> Headers for EspHttpRequest<'a> {
-    fn header(&self, name: impl AsRef<str>) -> Option<Cow<'a, str>> {
+    fn header(&self, name: &str) -> Option<&str> {
         EspHttpRequest::header(self.raw_req, name)
     }
 }
@@ -587,8 +592,8 @@ enum ResponseState {
 struct ResponseHeaders<'a> {
     _ptr: PhantomData<&'a httpd_req_t>,
     status: u16,
-    status_message: Option<Cow<'a, str>>,
-    headers: BTreeMap<Uncased<'a>, Cow<'a, str>>,
+    status_message: Option<&'a str>,
+    headers: BTreeMap<Uncased<'a>, &'a str>,
     session_cookie_name: &'a str,
 }
 
@@ -630,7 +635,7 @@ impl<'a> EspHttpResponse<'a> {
     fn into_writer_noreq(
         self,
         session_id: Option<Cow<'a, str>>,
-    ) -> Result<EspHttpResponseWrite<'a>, EspError> {
+    ) -> Result<EspHttpResponseWrite<'a>, EspIOError> {
         Ok(EspHttpResponseWrite::<'a> {
             raw_req: self.raw_req,
             _ptr: self._ptr,
@@ -657,25 +662,25 @@ impl<'a> SendStatus for EspHttpResponse<'a> {
 }
 
 impl<'a> SendHeaders for EspHttpResponse<'a> {
-    fn set_header<H, V>(&mut self, name: &str, value: &str) -> &mut Self {
+    fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
         // TODO: Optimize; convert everything to lower case? (map is now case-insensitive)
         *self
             .headers
             .headers
-            .entry(Uncased::from(name.into()))
-            .or_insert(Cow::Borrowed("")) = value.into();
+            .entry(Uncased::from(name))
+            .or_insert("") = value.into();
         self
     }
 }
 
 impl<'a> Io for EspHttpResponse<'a> {
-    type Error = EspError;
+    type Error = EspIOError;
 }
 
-impl<'a> Response<'a> for EspHttpResponse<'a> {
-    type Write<'b> = EspHttpResponseWrite<'b>;
+impl<'a> Response for EspHttpResponse<'a> {
+    type Write = EspHttpResponseWrite<'a>;
 
-    fn into_writer(self) -> Result<Self::Write<'a>, Self::Error> {
+    fn into_writer(self) -> Result<Self::Write, Self::Error> {
         let session_id: Option<Cow<'static, str>> = {
             let session = request.session();
 
@@ -704,7 +709,7 @@ pub struct EspHttpResponseWrite<'a> {
 }
 
 impl<'a> EspHttpResponseWrite<'a> {
-    fn send_headers(&mut self) -> Result<(), EspError> {
+    fn send_headers(&mut self) -> Result<(), EspIOError> {
         if let Some(headers) = self.headers.as_mut() {
             *self.state = ResponseState::HeadersSent;
 
@@ -750,7 +755,7 @@ impl<'a> EspHttpResponseWrite<'a> {
                     //     value
                     //         .as_ref()
                     //         .parse::<usize>()
-                    //         .map_err(|_| EspError::from(ESP_ERR_INVALID_ARG as _).unwrap())?,
+                    //         .map_err(|_| EspError::from(ESP_ERR_INVALID_ARG as _).unwrap().into())?,
                     // );
                 } else {
                     c_headers.push((
@@ -785,8 +790,11 @@ impl<'a> EspHttpResponseWrite<'a> {
     }
 }
 
-impl<'a> ResponseWrite<'a> for EspHttpResponseWrite<'a> {
-    fn complete(mut self) -> Result<Completion, Self::Error> {
+impl<'a> ResponseWrite for EspHttpResponseWrite<'a> {
+    fn complete<R>(mut self, request: R) -> Result<Completion, Self::Error>
+    where
+        R: Request,
+    {
         self.send_headers()?;
 
         esp!(unsafe { httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0) })?;
@@ -798,7 +806,7 @@ impl<'a> ResponseWrite<'a> for EspHttpResponseWrite<'a> {
 }
 
 impl<'a> Io for EspHttpResponseWrite<'a> {
-    type Error = EspError;
+    type Error = EspIOError;
 }
 
 impl<'a> Write for EspHttpResponseWrite<'a> {
@@ -815,11 +823,15 @@ impl<'a> Write for EspHttpResponseWrite<'a> {
 
         Ok(buf.len())
     }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 #[cfg(esp_idf_httpd_ws_support)]
 pub mod ws {
-    use core::fmt;
+    use core::fmt::Debug;
     use core::ptr;
     use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -838,6 +850,7 @@ pub mod ws {
 
     use esp_idf_hal::mutex::{Condvar, Mutex};
 
+    use crate::errors::EspIOError;
     use crate::private::common::Newtype;
     use crate::private::cstr::CString;
 
@@ -875,7 +888,7 @@ pub mod ws {
     }
 
     impl Io for EspHttpWsSender {
-        type Error = EspError;
+        type Error = EspIOError;
     }
 
     impl Sender for EspHttpWsSender {
@@ -919,7 +932,7 @@ pub mod ws {
 
                     Ok(EspHttpWsDetachedSender::new(*sd, fd, closed.clone()))
                 }
-                Self::Closed(_) => Err(EspError::from(ESP_FAIL).unwrap()),
+                Self::Closed(_) => Err(EspError::from(ESP_FAIL).unwrap().into()),
             }
         }
     }
@@ -972,13 +985,13 @@ pub mod ws {
     }
 
     impl Io for EspHttpWsReceiver {
-        type Error = EspError;
+        type Error = EspIOError;
     }
 
     impl Receiver for EspHttpWsReceiver {
         fn recv(&mut self, frame_data_buf: &mut [u8]) -> Result<(FrameType, usize), Self::Error> {
             match self {
-                Self::New(_) => Err(EspError::from(ESP_FAIL).unwrap()),
+                Self::New(_) => Err(EspError::from(ESP_FAIL).unwrap().into()),
                 Self::Open(raw_req) => {
                     let mut raw_frame: httpd_ws_frame_t = Default::default();
 
@@ -1077,7 +1090,7 @@ pub mod ws {
     }
 
     impl Io for EspHttpWsDetachedSender {
-        type Error = EspError;
+        type Error = EspIOError;
     }
 
     impl Sender for EspHttpWsDetachedSender {
@@ -1147,7 +1160,7 @@ pub mod ws {
         fn set_handler<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, Self::Error>
         where
             H: for<'a> Fn(&'a mut Self::Receiver, &'a mut Self::Sender) -> Result<(), E> + 'static,
-            E: fmt::Display + fmt::Debug,
+            E: Debug,
         {
             let c_str = CString::new(uri).unwrap();
 
@@ -1192,7 +1205,7 @@ pub mod ws {
         ) -> Result<(), E>
         where
             H: for<'b> Fn(&'b mut EspHttpWsReceiver, &'b mut EspHttpWsSender) -> Result<(), E>,
-            E: fmt::Display + fmt::Debug,
+            E: Debug,
         {
             handler(receiver, sender)?;
 
@@ -1201,9 +1214,9 @@ pub mod ws {
 
         fn handle_ws_error<'a, E>(error: E) -> c_types::c_int
         where
-            E: fmt::Display + fmt::Debug,
+            E: Debug,
         {
-            warn!("Unhandled internal error [{}]:\n{:?}", error, error);
+            warn!("Unhandled internal error [{:?}]:\n{:?}", error, error);
 
             ESP_OK as _
         }
@@ -1219,7 +1232,7 @@ pub mod ws {
         where
             H: for<'a> Fn(&'a mut EspHttpWsReceiver, &'a mut EspHttpWsSender) -> Result<(), E>
                 + 'static,
-            E: fmt::Display + fmt::Debug,
+            E: Debug,
         {
             let boxed_handler = Arc::new(
                 move |mut receiver: EspHttpWsReceiver, mut sender: EspHttpWsSender| {

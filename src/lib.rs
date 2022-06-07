@@ -55,21 +55,18 @@ pub mod netif;
 #[cfg(all(feature = "experimental", feature = "alloc"))]
 pub mod notify;
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
-// TODO: Expose a subset which does not require "alloc"
 pub mod nvs;
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
-// TODO: Expose a subset which does not require "alloc"
 pub mod nvs_storage;
-// #[cfg(all(
-//     feature = "experimental",
-//     feature = "alloc",
-//     esp_idf_comp_app_update_enabled,
-//     esp_idf_comp_spi_flash_enabled
-// ))]
-// pub mod ota;
+#[cfg(all(
+    feature = "experimental",
+    esp_idf_comp_app_update_enabled,
+    esp_idf_comp_spi_flash_enabled
+))]
+pub mod ota;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub mod ping;
-#[cfg(all(feature = "alloc", esp_idf_comp_esp_netif_enabled))]
+#[cfg(esp_idf_comp_esp_netif_enabled)]
 pub mod sntp;
 #[cfg(esp_idf_comp_esp_event_enabled)]
 pub mod sysloop;
