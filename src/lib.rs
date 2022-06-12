@@ -86,3 +86,7 @@ pub mod wifi;
 pub mod ws;
 
 mod private;
+
+mod fatfs;
+mod sdspi;
+mod vfs;
