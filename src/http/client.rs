@@ -151,12 +151,8 @@ impl Io for EspHttpClient {
 impl Client for EspHttpClient {
     type Request<'a> = EspHttpRequest<'a>;
 
-    fn request(
-        &mut self,
-        method: Method,
-        url: impl AsRef<str>,
-    ) -> Result<Self::Request<'_>, Self::Error> {
-        let c_url = CString::new(url.as_ref()).unwrap();
+    fn request(&mut self, method: Method, url: &str) -> Result<Self::Request<'_>, Self::Error> {
+        let c_url = CString::new(url).unwrap();
 
         esp!(unsafe { esp_http_client_set_url(self.raw, c_url.as_ptr() as _) })?;
         esp!(unsafe {
@@ -188,13 +184,13 @@ impl<'a> Io for EspHttpRequest<'a> {
     type Error = EspIOError;
 }
 
-impl<'a> Request<'a> for EspHttpRequest<'a> {
-    type Write<'b> = EspHttpRequestWrite<'b>;
+impl<'a> Request for EspHttpRequest<'a> {
+    type Write = EspHttpRequestWrite<'a>;
 
-    fn into_writer(self, size: usize) -> Result<Self::Write<'a>, Self::Error> {
+    fn into_writer(self, size: usize) -> Result<Self::Write, Self::Error> {
         esp!(unsafe { esp_http_client_open(self.client.raw, size as _) })?;
 
-        Ok(Self::Write::<'a> {
+        Ok(Self::Write {
             client: self.client,
             follow_redirects: self.follow_redirects,
             size,
@@ -300,7 +296,7 @@ impl<'a> EspHttpRequestWrite<'a> {
     }
 }
 
-impl<'a> RequestWrite<'a> for EspHttpRequestWrite<'a> {
+impl<'a> RequestWrite for EspHttpRequestWrite<'a> {
     type Response = EspHttpResponse<'a>;
 
     fn into_response(mut self) -> Result<Self::Response, Self::Error> {
