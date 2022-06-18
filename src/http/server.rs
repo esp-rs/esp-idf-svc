@@ -1,9 +1,9 @@
 use core::cell::UnsafeCell;
 use core::fmt::{Debug, Display, Write as _};
 use core::marker::PhantomData;
+use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
-use core::{mem, ptr};
 
 extern crate alloc;
 use alloc::collections::BTreeMap;
@@ -292,7 +292,7 @@ impl EspHttpServer {
 
             match result {
                 Ok(()) => ESP_OK as _,
-                Err(e) => Self::handle_error(raw_req, ResponseState::New /*TODO*/, e),
+                Err(e) => Self::handle_error(raw_req, response_state, e),
             }
         })
     }
@@ -388,52 +388,6 @@ impl<'a> EspHttpRequest<'a> {
             query_string: UnsafeCell::new(None),
             headers: UnsafeCell::new(BTreeMap::new()),
             _ref: PhantomData,
-        }
-    }
-
-    fn header<'b>(&self, name: &str) -> Option<&str> {
-        if let Some(value) =
-            unsafe { self.headers.get().as_ref().unwrap() }.get(UncasedStr::new(name))
-        {
-            Some(value.as_ref())
-        } else {
-            let c_name = CString::new(name).unwrap();
-
-            match unsafe { httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _) }
-                as usize
-            {
-                0 => None,
-                len => {
-                    // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
-                    // pointer to the header value that is in the scratch buffer
-                    //
-                    // Check if we can implement it ourselves vy traversing the scratch buffer manually
-
-                    let mut buf: Vec<u8> = Vec::with_capacity(len + 1);
-
-                    esp_nofail!(unsafe {
-                        httpd_req_get_hdr_value_str(
-                            self.raw_req,
-                            c_name.as_ptr() as _,
-                            buf.as_mut_ptr() as *mut _,
-                            (len + 1) as size_t,
-                        )
-                    });
-
-                    unsafe {
-                        buf.set_len(len + 1);
-                    }
-
-                    // TODO: Replace with a proper conversion from ISO-8859-1 to UTF8
-                    let value = String::from_utf8_lossy(&buf[..len]).into_owned();
-                    unsafe { self.headers.get().as_mut().unwrap() }
-                        .insert(Uncased::from(name.to_owned()), value);
-
-                    unsafe { self.headers.get().as_ref().unwrap() }
-                        .get(UncasedStr::new(name))
-                        .map(|s| s.as_ref())
-                }
-            }
         }
     }
 
@@ -545,7 +499,49 @@ impl<'a> Read for &mut EspHttpRequest<'a> {
 
 impl<'a> Headers for EspHttpRequest<'a> {
     fn header(&self, name: &str) -> Option<&str> {
-        EspHttpRequest::header(self, name)
+        if let Some(value) =
+            unsafe { self.headers.get().as_ref().unwrap() }.get(UncasedStr::new(name))
+        {
+            Some(value.as_ref())
+        } else {
+            let c_name = CString::new(name).unwrap();
+
+            match unsafe { httpd_req_get_hdr_value_len(self.raw_req, c_name.as_ptr() as _) }
+                as usize
+            {
+                0 => None,
+                len => {
+                    // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
+                    // pointer to the header value that is in the scratch buffer
+                    //
+                    // Check if we can implement it ourselves vy traversing the scratch buffer manually
+
+                    let mut buf: Vec<u8> = Vec::with_capacity(len + 1);
+
+                    esp_nofail!(unsafe {
+                        httpd_req_get_hdr_value_str(
+                            self.raw_req,
+                            c_name.as_ptr() as _,
+                            buf.as_mut_ptr() as *mut _,
+                            (len + 1) as size_t,
+                        )
+                    });
+
+                    unsafe {
+                        buf.set_len(len + 1);
+                    }
+
+                    // TODO: Replace with a proper conversion from ISO-8859-1 to UTF8
+                    let value = String::from_utf8_lossy(&buf[..len]).into_owned();
+                    unsafe { self.headers.get().as_mut().unwrap() }
+                        .insert(Uncased::from(name.to_owned()), value);
+
+                    unsafe { self.headers.get().as_ref().unwrap() }
+                        .get(UncasedStr::new(name))
+                        .map(|s| s.as_ref())
+                }
+            }
+        }
     }
 }
 
@@ -568,6 +564,7 @@ struct EspHttpResponseHeaders {
     status: u16,
     status_message: Option<String>,
     headers: BTreeMap<Uncased<'static>, CString>,
+    names: Vec<CString>,
 }
 
 impl<'a> EspHttpResponseHeaders {
@@ -576,16 +573,11 @@ impl<'a> EspHttpResponseHeaders {
             status: 200,
             status_message: None,
             headers: BTreeMap::new(),
+            names: Vec::new(),
         }
     }
 
-    fn send(
-        self,
-        raw_req: *mut httpd_req_t,
-        state: &mut ResponseState,
-    ) -> Result<Vec<CString>, EspIOError> {
-        *state = ResponseState::HeadersSent;
-
+    fn send(&mut self, raw_req: *mut httpd_req_t) -> Result<(), EspIOError> {
         // TODO: Would be much more effective if we are serializing the status line and headers directly
         // Consider implementing this on top of http_resp_send() - even though that would require implementing
         // chunking in Rust
@@ -600,8 +592,6 @@ impl<'a> EspHttpResponseHeaders {
 
         esp!(unsafe { httpd_resp_set_status(raw_req, c_status.as_ptr() as _) })?;
 
-        let mut names = Vec::new();
-
         for (key, value) in &self.headers {
             if key == "Content-Type" {
                 esp!(unsafe { httpd_resp_set_type(raw_req, value.as_ptr()) })?;
@@ -614,11 +604,10 @@ impl<'a> EspHttpResponseHeaders {
                     httpd_resp_set_hdr(raw_req, name.as_ptr() as _, value.as_ptr() as _)
                 })?;
 
-                names.push(name);
+                self.names.push(name);
             }
         }
-
-        Ok(names)
+        Ok(())
     }
 }
 
@@ -706,16 +695,19 @@ impl<'a> Io for EspHttpResponseWrite<'a> {
 impl<'a> Write for EspHttpResponseWrite<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         if !buf.is_empty() {
-            let _names = if let Some(headers) = mem::replace(&mut self.headers, None) {
-                headers.send(self.raw_req, &mut self.state)?
-            } else {
-                Vec::new()
-            };
+            if *self.state == ResponseState::New {
+                if let Some(headers) = self.headers.as_mut() {
+                    headers.send(self.raw_req)?;
+
+                    *self.state = ResponseState::HeadersSent;
+                }
+            }
 
             esp!(unsafe {
                 httpd_resp_send_chunk(self.raw_req, buf.as_ptr() as *const _, buf.len() as ssize_t)
             })?;
 
+            self.headers = None;
             *self.state = ResponseState::Opened;
         }
 
