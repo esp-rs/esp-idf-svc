@@ -4,8 +4,7 @@ use core::time;
 extern crate alloc;
 use alloc::sync::Arc;
 
-use embedded_svc::io::Io;
-use embedded_svc::ws::{FrameType, Sender};
+use embedded_svc::ws::{ErrorType, FrameType, Sender};
 
 use esp_idf_hal::delay::TickType;
 use esp_idf_hal::mutex::{Condvar, Mutex};
@@ -475,7 +474,7 @@ impl EspWebSocketClient {
         &mut self,
         frame_type: FrameType,
         frame_data: Option<&[u8]>,
-    ) -> Result<usize, <EspWebSocketClient as Io>::Error> {
+    ) -> Result<usize, <EspWebSocketClient as ErrorType>::Error> {
         let mut content = core::ptr::null();
         let mut content_length: usize = 0;
 
@@ -517,7 +516,7 @@ impl Drop for EspWebSocketClient {
     }
 }
 
-impl Io for EspWebSocketClient {
+impl ErrorType for EspWebSocketClient {
     type Error = EspIOError;
 }
 

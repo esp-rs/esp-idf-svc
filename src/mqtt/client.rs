@@ -8,9 +8,8 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use embedded_svc::io::{self, Io};
 use embedded_svc::mqtt::client::utils::{ConnState, ConnStateGuard, Connection, Postbox};
-use embedded_svc::mqtt::client::{self, Message, MessageImpl};
+use embedded_svc::mqtt::client::{self, ErrorType, Message, MessageImpl};
 
 use esp_idf_hal::mutex::Condvar;
 
@@ -19,7 +18,6 @@ use esp_idf_sys::*;
 #[cfg(feature = "experimental")]
 pub use asyncify::*;
 
-use crate::errors::EspIOError;
 use crate::private::cstr::*;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -207,11 +205,11 @@ pub struct EspMqttClient<S = ()> {
     _boxed_raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
 }
 
-impl EspMqttClient<ConnState<MessageImpl, EspIOError>> {
+impl EspMqttClient<ConnState<MessageImpl, EspError>> {
     pub fn new_with_conn<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
-    ) -> Result<(Self, Connection<Condvar, MessageImpl, EspIOError>), EspIOError>
+    ) -> Result<(Self, Connection<Condvar, MessageImpl, EspError>), EspError>
     where
         Self: Sized,
     {
@@ -226,17 +224,17 @@ impl EspMqttClient<ConnState<MessageImpl, EspIOError>> {
 impl<M, E> EspMqttClient<ConnState<M, E>>
 where
     M: Send + 'static,
-    E: io::Error + Send + 'static,
+    E: Debug + Send + 'static,
 {
     pub fn new_with_converting_conn<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
         mut converter: impl for<'b> FnMut(
-                &'b Result<client::Event<EspMqttMessage<'b>>, EspIOError>,
+                &'b Result<client::Event<EspMqttMessage<'b>>, EspError>,
             ) -> Result<client::Event<M>, E>
             + Send
             + 'static,
-    ) -> Result<(Self, Connection<Condvar, M, E>), EspIOError>
+    ) -> Result<(Self, Connection<Condvar, M, E>), EspError>
     where
         Self: Sized,
     {
@@ -256,10 +254,10 @@ impl EspMqttClient<()> {
     pub fn new<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
-        callback: impl for<'b> FnMut(&'b Result<client::Event<EspMqttMessage<'b>>, EspIOError>)
+        callback: impl for<'b> FnMut(&'b Result<client::Event<EspMqttMessage<'b>>, EspError>)
             + Send
             + 'static,
-    ) -> Result<Self, EspIOError>
+    ) -> Result<Self, EspError>
     where
         Self: Sized,
     {
@@ -272,10 +270,10 @@ impl<S> EspMqttClient<S> {
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
         conn_state_guard: Option<Arc<ConnStateGuard<Condvar, S>>>,
-        mut callback: impl for<'b> FnMut(&'b Result<client::Event<EspMqttMessage<'b>>, EspIOError>)
+        mut callback: impl for<'b> FnMut(&'b Result<client::Event<EspMqttMessage<'b>>, EspError>)
             + Send
             + 'static,
-    ) -> Result<Self, EspIOError>
+    ) -> Result<Self, EspError>
     where
         Self: Sized,
     {
@@ -296,7 +294,7 @@ impl<S> EspMqttClient<S> {
         conf: &'a MqttClientConfiguration<'a>,
         raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
         conn_state_guard: Option<Arc<ConnStateGuard<Condvar, S>>>,
-    ) -> Result<Self, EspIOError>
+    ) -> Result<Self, EspError>
     where
         Self: Sized,
     {
@@ -344,7 +342,7 @@ impl<S> EspMqttClient<S> {
         }
     }
 
-    fn check(result: i32) -> Result<client::MessageId, EspIOError> {
+    fn check(result: i32) -> Result<client::MessageId, EspError> {
         if result < 0 {
             esp!(result)?;
         }
@@ -369,8 +367,8 @@ impl<P> Drop for EspMqttClient<P> {
     }
 }
 
-impl<P> Io for EspMqttClient<P> {
-    type Error = EspIOError;
+impl<P> ErrorType for EspMqttClient<P> {
+    type Error = EspError;
 }
 
 impl<P> client::Client for EspMqttClient<P> {
@@ -451,7 +449,7 @@ impl<'a> EspMqttMessage<'a> {
     #[allow(non_upper_case_globals)]
     fn new_event(
         event: &'a esp_mqtt_event_t,
-    ) -> Result<client::Event<EspMqttMessage<'a>>, EspIOError> {
+    ) -> Result<client::Event<EspMqttMessage<'a>>, EspError> {
         match event.event_id {
             esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap().into()), // TODO
             esp_mqtt_event_id_t_MQTT_EVENT_BEFORE_CONNECT => Ok(client::Event::BeforeConnect),
@@ -557,11 +555,12 @@ impl<'a> client::Message for EspMqttMessage<'a> {
 
 #[cfg(feature = "experimental")]
 mod asyncify {
+    use core::fmt::Debug;
+
     extern crate alloc;
 
     use alloc::sync::Arc;
 
-    use embedded_svc::io;
     use embedded_svc::mqtt::client::MessageImpl;
     use embedded_svc::mqtt::client::{self, utils::ConnStateGuard};
     use embedded_svc::utils::asyncify::mqtt::client::{
@@ -571,8 +570,9 @@ mod asyncify {
 
     use esp_idf_hal::mutex::{Condvar, Mutex};
 
+    use esp_idf_sys::EspError;
+
     use super::{EspMqttClient, EspMqttMessage, MqttClientConfiguration};
-    use crate::errors::EspIOError;
 
     impl<P> UnblockingAsyncify for super::EspMqttClient<P> {
         type AsyncWrapper<U, S> = AsyncClient<U, Arc<Mutex<S>>>;
@@ -582,12 +582,12 @@ mod asyncify {
         type AsyncWrapper<S> = AsyncClient<(), Blocking<S, Publishing>>;
     }
 
-    pub type EspMqttAsyncClient = EspMqttConvertingAsyncClient<MessageImpl, EspIOError>;
+    pub type EspMqttAsyncClient = EspMqttConvertingAsyncClient<MessageImpl, EspError>;
 
     pub type EspMqttUnblockingAsyncClient<U> =
-        EspMqttConvertingUnblockingAsyncClient<U, MessageImpl, EspIOError>;
+        EspMqttConvertingUnblockingAsyncClient<U, MessageImpl, EspError>;
 
-    pub type EspMqttAsyncConnection = EspMqttConvertingAsyncConnection<MessageImpl, EspIOError>;
+    pub type EspMqttAsyncConnection = EspMqttConvertingAsyncConnection<MessageImpl, EspError>;
 
     pub type EspMqttConvertingUnblockingAsyncClient<U, M, E> =
         AsyncClient<U, Arc<Mutex<EspMqttClient<AsyncConnState<M, E>>>>>;
@@ -597,11 +597,11 @@ mod asyncify {
 
     pub type EspMqttConvertingAsyncConnection<M, E> = AsyncConnection<Condvar, M, E>;
 
-    impl EspMqttClient<AsyncConnState<MessageImpl, EspIOError>> {
+    impl EspMqttClient<AsyncConnState<MessageImpl, EspError>> {
         pub fn new_with_async_conn<'a>(
             url: impl AsRef<str>,
             conf: &'a MqttClientConfiguration<'a>,
-        ) -> Result<(Self, EspMqttAsyncConnection), EspIOError>
+        ) -> Result<(Self, EspMqttAsyncConnection), EspError>
         where
             Self: Sized,
         {
@@ -616,17 +616,17 @@ mod asyncify {
     impl<M, E> EspMqttClient<AsyncConnState<M, E>>
     where
         M: Send + 'static,
-        E: io::Error + Send + 'static,
+        E: Debug + Send + 'static,
     {
         pub fn new_with_converting_async_conn<'a>(
             url: impl AsRef<str>,
             conf: &'a MqttClientConfiguration<'a>,
             mut converter: impl for<'b> FnMut(
-                    &'b Result<client::Event<EspMqttMessage<'b>>, EspIOError>,
+                    &'b Result<client::Event<EspMqttMessage<'b>>, EspError>,
                 ) -> Result<client::Event<M>, E>
                 + Send
                 + 'static,
-        ) -> Result<(Self, EspMqttConvertingAsyncConnection<M, E>), EspIOError>
+        ) -> Result<(Self, EspMqttConvertingAsyncConnection<M, E>), EspError>
         where
             Self: Sized,
         {

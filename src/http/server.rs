@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use core::fmt::Debug;
+use core::fmt::{Debug, Display, Write as _};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
@@ -13,7 +13,9 @@ use alloc::vec::Vec;
 
 use log::{info, warn};
 
-use embedded_svc::http::server::{Completion, Request, Response, ResponseWrite};
+use embedded_svc::http::server::{
+    registry::Registry, Completion, Handler, HandlerError, Request, Response, ResponseWrite,
+};
 use embedded_svc::http::*;
 use embedded_svc::io::{Io, Read, Write};
 
@@ -159,65 +161,6 @@ impl EspHttpServer {
         Ok(server)
     }
 
-    pub fn handle_get<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, EspError>
-    where
-        H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
-        E: Debug,
-    {
-        self.handle(uri, Method::Get, handler)
-    }
-
-    pub fn handle<H, E>(
-        &mut self,
-        uri: &str,
-        method: Method,
-        handler: H,
-    ) -> Result<&mut Self, EspError>
-    where
-        H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
-        E: Debug,
-    {
-        let c_str = CString::new(uri).unwrap();
-
-        #[allow(clippy::needless_update)]
-        let conf = httpd_uri_t {
-            uri: c_str.as_ptr() as _,
-            method: Newtype::<c_types::c_uint>::from(method).0,
-            user_ctx: Box::into_raw(Box::new(self.to_native_handler(handler))) as *mut _,
-            handler: Some(EspHttpServer::handle_req),
-            ..Default::default()
-        };
-
-        esp!(unsafe { esp_idf_sys::httpd_register_uri_handler(self.sd, &conf) })?;
-
-        info!(
-            "Registered Httpd server handler {:?} for URI \"{}\"",
-            method,
-            c_str.to_str().unwrap()
-        );
-
-        self.registrations.push((c_str, conf));
-
-        Ok(self)
-    }
-
-    // fn get_random() -> [u8; 16] {
-    //     let mut result = [0; 16];
-
-    //     unsafe {
-    //         esp_fill_random(
-    //             &mut result as *mut _ as *mut c_types::c_void,
-    //             result.len() as _,
-    //         )
-    //     }
-
-    //     result
-    // }
-
-    // fn get_current_time() -> Duration {
-    //     Duration::from_micros(unsafe { esp_timer_get_time() } as _)
-    // }
-
     fn unregister(&mut self, uri: CString, conf: httpd_uri_t) -> Result<(), EspIOError> {
         unsafe {
             esp!(httpd_unregister_uri_handler(
@@ -258,18 +201,17 @@ impl EspHttpServer {
         Ok(())
     }
 
-    fn handle_request<'a, H, E>(
+    fn handle_request<'a, H>(
         req: EspHttpRequest<'a>,
         resp: EspHttpResponse<'a>,
         handler: &H,
-    ) -> Result<(), E>
+    ) -> Result<(), HandlerError>
     where
-        H: Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E>,
-        E: Debug,
+        H: Handler<EspHttpRequest<'a>, EspHttpResponse<'a>>,
     {
         info!("About to handle query string {:?}", req.query_string());
 
-        handler(req, resp)?;
+        handler.handle(req, resp)?;
 
         Ok(())
     }
@@ -280,24 +222,24 @@ impl EspHttpServer {
         error: E,
     ) -> c_types::c_int
     where
-        E: Debug,
+        E: Display,
     {
         if response_state == ResponseState::New {
             info!(
-                "About to handle internal error [{:?}], response is pristine",
-                error
+                "About to handle internal error [{}], response is pristine",
+                &error
             );
 
-            if let Err(error) = Self::render_error(raw_req, error) {
+            if let Err(error2) = Self::render_error(raw_req, &error) {
                 warn!(
-                    "Internal error[{}] while rendering another internal error:\n{:?}",
-                    error, error
+                    "Internal error[{}] while rendering another internal error:\n{}",
+                    error2, error
                 );
             }
         } else {
             warn!(
-                "Unhandled internal error [{:?}], response is already sent or initiated:\n{:?}",
-                error, error
+                "Unhandled internal error [{}], response is already sent or initiated",
+                error
             );
         }
 
@@ -306,7 +248,7 @@ impl EspHttpServer {
 
     fn render_error<'a, E>(raw_req: *mut httpd_req_t, error: E) -> Result<Completion, EspIOError>
     where
-        E: Debug,
+        E: Display,
     {
         let mut response_state = ResponseState::New;
 
@@ -322,24 +264,22 @@ impl EspHttpServer {
                     <html>
                         <body style="font-family: Verdana, Sans;">
                             <h1>INTERNAL ERROR</h1>
-                            <h2>{:?}</h2>
                             <hr>
-                            <pre>{:?}</pre>
+                            <pre>{}</pre>
                         <body>
                     </html>
                 "#,
-                error, error
+                error
             )
             .as_bytes(),
         )?;
 
-        writer.complete(EspHttpRequest::new(raw_req))
+        writer.complete()
     }
 
-    fn to_native_handler<H, E>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
+    fn to_native_handler<H>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
     where
-        H: for<'a> Fn(EspHttpRequest<'a>, EspHttpResponse<'a>) -> Result<Completion, E> + 'static,
-        E: Debug,
+        H: for<'a> Handler<EspHttpRequest<'a>, EspHttpResponse<'a>> + 'static,
     {
         Box::new(move |raw_req| {
             let mut response_state = ResponseState::New;
@@ -352,7 +292,7 @@ impl EspHttpServer {
 
             match result {
                 Ok(()) => ESP_OK as _,
-                Err(e) => Self::handle_error(raw_req, response_state, e),
+                Err(e) => Self::handle_error(raw_req, ResponseState::New /*TODO*/, e),
             }
         })
     }
@@ -391,12 +331,50 @@ impl Drop for EspHttpServer {
     }
 }
 
-// impl Io for EspHttpServer {
-//     type Error = EspIOError;
-// }
+impl Registry for EspHttpServer {
+    type Error = EspError;
+    type IOError = EspIOError;
+
+    type Request<'a> = EspHttpRequest<'a>;
+    type Response<'a> = EspHttpResponse<'a>;
+
+    fn set_handler<H>(
+        &mut self,
+        uri: &str,
+        method: Method,
+        handler: H,
+    ) -> Result<&mut Self, Self::Error>
+    where
+        H: for<'a> Handler<Self::Request<'a>, Self::Response<'a>> + 'static,
+    {
+        let c_str = CString::new(uri).unwrap();
+
+        #[allow(clippy::needless_update)]
+        let conf = httpd_uri_t {
+            uri: c_str.as_ptr() as _,
+            method: Newtype::<c_types::c_uint>::from(method).0,
+            user_ctx: Box::into_raw(Box::new(self.to_native_handler(handler))) as *mut _,
+            handler: Some(EspHttpServer::handle_req),
+            ..Default::default()
+        };
+
+        esp!(unsafe { esp_idf_sys::httpd_register_uri_handler(self.sd, &conf) })?;
+
+        info!(
+            "Registered Httpd server handler {:?} for URI \"{}\"",
+            method,
+            c_str.to_str().unwrap()
+        );
+
+        self.registrations.push((c_str, conf));
+
+        Ok(self)
+    }
+}
 
 pub struct EspHttpRequest<'a> {
     raw_req: *mut httpd_req_t,
+    id: UnsafeCell<Option<heapless::String<32>>>,
     query_string: UnsafeCell<Option<String>>,
     headers: UnsafeCell<BTreeMap<Uncased<'static>, String>>,
     _ref: PhantomData<&'a ()>,
@@ -406,6 +384,7 @@ impl<'a> EspHttpRequest<'a> {
     fn new(raw_req: *mut httpd_req_t) -> Self {
         Self {
             raw_req,
+            id: UnsafeCell::new(None),
             query_string: UnsafeCell::new(None),
             headers: UnsafeCell::new(BTreeMap::new()),
             _ref: PhantomData,
@@ -457,6 +436,19 @@ impl<'a> EspHttpRequest<'a> {
             }
         }
     }
+
+    fn get_random() -> [u8; 16] {
+        let mut result = [0; 16];
+
+        unsafe {
+            esp_fill_random(
+                &mut result as *mut _ as *mut c_types::c_void,
+                result.len() as _,
+            )
+        }
+
+        result
+    }
 }
 
 impl<'a> Io for EspHttpRequest<'a> {
@@ -470,7 +462,22 @@ impl<'a> Request for EspHttpRequest<'a> {
     = &'b mut EspHttpRequest<'a>;
 
     fn get_request_id(&self) -> &'_ str {
-        return ""; // TODO
+        if let Some(id) = unsafe { self.id.get().as_ref().unwrap() }.as_ref() {
+            id.as_ref()
+        } else {
+            let mut id = heapless::String::<32>::new();
+            let buf = Self::get_random();
+
+            write!(
+                &mut id,
+                "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9],
+                buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]).unwrap();
+
+            *unsafe { self.id.get().as_mut().unwrap() } = Some(id);
+
+            unsafe { self.id.get().as_ref().unwrap() }.as_ref().unwrap()
+        }
     }
 
     fn query_string(&self) -> &str {
@@ -683,10 +690,7 @@ pub struct EspHttpResponseWrite<'a> {
 impl<'a> EspHttpResponseWrite<'a> {}
 
 impl<'a> ResponseWrite for EspHttpResponseWrite<'a> {
-    fn complete<R>(self, _request: R) -> Result<Completion, Self::Error>
-    where
-        R: Request,
-    {
+    fn complete(self) -> Result<Completion, Self::Error> {
         esp!(unsafe { httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0) })?;
 
         *self.state = ResponseState::Closed;
@@ -732,10 +736,10 @@ pub mod ws {
     extern crate alloc;
     use alloc::sync::Arc;
 
+    use embedded_svc::ws::server::registry::Registry;
     use log::*;
 
     use embedded_svc::http::Method;
-    use embedded_svc::io::Io;
     use embedded_svc::ws::server::*;
     use embedded_svc::ws::*;
 
@@ -743,7 +747,6 @@ pub mod ws {
 
     use esp_idf_hal::mutex::{Condvar, Mutex};
 
-    use crate::errors::EspIOError;
     use crate::private::common::Newtype;
     use crate::private::cstr::CString;
 
@@ -780,8 +783,8 @@ pub mod ws {
         }
     }
 
-    impl Io for EspHttpWsSender {
-        type Error = EspIOError;
+    impl ErrorType for EspHttpWsSender {
+        type Error = EspError;
     }
 
     impl Sender for EspHttpWsSender {
@@ -877,8 +880,8 @@ pub mod ws {
         }
     }
 
-    impl Io for EspHttpWsReceiver {
-        type Error = EspIOError;
+    impl ErrorType for EspHttpWsReceiver {
+        type Error = EspError;
     }
 
     impl Receiver for EspHttpWsReceiver {
@@ -982,8 +985,8 @@ pub mod ws {
         }
     }
 
-    impl Io for EspHttpWsDetachedSender {
-        type Error = EspIOError;
+    impl ErrorType for EspHttpWsDetachedSender {
+        type Error = EspError;
     }
 
     impl Sender for EspHttpWsDetachedSender {
@@ -1046,8 +1049,15 @@ pub mod ws {
         }
     }
 
-    impl EspHttpServer {
-        pub fn handle_ws<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, EspError>
+    impl Registry for EspHttpServer {
+        type Error = EspError;
+
+        type SendReceiveError = EspError;
+
+        type Receiver = EspHttpWsReceiver;
+        type Sender = EspHttpWsSender;
+
+        fn handle_ws<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, EspError>
         where
             H: for<'a> Fn(&'a mut EspHttpWsReceiver, &'a mut EspHttpWsSender) -> Result<(), E>
                 + 'static,
