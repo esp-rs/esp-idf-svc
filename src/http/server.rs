@@ -218,12 +218,14 @@ impl EspHttpServer {
         raw_req: *mut httpd_req_t,
         headers: &mut Option<EspHttpResponseHeaders>,
     ) -> Result<(), HandlerError> {
+        let buf = &[];
+
         if let Some(headers) = headers.as_mut() {
             headers.send(raw_req)?;
 
-            let buf = &[];
-
             esp!(unsafe { httpd_resp_send(raw_req, buf.as_ptr() as *const _, 0) })?;
+        } else {
+            esp!(unsafe { httpd_resp_send_chunk(raw_req, buf.as_ptr() as *const _, 0) })?;
         }
 
         Ok(())
@@ -282,6 +284,10 @@ impl EspHttpServer {
             )
             .as_bytes(),
         )?;
+
+        let buf = &[];
+
+        esp!(unsafe { httpd_resp_send_chunk(raw_req, buf.as_ptr() as *const _, 0) })?;
 
         Ok(())
     }
