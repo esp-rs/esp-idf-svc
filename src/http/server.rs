@@ -13,9 +13,7 @@ use alloc::vec::Vec;
 
 use log::{info, warn};
 
-use embedded_svc::http::server::{
-    registry::Registry, Completion, Handler, HandlerError, Request, Response, ResponseWrite,
-};
+use embedded_svc::http::server::{registry::Registry, Handler, HandlerError, Request, Response};
 use embedded_svc::http::*;
 use embedded_svc::io::{Io, Read, Write};
 
@@ -216,17 +214,28 @@ impl EspHttpServer {
         Ok(())
     }
 
-    fn handle_error<E>(
+    fn complete(
         raw_req: *mut httpd_req_t,
-        response_state: ResponseState,
-        error: E,
-    ) -> c_types::c_int
+        headers: &mut Option<EspHttpResponseHeaders>,
+    ) -> Result<(), HandlerError> {
+        if let Some(headers) = headers.as_mut() {
+            headers.send(raw_req)?;
+
+            let buf = &[];
+
+            esp!(unsafe { httpd_resp_send(raw_req, buf.as_ptr() as *const _, 0) })?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_error<E>(raw_req: *mut httpd_req_t, response_sent: bool, error: E) -> c_types::c_int
     where
         E: Display,
     {
-        if response_state == ResponseState::New {
+        if !response_sent {
             info!(
-                "About to handle internal error [{}], response is pristine",
+                "About to handle internal error [{}], response not sent yet",
                 &error
             );
 
@@ -238,7 +247,7 @@ impl EspHttpServer {
             }
         } else {
             warn!(
-                "Unhandled internal error [{}], response is already sent or initiated",
+                "Unhandled internal error [{}], response is already sent",
                 error
             );
         }
@@ -246,13 +255,13 @@ impl EspHttpServer {
         ESP_OK as _
     }
 
-    fn render_error<'a, E>(raw_req: *mut httpd_req_t, error: E) -> Result<Completion, EspIOError>
+    fn render_error<'a, E>(raw_req: *mut httpd_req_t, error: E) -> Result<(), EspIOError>
     where
         E: Display,
     {
-        let mut response_state = ResponseState::New;
+        let mut headers = Some(EspHttpResponseHeaders::new());
 
-        let mut writer = EspHttpResponse::new(raw_req, &mut response_state)
+        let mut writer = EspHttpResponse::new(raw_req, &mut headers)
             .status(500)
             .content_type("text/html")
             .into_writer()?;
@@ -274,7 +283,7 @@ impl EspHttpServer {
             .as_bytes(),
         )?;
 
-        writer.complete()
+        Ok(())
     }
 
     fn to_native_handler<H>(&self, handler: H) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
@@ -282,17 +291,18 @@ impl EspHttpServer {
         H: for<'a> Handler<EspHttpRequest<'a>, EspHttpResponse<'a>> + 'static,
     {
         Box::new(move |raw_req| {
-            let mut response_state = ResponseState::New;
+            let mut headers = Some(EspHttpResponseHeaders::new());
 
             let result = Self::handle_request(
                 EspHttpRequest::new(raw_req),
-                EspHttpResponse::new(raw_req, &mut response_state),
+                EspHttpResponse::new(raw_req, &mut headers),
                 &handler,
-            );
+            )
+            .and_then(|_| Self::complete(raw_req, &mut headers));
 
             match result {
                 Ok(()) => ESP_OK as _,
-                Err(e) => Self::handle_error(raw_req, response_state, e),
+                Err(e) => Self::handle_error(raw_req, headers.is_none(), e),
             }
         })
     }
@@ -545,18 +555,9 @@ impl<'a> Headers for EspHttpRequest<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum ResponseState {
-    New,
-    HeadersSent,
-    Opened,
-    Closed,
-}
-
 pub struct EspHttpResponse<'a> {
     raw_req: *mut httpd_req_t,
-    headers: EspHttpResponseHeaders,
-    state: &'a mut ResponseState,
+    headers: &'a mut Option<EspHttpResponseHeaders>,
     _ref: PhantomData<&'a ()>,
 }
 
@@ -607,18 +608,16 @@ impl<'a> EspHttpResponseHeaders {
                 self.names.push(name);
             }
         }
+
         Ok(())
     }
 }
 
 impl<'a> EspHttpResponse<'a> {
-    fn new(raw_req: *mut httpd_req_t, state: &'a mut ResponseState) -> Self {
-        *state = ResponseState::New;
-
+    fn new(raw_req: *mut httpd_req_t, headers: &'a mut Option<EspHttpResponseHeaders>) -> Self {
         Self {
             raw_req,
-            headers: EspHttpResponseHeaders::new(),
-            state,
+            headers,
             _ref: PhantomData,
         }
     }
@@ -626,12 +625,12 @@ impl<'a> EspHttpResponse<'a> {
 
 impl<'a> SendStatus for EspHttpResponse<'a> {
     fn set_status(&mut self, status: u16) -> &mut Self {
-        self.headers.status = status;
+        self.headers.as_mut().unwrap().status = status;
         self
     }
 
     fn set_status_message(&mut self, message: &str) -> &mut Self {
-        self.headers.status_message = Some(message.to_owned());
+        self.headers.as_mut().unwrap().status_message = Some(message.to_owned());
         self
     }
 }
@@ -639,11 +638,15 @@ impl<'a> SendStatus for EspHttpResponse<'a> {
 impl<'a> SendHeaders for EspHttpResponse<'a> {
     fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
         self.headers
+            .as_mut()
+            .unwrap()
             .headers
             .get_mut(UncasedStr::new(name))
             .map(|entry| *entry = CString::new(value).unwrap())
             .unwrap_or_else(|| {
                 self.headers
+                    .as_mut()
+                    .unwrap()
                     .headers
                     .insert(Uncased::from(name.to_owned()), CString::new(value).unwrap());
             });
@@ -662,8 +665,7 @@ impl<'a> Response for EspHttpResponse<'a> {
     fn into_writer(self) -> Result<EspHttpResponseWrite<'a>, EspIOError> {
         Ok(EspHttpResponseWrite::<'a> {
             raw_req: self.raw_req,
-            headers: Some(self.headers),
-            state: self.state,
+            headers: self.headers,
             _ref: self._ref,
         })
     }
@@ -671,22 +673,11 @@ impl<'a> Response for EspHttpResponse<'a> {
 
 pub struct EspHttpResponseWrite<'a> {
     raw_req: *mut httpd_req_t,
-    state: &'a mut ResponseState,
-    headers: Option<EspHttpResponseHeaders>,
+    headers: &'a mut Option<EspHttpResponseHeaders>,
     _ref: PhantomData<&'a ()>,
 }
 
 impl<'a> EspHttpResponseWrite<'a> {}
-
-impl<'a> ResponseWrite for EspHttpResponseWrite<'a> {
-    fn complete(self) -> Result<Completion, Self::Error> {
-        esp!(unsafe { httpd_resp_send_chunk(self.raw_req, core::ptr::null() as *const _, 0) })?;
-
-        *self.state = ResponseState::Closed;
-
-        Ok(unsafe { Completion::internal_new() })
-    }
-}
 
 impl<'a> Io for EspHttpResponseWrite<'a> {
     type Error = EspIOError;
@@ -695,20 +686,15 @@ impl<'a> Io for EspHttpResponseWrite<'a> {
 impl<'a> Write for EspHttpResponseWrite<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         if !buf.is_empty() {
-            if *self.state == ResponseState::New {
-                if let Some(headers) = self.headers.as_mut() {
-                    headers.send(self.raw_req)?;
-
-                    *self.state = ResponseState::HeadersSent;
-                }
+            if let Some(headers) = self.headers {
+                headers.send(self.raw_req)?;
             }
 
             esp!(unsafe {
                 httpd_resp_send_chunk(self.raw_req, buf.as_ptr() as *const _, buf.len() as ssize_t)
             })?;
 
-            self.headers = None;
-            *self.state = ResponseState::Opened;
+            *self.headers = None;
         }
 
         Ok(buf.len())

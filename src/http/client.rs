@@ -299,7 +299,7 @@ impl<'a> EspHttpRequestWrite<'a> {
 impl<'a> RequestWrite for EspHttpRequestWrite<'a> {
     type Response = EspHttpResponse<'a>;
 
-    fn into_response(mut self) -> Result<Self::Response, Self::Error> {
+    fn submit(mut self) -> Result<Self::Response, Self::Error> {
         let headers = self.fetch_headers()?;
 
         Ok(EspHttpResponse {
