@@ -257,7 +257,7 @@ impl EspHttpServer {
         ESP_OK as _
     }
 
-    fn render_error<'a, E>(raw_req: *mut httpd_req_t, error: E) -> Result<(), EspIOError>
+    fn render_error<E>(raw_req: *mut httpd_req_t, error: E) -> Result<(), EspIOError>
     where
         E: Display,
     {
@@ -455,7 +455,7 @@ impl<'a> Request for EspHttpRequest<'a> {
             query_string.as_ref()
         } else {
             match unsafe { httpd_req_get_url_query_len(self.raw_req) } as usize {
-                0 => "".into(),
+                0 => "",
                 len => {
                     // TODO: Would've been much more effective, if ESP-IDF was capable of returning a
                     // pointer to the header value that is in the scratch buffer

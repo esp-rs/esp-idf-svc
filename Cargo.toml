@@ -12,6 +12,10 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 documentation = "https://esp-rs.github.io/esp-idf-svc/"
 
+[patch.crates-io]
+embedded-svc = { path = "../embedded-svc" }
+esp-idf-hal = { path = "../esp-idf-hal" }
+
 [features]
 default = ["std"]
 

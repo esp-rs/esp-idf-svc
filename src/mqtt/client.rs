@@ -451,7 +451,7 @@ impl<'a> EspMqttMessage<'a> {
         event: &'a esp_mqtt_event_t,
     ) -> Result<client::Event<EspMqttMessage<'a>>, EspError> {
         match event.event_id {
-            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap().into()), // TODO
+            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap()), // TODO
             esp_mqtt_event_id_t_MQTT_EVENT_BEFORE_CONNECT => Ok(client::Event::BeforeConnect),
             esp_mqtt_event_id_t_MQTT_EVENT_CONNECTED => {
                 Ok(client::Event::Connected(event.session_present != 0))

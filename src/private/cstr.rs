@@ -25,7 +25,7 @@ pub fn from_cstr_ptr<'a>(ptr: *const c_types::c_char) -> &'a str {
     unsafe { CStr::from_ptr(ptr) }.to_str().unwrap()
 }
 
-pub fn from_cstr<'a>(buf: &'a [u8]) -> &'a str {
+pub fn from_cstr(buf: &[u8]) -> &str {
     // We have to find the first '\0' ourselves, because the passed buffer might
     // be wider than the ASCIIZ string it contains
     let len = buf.iter().position(|e| *e == 0).unwrap() + 1;

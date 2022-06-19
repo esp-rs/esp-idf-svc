@@ -10,7 +10,7 @@ use crate::private::cstr::CString;
 
 const SNTP_SERVER_NUM: usize = SNTP_MAX_SERVERS as usize;
 
-const DEFAULT_SERVERS: [&'static str; 4] = [
+const DEFAULT_SERVERS: [&str; 4] = [
     "0.pool.ntp.org",
     "1.pool.ntp.org",
     "2.pool.ntp.org",
