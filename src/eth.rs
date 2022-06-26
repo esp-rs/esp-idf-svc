@@ -147,7 +147,8 @@ pub enum SpiEthChipset {
 }
 
 #[cfg(any(all(esp32, esp_idf_eth_use_esp32_emac), esp_idf_eth_use_openeth))]
-static TAKEN: esp_idf_hal::mutex::Mutex<bool> = esp_idf_hal::mutex::Mutex::new(false);
+static TAKEN: esp_idf_hal::mutex::Mutex<bool> =
+    esp_idf_hal::mutex::Mutex::wrap(esp_idf_hal::mutex::RawMutex::new(), false);
 
 struct Shared {
     conf: Configuration,
