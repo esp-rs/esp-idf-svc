@@ -183,7 +183,7 @@ impl From<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
 struct Shared {
     client_ip_conf: Option<ipv4::ClientConfiguration>,

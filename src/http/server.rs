@@ -125,10 +125,10 @@ impl From<Method> for Newtype<c_types::c_uint> {
 }
 
 static OPEN_SESSIONS: mutex::Mutex<BTreeMap<(u32, c_types::c_int), Arc<AtomicBool>>> =
-    mutex::Mutex::new(BTreeMap::new());
+    mutex::Mutex::wrap(mutex::RawMutex::new(), BTreeMap::new());
 #[allow(clippy::type_complexity)]
 static mut CLOSE_HANDLERS: mutex::Mutex<BTreeMap<u32, Vec<Box<dyn Fn(c_types::c_int)>>>> =
-    mutex::Mutex::new(BTreeMap::new());
+    mutex::Mutex::wrap(mutex::RawMutex::new(), BTreeMap::new());
 
 pub struct EspHttpServer {
     sd: httpd_handle_t,

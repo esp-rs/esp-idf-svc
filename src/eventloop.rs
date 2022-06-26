@@ -98,7 +98,7 @@ impl From<&ExplicitLoopConfiguration> for esp_event_loop_args_t {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
 #[derive(Clone, Debug)]
 pub struct System;
