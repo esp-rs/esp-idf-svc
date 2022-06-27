@@ -1148,6 +1148,6 @@ mod asyncify {
     use embedded_svc::utils::asyncify::{event_bus::AsyncEventBus, Asyncify};
 
     impl<P> Asyncify for super::EspEth<P> {
-        type AsyncWrapper<S> = AsyncEventBus<(), esp_idf_hal::mutex::Condvar, S>;
+        type AsyncWrapper<S> = AsyncEventBus<(), esp_idf_hal::mutex::RawCondvar, S>;
     }
 }

@@ -727,12 +727,13 @@ pub mod ws {
     use embedded_svc::ws::server::registry::Registry;
 
     use embedded_svc::http::Method;
+    use embedded_svc::utils::mutex::{Condvar, Mutex};
     use embedded_svc::ws::server::*;
     use embedded_svc::ws::*;
 
     use esp_idf_sys::*;
 
-    use esp_idf_hal::mutex::{Condvar, Mutex};
+    use esp_idf_hal::mutex::{RawCondvar, RawMutex};
 
     use crate::private::common::Newtype;
     use crate::private::cstr::CString;
@@ -925,8 +926,8 @@ pub mod ws {
 
         raw_frame: *const httpd_ws_frame_t,
 
-        error_code: Mutex<Option<u32>>,
-        condvar: Condvar,
+        error_code: Mutex<RawMutex, Option<u32>>,
+        condvar: Condvar<RawCondvar>,
     }
 
     pub struct EspHttpWsDetachedSender {
@@ -1165,9 +1166,9 @@ pub mod ws {
         use super::{EspHttpWsDetachedSender, EspHttpWsReceiver, EspHttpWsSender};
 
         pub type EspHttpWsProcessor<const N: usize, const F: usize> =
-            Processor<esp_idf_hal::mutex::Condvar, EspHttpWsSender, EspHttpWsReceiver, N, F>;
+            Processor<esp_idf_hal::mutex::RawCondvar, EspHttpWsSender, EspHttpWsReceiver, N, F>;
 
         pub type EspHttpWsAcceptor<U> =
-            AsyncAcceptor<U, esp_idf_hal::mutex::Condvar, EspHttpWsDetachedSender>;
+            AsyncAcceptor<U, esp_idf_hal::mutex::RawCondvar, EspHttpWsDetachedSender>;
     }
 }
