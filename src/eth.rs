@@ -613,7 +613,7 @@ impl<P> EspEth<P> {
         Ok(eth)
     }
 
-    pub fn with_handle<F, T>(&self, f: F) -> T
+    pub fn with_handle<F, T>(&mut self, f: F) -> T
     where
         F: FnOnce(esp_eth_handle_t) -> T,
     {
