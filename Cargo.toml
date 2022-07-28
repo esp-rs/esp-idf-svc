@@ -17,7 +17,7 @@ default = ["std"]
 
 std = ["alloc", "anyhow/std", "log/std", "esp-idf-sys/std", "esp-idf-hal/std", "embedded-svc/std"]
 alloc = ["cstr_core/alloc", "anyhow", "esp-idf-hal/alloc", "embedded-svc/alloc"]
-isr-async-executor = ["embedded-svc/isr-async-executor", "alloc", "experimental"]
+embedded-async-executor = ["embedded-svc/embedded-async-executor", "alloc", "experimental"]
 experimental = ["embedded-svc/experimental", "esp-idf-hal/experimental", "uncased"]
 
 [dependencies]
@@ -27,9 +27,11 @@ log = { version = "0.4", default-features = false }
 cstr_core = "0.2"
 uncased = { version = "0.9.6", optional = true }
 anyhow = { version = "1", default-features = false, optional = true } # Only used by the deprecated httpd module
-embedded-svc = { version = "0.22", default-features = false }
+#embedded-svc = { version = "0.22", default-features = false }
+embedded-svc = { path = "../embedded-svc", default-features = false }
 esp-idf-sys = { version = "0.31.5", default-features = false, features = ["native"] }
-esp-idf-hal = { version = "0.38", default-features = false, features = ["esp-idf-sys"] }
+#esp-idf-hal = { version = "0.38", default-features = false, features = ["esp-idf-sys"] }
+esp-idf-hal = { path = "../esp-idf-hal", default-features = false, features = ["esp-idf-sys"] }
 
 [build-dependencies]
 embuild = "0.29"
