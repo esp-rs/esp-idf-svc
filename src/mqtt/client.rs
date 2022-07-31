@@ -15,7 +15,7 @@ use esp_idf_hal::mutex::RawCondvar;
 
 use esp_idf_sys::*;
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 pub use asyncify::*;
 
 use crate::private::cstr::*;
@@ -548,7 +548,7 @@ impl<'a> client::Message for EspMqttMessage<'a> {
     }
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 mod asyncify {
     use core::fmt::Debug;
 
