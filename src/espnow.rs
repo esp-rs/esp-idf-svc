@@ -2,7 +2,7 @@ use ::log::info;
 
 use alloc::boxed::Box;
 
-use embedded_svc::utils::mutex::Mutex:
+use embedded_svc::utils::mutex::Mutex;
 
 use esp_idf_hal::mutex::RawMutex;
 
