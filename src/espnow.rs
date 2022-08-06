@@ -3,7 +3,7 @@ use ::log::info;
 use alloc::boxed::Box;
 
 use esp_idf_hal::mutex::RawMutex;
-use esp_idf_hal::utils::mutex::Mutex;
+use embedded_svc::utils::mutex::Mutex;
 use esp_idf_sys::*;
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
