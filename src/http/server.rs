@@ -11,7 +11,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use log::{info, warn};
+use ::log::{info, warn};
 
 use embedded_svc::http::server::{registry::Registry, Handler, HandlerError, Request, Response};
 use embedded_svc::http::*;
@@ -724,7 +724,7 @@ pub mod ws {
     use alloc::sync::Arc;
 
     use embedded_svc::ws::server::registry::Registry;
-    use log::*;
+    use ::log::*;
 
     use embedded_svc::http::Method;
     use embedded_svc::ws::server::*;
