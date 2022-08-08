@@ -723,8 +723,8 @@ pub mod ws {
     extern crate alloc;
     use alloc::sync::Arc;
 
-    use embedded_svc::ws::server::registry::Registry;
     use ::log::*;
+    use embedded_svc::ws::server::registry::Registry;
 
     use embedded_svc::http::Method;
     use embedded_svc::ws::server::*;
