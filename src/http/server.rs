@@ -19,9 +19,8 @@ use embedded_svc::http::server::{
 use embedded_svc::http::*;
 use embedded_svc::io::{Io, Read, Write};
 use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
-use embedded_svc::utils::Mutex;
 
-use esp_idf_hal::mutex::RawMutex;
+use esp_idf_hal::mutex::{Mutex, RawMutex};
 
 use esp_idf_sys::*;
 
@@ -171,11 +170,11 @@ impl From<Method> for Newtype<c_types::c_uint> {
 }
 
 #[allow(clippy::type_complexity)]
-static OPEN_SESSIONS: Mutex<RawMutex, BTreeMap<(u32, c_types::c_int), Arc<AtomicBool>>> =
-    Mutex::wrap(mutex::RawMutex::new(), BTreeMap::new());
+static OPEN_SESSIONS: Mutex<BTreeMap<(u32, c_types::c_int), Arc<AtomicBool>>> =
+    Mutex::wrap(RawMutex::new(), BTreeMap::new());
 #[allow(clippy::type_complexity)]
-static mut CLOSE_HANDLERS: Mutex<RawMutex, BTreeMap<u32, Vec<Box<dyn Fn(c_types::c_int)>>>> =
-    Mutex::wrap(mutex::RawMutex::new(), BTreeMap::new());
+static mut CLOSE_HANDLERS: Mutex<BTreeMap<u32, Vec<Box<dyn Fn(c_types::c_int)>>>> =
+    Mutex::wrap(RawMutex::new(), BTreeMap::new());
 
 pub struct EspHttpServer {
     sd: httpd_handle_t,
