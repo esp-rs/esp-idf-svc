@@ -238,7 +238,8 @@ pub struct Server {
 
 impl Server {
     fn new(conf: &Configuration) -> Result<Self> {
-        let config = Self::default_configuration(conf.http_port, conf.https_port, conf.max_uri_handlers);
+        let config =
+            Self::default_configuration(conf.http_port, conf.https_port, conf.max_uri_handlers);
 
         let mut handle: esp_idf_sys::httpd_handle_t = ptr::null_mut();
         let handle_ref = &mut handle;
@@ -392,7 +393,11 @@ impl Server {
     }
 
     /// Copied from the definition of HTTPD_DEFAULT_CONFIG() in http_server.h/https_server.h
-    fn default_configuration(http_port: u16, https_port: u16, max_uri_handlers: u16) -> esp_idf_sys::httpd_config_t {
+    fn default_configuration(
+        http_port: u16,
+        https_port: u16,
+        max_uri_handlers: u16,
+    ) -> esp_idf_sys::httpd_config_t {
         esp_idf_sys::httpd_config_t {
             task_priority: 5,
             stack_size: if https_port != 0 { 10240 } else { 4096 },
