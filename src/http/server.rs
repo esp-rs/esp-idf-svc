@@ -1172,9 +1172,7 @@ pub mod ws {
     }
 }
 
-// config_esp_https_server_enable does not get picked up.
-// #[cfg(all(feature = "experimental", config_esp_https_server_enable))]
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "experimental", esp_idf_esp_https_server_enable))]
 pub mod https {
     use core::cell::UnsafeCell;
     use core::fmt::{Debug, Display, Write as _};
@@ -1211,7 +1209,6 @@ pub mod https {
     use crate::private::cstr::CString;
 
     use super::EspHttpServer;
-    use std::borrow::Borrow;
 
     #[derive(Copy, Clone, Debug)]
     pub struct SslConfiguration<'a> {
@@ -1288,6 +1285,7 @@ pub mod https {
             let ca_cert = CString::new(conf.ca_cert)
                 .expect("Found null byte in Server certificate")
                 .into_bytes_with_nul();
+                
             let private_key = CString::new(conf.private_key)
                 .expect("Found null byte in Server certificate")
                 .into_bytes_with_nul();
