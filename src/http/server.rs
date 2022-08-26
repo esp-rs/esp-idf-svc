@@ -11,7 +11,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use ::log::{info, warn};
+use log::{info, warn};
 
 use embedded_svc::http::server::{registry::Registry, Handler, HandlerError, Request, Response};
 use embedded_svc::http::*;
@@ -723,8 +723,8 @@ pub mod ws {
     extern crate alloc;
     use alloc::sync::Arc;
 
-    use ::log::*;
     use embedded_svc::ws::server::registry::Registry;
+    use log::*;
 
     use embedded_svc::http::Method;
     use embedded_svc::ws::server::*;
@@ -1169,5 +1169,366 @@ pub mod ws {
 
         pub type EspHttpWsAcceptor<U> =
             AsyncAcceptor<U, esp_idf_hal::mutex::Condvar, EspHttpWsDetachedSender>;
+    }
+}
+
+// config_esp_https_server_enable does not get picked up.
+// #[cfg(all(feature = "experimental", config_esp_https_server_enable))]
+#[cfg(feature = "experimental")]
+pub mod https {
+    use core::cell::UnsafeCell;
+    use core::fmt::{Debug, Display, Write as _};
+    use core::marker::PhantomData;
+    use core::ptr;
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use core::time::*;
+
+    extern crate alloc;
+    use alloc::collections::BTreeMap;
+    use alloc::string::String;
+    use alloc::sync::Arc;
+    use alloc::vec::Vec;
+
+    use log::{info, warn};
+
+    use embedded_svc::http::server::{
+        registry::Registry, Handler, HandlerError, Request, Response,
+    };
+    use embedded_svc::http::*;
+    use embedded_svc::io::{Io, Read, Write};
+
+    use esp_idf_hal::mutex;
+
+    use esp_idf_sys::*;
+
+    use uncased::{Uncased, UncasedStr};
+
+    use crate::errors::EspIOError;
+    use crate::http::server::{
+        Configuration, EspHttpRequest, EspHttpResponse, EspHttpResponseHeaders,
+    };
+    use crate::private::common::Newtype;
+    use crate::private::cstr::CString;
+
+    use super::EspHttpServer;
+    use std::borrow::Borrow;
+
+    #[derive(Copy, Clone, Debug)]
+    pub struct SslConfiguration<'a> {
+        pub http_configuration: Configuration,
+        pub ca_cert: &'a str,
+        pub private_key: &'a str,
+    }
+    // taken from https://github.com/espressif/esp-idf/blob/master/components/esp_https_server/include/esp_https_server.h
+    impl From<&SslConfiguration<'_>> for Newtype<httpd_ssl_config_t> {
+        fn from(conf: &SslConfiguration) -> Self {
+            let http_config_ref = &conf.http_configuration;
+            let http_config: Newtype<httpd_config_t> = http_config_ref.into();
+            // Turning the certificates into CStrings here drops the null bytes after passing them into httpd_ssl_config_t
+            // let private_key = CString::new(conf.private_key)
+            //     .expect("Found null byte in private key")
+            //     .into_bytes_with_nul();
+            // let ca_cert = CString::new(conf.ca_cert)
+            //     .expect("Found null byte in server certificate")
+            //     .into_bytes_with_nul();
+
+            Self(httpd_ssl_config_t {
+                httpd: http_config.0,
+                session_tickets: false,
+                port_secure: 443,
+                port_insecure: 80,
+                prvtkey_pem: conf.private_key.as_ptr(),
+                prvtkey_len: conf.private_key.len() as u32,
+                cacert_pem: conf.ca_cert.as_ptr(),
+                cacert_len: conf.ca_cert.len() as u32,
+                transport_mode: httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+                ..Default::default()
+            })
+        }
+    }
+    impl Default for Newtype<httpd_ssl_config_t> {
+        fn default() -> Self {
+            // Values taken from: https://github.com/espressif/esp-idf/blob/master/components/esp_https_server/include/esp_https_server.h#L114
+            Self(httpd_ssl_config_t {
+                session_tickets: false,
+                port_secure: 443,
+                port_insecure: 80,
+                transport_mode: httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    static mut CLOSE_HANDLERS: mutex::Mutex<BTreeMap<u32, Vec<Box<dyn Fn(c_types::c_int)>>>> =
+        mutex::Mutex::new(BTreeMap::new());
+
+    pub struct EspHttpsServer {
+        sd: httpd_handle_t,
+        registrations: Vec<(CString, esp_idf_sys::httpd_uri_t)>,
+    }
+
+    impl EspHttpsServer {
+        pub fn new(conf: &SslConfiguration) -> Result<Self, EspIOError> {
+            let mut config: Newtype<httpd_ssl_config_t> = Default::default();
+
+            let http_config_ref = &conf.http_configuration;
+            let mut http_config: Newtype<httpd_config_t> = http_config_ref.into();
+            http_config.0.close_fn = Some(EspHttpServer::close_fn);
+
+            // ssl needs bigger stack size. Taken from https://github.com/espressif/esp-idf/blob/master/components/esp_https_server/include/esp_https_server.h#L114
+            if conf.http_configuration.stack_size < 10240 {
+                http_config.0.stack_size = 10240;
+            }
+            http_config.0.server_port = 0;
+
+            config.0.httpd = http_config.0;
+            
+            // mbed tls expects nullbyte for parsing
+            let ca_cert = CString::new(conf.ca_cert)
+                .expect("Found null byte in Server certificate")
+                .into_bytes_with_nul();
+            let private_key = CString::new(conf.private_key)
+                .expect("Found null byte in Server certificate")
+                .into_bytes_with_nul();
+
+            // Set certs here since creating them in From<&SslConfiguration<'_>> for Newtype<httpd_ssl_config_t> loses the null byte in, which mbedtls needs to parse the certificates.
+            config.0.cacert_pem = ca_cert.as_ptr();
+            config.0.cacert_len = ca_cert.len() as u32;
+
+            config.0.prvtkey_pem = private_key.as_ptr();
+            config.0.prvtkey_len = private_key.len() as u32;
+
+            let mut handle: httpd_handle_t = ptr::null_mut();
+            let handle_ref = &mut handle;
+
+            esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
+
+            info!("Started Httpd ssl server.");
+
+            let server = EspHttpsServer {
+                sd: handle,
+                registrations: Vec::new(),
+            };
+
+            unsafe {
+                CLOSE_HANDLERS.lock().insert(server.sd as _, Vec::new());
+            }
+
+            Ok(server)
+        }
+
+        fn unregister(&mut self, uri: CString, conf: httpd_uri_t) -> Result<(), EspIOError> {
+            unsafe {
+                esp!(httpd_unregister_uri_handler(
+                    self.sd,
+                    uri.as_ptr() as _,
+                    conf.method
+                ))?;
+
+                let _drop = Box::from_raw(conf.user_ctx as *mut _);
+            };
+
+            info!(
+                "Unregistered Httpd server handler {:?} for URI \"{}\"",
+                conf.method,
+                uri.to_str().unwrap()
+            );
+
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<(), EspIOError> {
+            if !self.sd.is_null() {
+                while !self.registrations.is_empty() {
+                    let (uri, registration) = self.registrations.pop().unwrap();
+
+                    self.unregister(uri, registration)?;
+                }
+                // httpd_ssl_stop doesn't return EspErr for some reason. It returns void.
+                #[cfg(not(esp_idf_version_major = "5"))]
+                unsafe {
+                    esp_idf_sys::httpd_ssl_stop(self.sd)
+                };
+                // esp-idf version 5 returns EspErr
+                #[cfg(esp_idf_version_major = "5")]
+                esp!(unsafe { esp_idf_sys::httpd_ssl_stop(self.sd) })?;
+                unsafe { CLOSE_HANDLERS.lock() }.remove(&(self.sd as u32));
+
+                self.sd = ptr::null_mut();
+            }
+
+            info!("Httpd server stopped");
+
+            Ok(())
+        }
+
+        fn handle_request<'a, H>(
+            req: EspHttpRequest<'a>,
+            resp: EspHttpResponse<'a>,
+            handler: &H,
+        ) -> Result<(), HandlerError>
+        where
+            H: Handler<EspHttpRequest<'a>, EspHttpResponse<'a>>,
+        {
+            info!("About to handle query string {:?}", req.query_string());
+
+            handler.handle(req, resp)?;
+
+            Ok(())
+        }
+
+        fn complete(
+            raw_req: *mut httpd_req_t,
+            headers: &mut Option<EspHttpResponseHeaders>,
+        ) -> Result<(), HandlerError> {
+            let buf = &[];
+
+            if let Some(headers) = headers.as_mut() {
+                headers.send(raw_req)?;
+
+                esp!(unsafe { httpd_resp_send(raw_req, buf.as_ptr() as *const _, 0) })?;
+            } else {
+                esp!(unsafe { httpd_resp_send_chunk(raw_req, buf.as_ptr() as *const _, 0) })?;
+            }
+
+            Ok(())
+        }
+
+        fn handle_error<E>(
+            raw_req: *mut httpd_req_t,
+            response_sent: bool,
+            error: E,
+        ) -> c_types::c_int
+        where
+            E: Display,
+        {
+            if !response_sent {
+                info!(
+                    "About to handle internal error [{}], response not sent yet",
+                    &error
+                );
+
+                if let Err(error2) = Self::render_error(raw_req, &error) {
+                    warn!(
+                        "Internal error[{}] while rendering another internal error:\n{}",
+                        error2, error
+                    );
+                }
+            } else {
+                warn!(
+                    "Unhandled internal error [{}], response is already sent",
+                    error
+                );
+            }
+
+            ESP_OK as _
+        }
+
+        fn render_error<E>(raw_req: *mut httpd_req_t, error: E) -> Result<(), EspIOError>
+        where
+            E: Display,
+        {
+            let mut headers = Some(EspHttpResponseHeaders::new());
+
+            let mut writer = EspHttpResponse::new(raw_req, &mut headers)
+                .status(500)
+                .content_type("text/html")
+                .into_writer()?;
+
+            writer.write_all(
+                format!(
+                    r#"
+                    <!DOCTYPE html5>
+                    <html>
+                        <body style="font-family: Verdana, Sans;">
+                            <h1>INTERNAL ERROR</h1>
+                            <hr>
+                            <pre>{}</pre>
+                        <body>
+                    </html>
+                "#,
+                    error
+                )
+                .as_bytes(),
+            )?;
+
+            let buf = &[];
+
+            esp!(unsafe { httpd_resp_send_chunk(raw_req, buf.as_ptr() as *const _, 0) })?;
+
+            Ok(())
+        }
+
+        fn to_native_handler<H>(
+            &self,
+            handler: H,
+        ) -> Box<dyn Fn(*mut httpd_req_t) -> c_types::c_int>
+        where
+            H: for<'a> Handler<EspHttpRequest<'a>, EspHttpResponse<'a>> + 'static,
+        {
+            Box::new(move |raw_req| {
+                let mut headers = Some(EspHttpResponseHeaders::new());
+
+                let result = Self::handle_request(
+                    EspHttpRequest::new(raw_req),
+                    EspHttpResponse::new(raw_req, &mut headers),
+                    &handler,
+                )
+                .and_then(|_| Self::complete(raw_req, &mut headers));
+
+                match result {
+                    Ok(()) => ESP_OK as _,
+                    Err(e) => Self::handle_error(raw_req, headers.is_none(), e),
+                }
+            })
+        }
+    }
+
+    impl Drop for EspHttpsServer {
+        fn drop(&mut self) {
+            self.stop().expect("Unable to stop the server cleanly");
+        }
+    }
+
+    impl Registry for EspHttpsServer {
+        type Error = EspError;
+        type IOError = EspIOError;
+
+        type Request<'a> = EspHttpRequest<'a>;
+        type Response<'a> = EspHttpResponse<'a>;
+
+        fn set_handler<H>(
+            &mut self,
+            uri: &str,
+            method: Method,
+            handler: H,
+        ) -> Result<&mut Self, Self::Error>
+        where
+            H: for<'a> Handler<Self::Request<'a>, Self::Response<'a>> + 'static,
+        {
+            let c_str = CString::new(uri).unwrap();
+
+            #[allow(clippy::needless_update)]
+            let conf = httpd_uri_t {
+                uri: c_str.as_ptr() as _,
+                method: Newtype::<c_types::c_uint>::from(method).0,
+                user_ctx: Box::into_raw(Box::new(self.to_native_handler(handler))) as *mut _,
+                handler: Some(EspHttpServer::handle_req),
+                ..Default::default()
+            };
+
+            esp!(unsafe { esp_idf_sys::httpd_register_uri_handler(self.sd, &conf) })?;
+
+            info!(
+                "Registered Httpd server handler {:?} for URI \"{}\"",
+                method,
+                c_str.to_str().unwrap()
+            );
+
+            self.registrations.push((c_str, conf));
+
+            Ok(self)
+        }
     }
 }
