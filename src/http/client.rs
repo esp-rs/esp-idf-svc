@@ -64,6 +64,8 @@ pub struct EspHttpClientConfiguration {
     pub buffer_size: Option<usize>,
     pub buffer_size_tx: Option<usize>,
     pub follow_redirects_policy: FollowRedirectsPolicy,
+    pub client_cert_pem: Option<&'static str>,
+    pub client_key_pem: Option<&'static str>,
 
     pub use_global_ca_store: bool,
     #[cfg(not(esp_idf_version = "4.3"))]
@@ -107,7 +109,27 @@ impl EspHttpClient {
             native_config.buffer_size_tx = buffer_size_tx as _;
         }
 
-        let raw = unsafe { esp_http_client_init(&native_config) };
+        let raw;
+
+        if let (Some(client_cert_pem), Some(client_key_pem)) = (configuration.client_cert_pem, configuration.client_key_pem) {
+
+            // Convert client cert and key to bytes with null ending
+            let client_cert_pem = CString::new(client_cert_pem).unwrap().into_bytes_with_nul();
+            let client_key_pem = CString::new(client_key_pem).unwrap().into_bytes_with_nul();
+
+            // Sets pointer for client cert
+            native_config.client_cert_pem = client_cert_pem.as_ptr() as *const _;
+            native_config.client_cert_len = client_cert_pem.len() as u32;
+
+            // Sets pointer for client key
+            native_config.client_key_pem = client_key_pem.as_ptr() as *const _;
+            native_config.client_key_len = client_key_pem.len() as u32;
+
+            raw = unsafe { esp_http_client_init(&native_config) };
+        } else {
+            raw = unsafe { esp_http_client_init(&native_config) };
+        }
+
         if raw.is_null() {
             Err(EspError::from(ESP_FAIL).unwrap())
         } else {
