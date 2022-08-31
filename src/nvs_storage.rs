@@ -189,9 +189,12 @@ impl RawStorage for EspNvsStorage {
                     ((u64value >> 48) & 0xff) as u8,
                 ];
 
-                buf.copy_from_slice(&array[..min(buf.len(), len as usize)]);
+                let buf_len = min(buf.len(), len as usize);
+                let buf = &mut buf[..buf_len];
 
-                Ok(Some((&buf[..min(buf.len(), len as usize)], len as _)))
+                buf.copy_from_slice(&array[..buf_len]);
+
+                Ok(Some((buf, len as _)))
             }
         }
     }
