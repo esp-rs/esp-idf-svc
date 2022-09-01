@@ -60,12 +60,12 @@ impl Default for FollowRedirectsPolicy {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct EspHttpClientConfiguration {
+pub struct EspHttpClientConfiguration<'a> {
     pub buffer_size: Option<usize>,
     pub buffer_size_tx: Option<usize>,
     pub follow_redirects_policy: FollowRedirectsPolicy,
-    pub client_cert_pem: Option<&'static str>,
-    pub client_key_pem: Option<&'static str>,
+    pub client_cert_pem: Option<&'a str>,
+    pub client_key_pem: Option<&'a str>,
 
     pub use_global_ca_store: bool,
     #[cfg(not(esp_idf_version = "4.3"))]
@@ -77,6 +77,8 @@ pub struct EspHttpClient {
     raw: esp_http_client_handle_t,
     follow_redirects_policy: FollowRedirectsPolicy,
     event_handler: Box<Option<Box<dyn Fn(&esp_http_client_event_t) -> esp_err_t>>>,
+    _client_cert_pem: Option<CString>,
+    _client_key_pem: Option<CString>
 }
 
 impl EspHttpClient {
@@ -86,6 +88,8 @@ impl EspHttpClient {
 
     pub fn new(configuration: &EspHttpClientConfiguration) -> Result<Self, EspError> {
         let event_handler = Box::new(None);
+        let mut client_cert_pem: Option<CString> = None;
+        let mut client_key_pem: Option<CString> = None;
 
         let mut native_config = esp_http_client_config_t {
             // The ESP-IDF HTTP client is really picky on being initialized with a valid URL
@@ -109,27 +113,22 @@ impl EspHttpClient {
             native_config.buffer_size_tx = buffer_size_tx as _;
         }
 
-        let raw;
+        if let (Some(cert), Some(key)) = (configuration.client_cert_pem, configuration.client_key_pem) {
 
-        if let (Some(client_cert_pem), Some(client_key_pem)) = (configuration.client_cert_pem, configuration.client_key_pem) {
-
-            // Convert client cert and key to bytes with null ending
-            let client_cert_pem = CString::new(client_cert_pem).unwrap().into_bytes_with_nul();
-            let client_key_pem = CString::new(client_key_pem).unwrap().into_bytes_with_nul();
+            // Convert client cert and key to CString
+            client_cert_pem = Some(CString::new(cert).unwrap());
+            client_key_pem = Some(CString::new(key).unwrap());
 
             // Sets pointer for client cert
-            native_config.client_cert_pem = client_cert_pem.as_ptr() as *const _;
-            native_config.client_cert_len = client_cert_pem.len() as u32;
+            native_config.client_cert_pem = client_cert_pem.as_ref().unwrap().as_ptr();
+            native_config.client_cert_len = 0;
 
             // Sets pointer for client key
-            native_config.client_key_pem = client_key_pem.as_ptr() as *const _;
-            native_config.client_key_len = client_key_pem.len() as u32;
-
-            raw = unsafe { esp_http_client_init(&native_config) };
-        } else {
-            raw = unsafe { esp_http_client_init(&native_config) };
+            native_config.client_key_pem = client_key_pem.as_ref().unwrap().as_ptr();
+            native_config.client_key_len = 0;
         }
 
+        let raw = unsafe { esp_http_client_init(&native_config) };
         if raw.is_null() {
             Err(EspError::from(ESP_FAIL).unwrap())
         } else {
@@ -137,6 +136,8 @@ impl EspHttpClient {
                 raw,
                 follow_redirects_policy: configuration.follow_redirects_policy,
                 event_handler,
+                _client_cert_pem: client_cert_pem,
+                _client_key_pem: client_key_pem
             })
         }
     }
