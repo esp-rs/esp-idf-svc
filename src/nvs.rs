@@ -343,7 +343,7 @@ impl<T: NvsPartitionId> RawStorage for EspNvs<T> {
                     ((u64value >> 48) & 0xff) as u8,
                 ];
 
-                buf.copy_from_slice(&array[..len as usize]);
+                buf[..len as usize].copy_from_slice(&array[..len as usize]);
 
                 Ok(Some(&buf[..len as usize]))
             }
