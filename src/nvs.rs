@@ -1,4 +1,3 @@
-use core::cmp::min;
 use core::ptr;
 
 extern crate alloc;
