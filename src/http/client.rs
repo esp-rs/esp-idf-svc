@@ -1,4 +1,6 @@
 extern crate alloc;
+use core::cell::UnsafeCell;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -14,6 +16,7 @@ use esp_idf_sys::*;
 use uncased::{Uncased, UncasedStr};
 
 use crate::errors::EspIOError;
+use crate::handle::RawHandle;
 use crate::private::common::Newtype;
 use crate::private::cstr::*;
 
@@ -60,7 +63,7 @@ impl Default for FollowRedirectsPolicy {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct EspHttpClientConfiguration {
+pub struct Configuration {
     pub buffer_size: Option<usize>,
     pub buffer_size_tx: Option<usize>,
     pub follow_redirects_policy: FollowRedirectsPolicy,
@@ -70,19 +73,27 @@ pub struct EspHttpClientConfiguration {
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut c_types::c_void) -> esp_err_t>,
 }
 
-#[allow(clippy::type_complexity)]
-pub struct EspHttpClient {
-    raw: esp_http_client_handle_t,
-    follow_redirects_policy: FollowRedirectsPolicy,
-    event_handler: Box<Option<Box<dyn Fn(&esp_http_client_event_t) -> esp_err_t>>>,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum State {
+    New,
+    Request,
+    Response,
 }
 
-impl EspHttpClient {
-    pub fn new_default() -> Result<Self, EspError> {
-        Self::new(&Default::default())
-    }
+#[allow(clippy::type_complexity)]
+pub struct EspHttpConnection {
+    raw_client: esp_http_client_handle_t,
+    follow_redirects_policy: FollowRedirectsPolicy,
+    event_handler: Box<Option<Box<dyn Fn(&esp_http_client_event_t) -> esp_err_t>>>,
+    state: State,
+    request_content_len: u64,
+    follow_redirects: bool,
+    headers: BTreeMap<Uncased<'static>, String>,
+    content_len_header: UnsafeCell<Option<Option<String>>>,
+}
 
-    pub fn new(configuration: &EspHttpClientConfiguration) -> Result<Self, EspError> {
+impl EspHttpConnection {
+    pub fn new(configuration: &Configuration) -> Result<Self, EspError> {
         let event_handler = Box::new(None);
 
         let mut native_config = esp_http_client_config_t {
@@ -107,16 +118,171 @@ impl EspHttpClient {
             native_config.buffer_size_tx = buffer_size_tx as _;
         }
 
-        let raw = unsafe { esp_http_client_init(&native_config) };
-        if raw.is_null() {
+        let raw_client = unsafe { esp_http_client_init(&native_config) };
+        if raw_client.is_null() {
             Err(EspError::from(ESP_FAIL).unwrap())
         } else {
             Ok(Self {
-                raw,
+                raw_client,
                 follow_redirects_policy: configuration.follow_redirects_policy,
                 event_handler,
+                state: State::New,
+                request_content_len: 0,
+                follow_redirects: false,
+                headers: BTreeMap::new(),
+                content_len_header: UnsafeCell::new(None),
             })
         }
+    }
+
+    pub fn status(&self) -> u16 {
+        self.assert_response();
+        unsafe { esp_http_client_get_status_code(self.raw_client) as _ }
+    }
+
+    pub fn status_message(&self) -> Option<&str> {
+        self.assert_response();
+        None
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.assert_response();
+
+        if name.eq_ignore_ascii_case("Content-Length") {
+            if let Some(content_len_opt) =
+                unsafe { self.content_len_header.get().as_mut().unwrap() }.as_ref()
+            {
+                content_len_opt.as_ref().map(|s| s.as_str())
+            } else {
+                let content_len = unsafe { esp_http_client_get_content_length(self.raw_client) };
+                *unsafe { self.content_len_header.get().as_mut().unwrap() } = if content_len >= 0 {
+                    Some(Some(content_len.to_string()))
+                } else {
+                    None
+                };
+
+                unsafe { self.content_len_header.get().as_mut().unwrap() }
+                    .as_ref()
+                    .and_then(|s| s.as_ref().map(|s| s.as_ref()))
+            }
+        } else {
+            self.headers.get(UncasedStr::new(name)).map(|s| s.as_str())
+        }
+    }
+
+    pub fn initiate_request<'a>(
+        &'a mut self,
+        method: Method,
+        uri: &'a str,
+        headers: &'a [(&'a str, &'a str)],
+    ) -> Result<(), EspError> {
+        self.assert_initial();
+
+        let c_uri = CString::new(uri).unwrap();
+
+        esp!(unsafe { esp_http_client_set_url(self.raw_client, c_uri.as_ptr() as _) })?;
+        esp!(unsafe {
+            esp_http_client_set_method(
+                self.raw_client,
+                Newtype::<(esp_http_client_method_t, ())>::from(method).0 .0,
+            )
+        })?;
+
+        let mut content_len = None;
+
+        for (name, value) in headers {
+            if name.eq_ignore_ascii_case("Content-Length") {
+                if let Ok(len) = value.parse::<u64>() {
+                    content_len = Some(len);
+                }
+            }
+
+            let c_name = CString::new(*name).unwrap();
+
+            // TODO: Replace with a proper conversion from UTF8 to ISO-8859-1
+            let c_value = CString::new(*value).unwrap();
+
+            esp!(unsafe {
+                esp_http_client_set_header(
+                    self.raw_client,
+                    c_name.as_ptr() as _,
+                    c_value.as_ptr() as _,
+                )
+            })?;
+        }
+
+        self.follow_redirects = match self.follow_redirects_policy {
+            FollowRedirectsPolicy::FollowAll => true,
+            FollowRedirectsPolicy::FollowGetHead => method == Method::Get || method == Method::Head,
+            _ => false,
+        };
+
+        self.request_content_len = content_len.unwrap_or(0);
+
+        esp!(unsafe { esp_http_client_open(self.raw_client, self.request_content_len as _) })?;
+
+        self.state = State::Request;
+
+        Ok(())
+    }
+
+    pub fn is_request_initiated(&self) -> bool {
+        self.state == State::Request
+    }
+
+    pub fn initiate_response(&mut self) -> Result<(), EspError> {
+        self.assert_request();
+
+        self.fetch_headers()?;
+
+        self.state = State::Response;
+
+        Ok(())
+    }
+
+    pub fn is_response_initiated(&self) -> bool {
+        self.state == State::Response
+    }
+
+    pub fn split(&mut self) -> (&EspHttpConnection, &mut Self) {
+        self.assert_response();
+
+        let headers_ptr: *const EspHttpConnection = self as *const _;
+
+        let headers = unsafe { headers_ptr.as_ref().unwrap() };
+
+        (headers, self)
+    }
+
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.assert_response();
+
+        let result = unsafe {
+            esp_http_client_read_response(self.raw_client, buf.as_mut_ptr() as _, buf.len() as _)
+        };
+        if result < 0 {
+            esp!(result)?;
+        }
+
+        Ok(result as _)
+    }
+
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspError> {
+        self.assert_request();
+
+        let result =
+            unsafe { esp_http_client_write(self.raw_client, buf.as_ptr() as _, buf.len() as _) };
+        if result < 0 {
+            esp!(result)?;
+        }
+
+        Ok(result as _)
+    }
+
+    pub fn flush(&mut self) -> Result<(), EspError> {
+        self.assert_request();
+
+        Ok(())
     }
 
     extern "C" fn on_events(event: *mut esp_http_client_event_t) -> esp_err_t {
@@ -135,98 +301,14 @@ impl EspHttpClient {
             None => ESP_FAIL as _,
         }
     }
-}
 
-impl Drop for EspHttpClient {
-    fn drop(&mut self) {
-        esp!(unsafe { esp_http_client_cleanup(self.raw) })
-            .expect("Unable to stop the client cleanly");
-    }
-}
-
-impl Io for EspHttpClient {
-    type Error = EspIOError;
-}
-
-impl Client for EspHttpClient {
-    type Request<'a> = EspHttpRequest<'a>;
-
-    fn request(&mut self, method: Method, url: &str) -> Result<Self::Request<'_>, Self::Error> {
-        let c_url = CString::new(url).unwrap();
-
-        esp!(unsafe { esp_http_client_set_url(self.raw, c_url.as_ptr() as _) })?;
-        esp!(unsafe {
-            esp_http_client_set_method(
-                self.raw,
-                Newtype::<(esp_http_client_method_t, ())>::from(method).0 .0,
-            )
-        })?;
-
-        let follow_redirects = match self.follow_redirects_policy {
-            FollowRedirectsPolicy::FollowAll => true,
-            FollowRedirectsPolicy::FollowGetHead => method == Method::Get || method == Method::Head,
-            _ => false,
-        };
-
-        Ok(EspHttpRequest {
-            client: self,
-            follow_redirects,
-        })
-    }
-}
-
-pub struct EspHttpRequest<'a> {
-    client: &'a mut EspHttpClient,
-    follow_redirects: bool,
-}
-
-impl<'a> Io for EspHttpRequest<'a> {
-    type Error = EspIOError;
-}
-
-impl<'a> Request for EspHttpRequest<'a> {
-    type Write = EspHttpRequestWrite<'a>;
-
-    fn into_writer(self, size: usize) -> Result<Self::Write, Self::Error> {
-        esp!(unsafe { esp_http_client_open(self.client.raw, size as _) })?;
-
-        Ok(Self::Write {
-            client: self.client,
-            follow_redirects: self.follow_redirects,
-            size,
-        })
-    }
-}
-
-impl<'a> SendHeaders for EspHttpRequest<'a> {
-    fn set_header(&mut self, name: &str, value: &str) -> &mut Self {
-        let c_name = CString::new(name).unwrap();
-
-        // TODO: Replace with a proper conversion from UTF8 to ISO-8859-1
-        let c_value = CString::new(value).unwrap();
-
-        esp!(unsafe {
-            esp_http_client_set_header(self.client.raw, c_name.as_ptr() as _, c_value.as_ptr() as _)
-        })
-        .unwrap();
-
-        self
-    }
-}
-
-pub struct EspHttpRequestWrite<'a> {
-    client: &'a mut EspHttpClient,
-    follow_redirects: bool,
-    size: usize,
-}
-
-impl<'a> EspHttpRequestWrite<'a> {
-    fn fetch_headers(&mut self) -> Result<BTreeMap<Uncased<'static>, String>, EspIOError> {
-        let mut headers = BTreeMap::new();
+    fn fetch_headers(&mut self) -> Result<(), EspError> {
+        self.headers.clear();
+        *self.content_len_header.get_mut() = None;
 
         loop {
             // TODO: Implement a mechanism where the client can declare in which header it is interested
-            let headers_ptr = &mut headers as *mut BTreeMap<Uncased, String>;
+            let headers_ptr = &mut self.headers as *mut BTreeMap<Uncased, String>;
 
             let handler = move |event: &esp_http_client_event_t| {
                 if event.event_id == esp_http_client_event_id_t_HTTP_EVENT_ON_HEADER {
@@ -245,7 +327,7 @@ impl<'a> EspHttpRequestWrite<'a> {
 
             self.register_handler(handler);
 
-            let result = unsafe { esp_http_client_fetch_headers(self.client.raw) };
+            let result = unsafe { esp_http_client_fetch_headers(self.raw_client) };
 
             self.deregister_handler();
 
@@ -253,26 +335,28 @@ impl<'a> EspHttpRequestWrite<'a> {
                 esp!(result)?;
             }
 
-            trace!("Fetched headers: {:?}", headers);
+            trace!("Fetched headers: {:?}", self.headers);
 
             if self.follow_redirects {
-                let status = unsafe { esp_http_client_get_status_code(self.client.raw) as u16 };
+                let status = unsafe { esp_http_client_get_status_code(self.raw_client) as u16 };
 
                 if status::REDIRECT.contains(&status) {
                     info!("Got response {}, about to follow redirect", status);
 
                     let mut len = 0_i32;
-                    esp!(unsafe { esp_http_client_flush_response(self.client.raw, &mut len) })?;
+                    esp!(unsafe { esp_http_client_flush_response(self.raw_client, &mut len) })?;
                     esp!(unsafe {
                         esp_http_client_set_method(
-                            self.client.raw,
+                            self.raw_client,
                             esp_http_client_method_t_HTTP_METHOD_GET,
                         )
                     })?;
-                    esp!(unsafe { esp_http_client_set_redirection(self.client.raw) })?;
-                    esp!(unsafe { esp_http_client_open(self.client.raw, self.size as _) })?;
+                    esp!(unsafe { esp_http_client_set_redirection(self.raw_client) })?;
+                    esp!(unsafe {
+                        esp_http_client_open(self.raw_client, self.request_content_len as _)
+                    })?;
 
-                    headers.clear();
+                    self.headers.clear();
 
                     continue;
                 }
@@ -281,114 +365,129 @@ impl<'a> EspHttpRequestWrite<'a> {
             break;
         }
 
-        Ok(headers)
+        Ok(())
     }
 
     fn register_handler(
         &mut self,
         handler: impl Fn(&esp_http_client_event_t) -> esp_err_t + 'static,
     ) {
-        *self.client.event_handler = Some(Box::new(handler));
+        *self.event_handler = Some(Box::new(handler));
     }
 
     fn deregister_handler(&mut self) {
-        *self.client.event_handler = None;
+        *self.event_handler = None;
     }
-}
 
-impl<'a> RequestWrite for EspHttpRequestWrite<'a> {
-    type Response = EspHttpResponse<'a>;
-
-    fn submit(mut self) -> Result<Self::Response, Self::Error> {
-        let headers = self.fetch_headers()?;
-
-        Ok(EspHttpResponse {
-            client: self.client,
-            headers,
-        })
-    }
-}
-
-impl<'a> Io for EspHttpRequestWrite<'a> {
-    type Error = EspIOError;
-}
-
-impl<'a> Write for EspHttpRequestWrite<'a> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let result =
-            unsafe { esp_http_client_write(self.client.raw, buf.as_ptr() as _, buf.len() as _) };
-        if result < 0 {
-            esp!(result)?;
+    fn assert_initial(&self) {
+        if self.state != State::New && self.state != State::Response {
+            panic!("connection is not in initial phase");
         }
-
-        Ok(result as _)
     }
 
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-pub struct EspHttpResponse<'a> {
-    client: &'a mut EspHttpClient,
-    headers: BTreeMap<Uncased<'static>, String>,
-}
-
-impl<'a> Io for EspHttpResponse<'a> {
-    type Error = EspIOError;
-}
-
-impl<'a> Response for EspHttpResponse<'a> {
-    type Read<'b>
-    where
-        'a: 'b,
-    = &'b mut EspHttpResponse<'a>;
-
-    fn reader(&mut self) -> Self::Read<'_> {
-        self
-    }
-}
-
-impl<'a> Headers for EspHttpResponse<'a> {
-    fn header(&self, name: &str) -> Option<&str> {
-        // TODO XXX FIXME
-        // if name.eq_ignore_ascii_case("Content-Length") {
-        //     self.content_len().map(|l| l.to_string())
-        // } else {
-        self.headers.get(UncasedStr::new(name)).map(|s| s.as_str())
-        // }
+    fn assert_request(&self) {
+        if self.state != State::Request {
+            panic!("connection is not in request phase");
+        }
     }
 
-    fn content_len(&self) -> Option<usize> {
-        let content_length = unsafe { esp_http_client_get_content_length(self.client.raw) };
-
-        if content_length >= 0 {
-            Some(content_length as usize)
-        } else {
-            None
+    fn assert_response(&self) {
+        if self.state != State::Response {
+            panic!("connection is not in response phase");
         }
     }
 }
 
-impl<'a> Status for EspHttpResponse<'a> {
+impl Drop for EspHttpConnection {
+    fn drop(&mut self) {
+        esp!(unsafe { esp_http_client_cleanup(self.raw_client) })
+            .expect("Unable to stop the client cleanly");
+    }
+}
+
+impl RawHandle for EspHttpConnection {
+    type Handle = esp_http_client_handle_t;
+
+    unsafe fn handle(&self) -> Self::Handle {
+        self.raw_client
+    }
+}
+
+impl Status for EspHttpConnection {
     fn status(&self) -> u16 {
-        unsafe { esp_http_client_get_status_code(self.client.raw) as _ }
+        EspHttpConnection::status(self)
     }
 
     fn status_message(&self) -> Option<&str> {
-        None
+        EspHttpConnection::status_message(self)
     }
 }
 
-impl<'a> Read for &mut EspHttpResponse<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let result = unsafe {
-            esp_http_client_read_response(self.client.raw, buf.as_mut_ptr() as _, buf.len() as _)
-        };
-        if result < 0 {
-            esp!(result)?;
-        }
+impl Headers for EspHttpConnection {
+    fn header(&self, name: &str) -> Option<&str> {
+        EspHttpConnection::header(self, name)
+    }
+}
 
-        Ok(result as _)
+impl Io for EspHttpConnection {
+    type Error = EspIOError;
+}
+
+impl Read for EspHttpConnection {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        let size = EspHttpConnection::read(self, buf)?;
+
+        Ok(size)
+    }
+}
+
+impl Write for EspHttpConnection {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        let size = EspHttpConnection::write(self, buf)?;
+
+        Ok(size)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        EspHttpConnection::flush(self).map_err(EspIOError)
+    }
+}
+
+impl Connection for EspHttpConnection {
+    type Headers = Self;
+
+    type Read = Self;
+
+    type RawConnectionError = EspIOError;
+
+    type RawConnection = Self;
+
+    fn initiate_request<'a>(
+        &'a mut self,
+        method: Method,
+        uri: &'a str,
+        headers: &'a [(&'a str, &'a str)],
+    ) -> Result<(), Self::Error> {
+        EspHttpConnection::initiate_request(self, method, uri, headers).map_err(EspIOError)
+    }
+
+    fn is_request_initiated(&self) -> bool {
+        EspHttpConnection::is_request_initiated(self)
+    }
+
+    fn initiate_response(&mut self) -> Result<(), Self::Error> {
+        EspHttpConnection::initiate_response(self).map_err(EspIOError)
+    }
+
+    fn is_response_initiated(&self) -> bool {
+        EspHttpConnection::is_response_initiated(self)
+    }
+
+    fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
+        EspHttpConnection::split(self)
+    }
+
+    fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
+        Err(EspError::from(ESP_FAIL).unwrap().into())
     }
 }
