@@ -8,17 +8,20 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use embedded_svc::mqtt::client::utils::{ConnState, ConnStateGuard, Connection, Postbox};
-use embedded_svc::mqtt::client::{self, ErrorType, Message, MessageImpl};
-
-use esp_idf_hal::mutex::Condvar;
+use embedded_svc::mqtt::client::{self, ErrorType, MessageImpl};
+use embedded_svc::utils::mqtt::client::{ConnState, ConnStateGuard, Connection, Postbox};
 
 use esp_idf_sys::*;
 
-#[cfg(feature = "experimental")]
+use crate::handle::RawHandle;
+use crate::private::mutex::RawCondvar;
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 pub use asyncify::*;
 
 use crate::private::cstr::*;
+
+pub use client::{Details, MessageId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MqttProtocolVersion {
@@ -118,6 +121,7 @@ impl<'a> Default for MqttClientConfiguration<'a> {
     }
 }
 
+#[cfg(esp_idf_version_major = "4")]
 impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
     fn from(conf: &'a MqttClientConfiguration<'a>) -> Self {
         let mut cstrs = RawCstrs::new();
@@ -177,6 +181,87 @@ impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, Ra
     }
 }
 
+#[cfg(not(esp_idf_version_major = "4"))]
+impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
+    fn from(conf: &'a MqttClientConfiguration<'a>) -> Self {
+        let mut cstrs = RawCstrs::new();
+
+        let mut c_conf = esp_mqtt_client_config_t {
+            broker: esp_mqtt_client_config_t_broker_t {
+                verification: esp_mqtt_client_config_t_broker_t_verification_t {
+                    use_global_ca_store: conf.use_global_ca_store,
+                    skip_cert_common_name_check: conf.skip_cert_common_name_check,
+                    #[cfg(not(esp_idf_version = "4.3"))]
+                    crt_bundle_attach: conf.crt_bundle_attach,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            credentials: esp_mqtt_client_config_t_credentials_t {
+                client_id: cstrs.as_nptr(conf.client_id),
+                set_null_client_id: conf.client_id.is_none(),
+                username: cstrs.as_nptr(conf.username),
+                authentication: esp_mqtt_client_config_t_credentials_t_authentication_t {
+                    password: cstrs.as_nptr(conf.password),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            session: esp_mqtt_client_config_t_session_t {
+                protocol_ver: if let Some(protocol_version) = conf.protocol_version {
+                    protocol_version.into()
+                } else {
+                    esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_UNDEFINED
+                },
+                disable_clean_session: conf.disable_clean_session as _,
+                ..Default::default()
+            },
+            network: esp_mqtt_client_config_t_network_t {
+                refresh_connection_after_ms: conf.connection_refresh_interval.as_millis() as _,
+                timeout_ms: conf.network_timeout.as_millis() as _,
+                ..Default::default()
+            },
+            task: esp_mqtt_client_config_t_task_t {
+                priority: conf.task_prio as _,
+                stack_size: conf.task_stack as _,
+                ..Default::default()
+            },
+            buffer: esp_mqtt_client_config_t_buffer_t {
+                size: conf.buffer_size as _,
+                out_size: conf.out_buffer_size as _,
+                ..Default::default()
+            },
+        };
+
+        if let Some(keep_alive_interval) = conf.keep_alive_interval {
+            c_conf.session.keepalive = keep_alive_interval.as_secs() as _;
+            c_conf.session.disable_keepalive = false;
+        } else {
+            c_conf.session.disable_keepalive = true;
+        }
+
+        if let Some(reconnect_timeout) = conf.reconnect_timeout {
+            c_conf.network.reconnect_timeout_ms = reconnect_timeout.as_millis() as _;
+            c_conf.network.disable_auto_reconnect = false;
+        } else {
+            c_conf.network.disable_auto_reconnect = true;
+        }
+
+        if let Some(lwt) = conf.lwt.as_ref() {
+            c_conf.session.last_will = esp_mqtt_client_config_t_session_t_last_will_t {
+                topic: cstrs.as_ptr(lwt.topic),
+                msg: lwt.payload.as_ptr() as _,
+                msg_len: lwt.payload.len() as _,
+                qos: lwt.qos as _,
+                retain: lwt.retain as _,
+                ..Default::default()
+            };
+        }
+
+        (c_conf, cstrs)
+    }
+}
+
 struct UnsafeCallback(*mut Box<dyn FnMut(esp_mqtt_event_handle_t)>);
 
 impl UnsafeCallback {
@@ -201,15 +286,23 @@ impl UnsafeCallback {
 
 pub struct EspMqttClient<S = ()> {
     raw_client: esp_mqtt_client_handle_t,
-    conn_state_guard: Option<Arc<ConnStateGuard<Condvar, S>>>,
+    conn_state_guard: Option<Arc<ConnStateGuard<RawCondvar, S>>>,
     _boxed_raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
+}
+
+impl<S> RawHandle for EspMqttClient<S> {
+    type Handle = esp_mqtt_client_handle_t;
+
+    unsafe fn handle(&self) -> Self::Handle {
+        self.raw_client
+    }
 }
 
 impl EspMqttClient<ConnState<MessageImpl, EspError>> {
     pub fn new_with_conn<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
-    ) -> Result<(Self, Connection<Condvar, MessageImpl, EspError>), EspError>
+    ) -> Result<(Self, Connection<RawCondvar, MessageImpl, EspError>), EspError>
     where
         Self: Sized,
     {
@@ -234,7 +327,7 @@ where
             ) -> Result<client::Event<M>, E>
             + Send
             + 'static,
-    ) -> Result<(Self, Connection<Condvar, M, E>), EspError>
+    ) -> Result<(Self, Connection<RawCondvar, M, E>), EspError>
     where
         Self: Sized,
     {
@@ -269,7 +362,7 @@ impl<S> EspMqttClient<S> {
     pub fn new_generic<'a>(
         url: impl AsRef<str>,
         conf: &'a MqttClientConfiguration<'a>,
-        conn_state_guard: Option<Arc<ConnStateGuard<Condvar, S>>>,
+        conn_state_guard: Option<Arc<ConnStateGuard<RawCondvar, S>>>,
         mut callback: impl for<'b> FnMut(&'b Result<client::Event<EspMqttMessage<'b>>, EspError>)
             + Send
             + 'static,
@@ -293,7 +386,7 @@ impl<S> EspMqttClient<S> {
         url: impl AsRef<str> + 'a,
         conf: &'a MqttClientConfiguration<'a>,
         raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
-        conn_state_guard: Option<Arc<ConnStateGuard<Condvar, S>>>,
+        conn_state_guard: Option<Arc<ConnStateGuard<RawCondvar, S>>>,
     ) -> Result<Self, EspError>
     where
         Self: Sized,
@@ -304,7 +397,15 @@ impl<S> EspMqttClient<S> {
 
         let (mut c_conf, mut cstrs) = conf.into();
 
-        c_conf.uri = cstrs.as_ptr(url);
+        #[cfg(esp_idf_version_major = "4")]
+        {
+            c_conf.uri = cstrs.as_ptr(url);
+        }
+
+        #[cfg(not(esp_idf_version_major = "4"))]
+        {
+            c_conf.broker.address.uri = cstrs.as_ptr(url);
+        }
 
         let raw_client = unsafe { esp_mqtt_client_init(&c_conf as *const _) };
         if raw_client.is_null() {
@@ -329,6 +430,67 @@ impl<S> EspMqttClient<S> {
         esp!(unsafe { esp_mqtt_client_start(client.raw_client) })?;
 
         Ok(client)
+    }
+
+    pub fn subscribe(
+        &mut self,
+        topic: &str,
+        qos: client::QoS,
+    ) -> Result<client::MessageId, EspError> {
+        let c_topic = CString::new(topic).unwrap();
+
+        Self::check(unsafe {
+            esp_mqtt_client_subscribe(self.raw_client, c_topic.as_ptr(), qos as _)
+        })
+    }
+
+    pub fn unsubscribe(&mut self, topic: &str) -> Result<client::MessageId, EspError> {
+        let c_topic = CString::new(topic).unwrap();
+
+        Self::check(unsafe { esp_mqtt_client_unsubscribe(self.raw_client, c_topic.as_ptr()) })
+    }
+
+    pub fn publish(
+        &mut self,
+        topic: &str,
+        qos: client::QoS,
+        retain: bool,
+        payload: &[u8],
+    ) -> Result<client::MessageId, EspError> {
+        let c_topic = CString::new(topic).unwrap();
+
+        Self::check(unsafe {
+            esp_mqtt_client_publish(
+                self.raw_client,
+                c_topic.as_ptr(),
+                payload.as_ptr() as _,
+                payload.len() as _,
+                qos as _,
+                retain as _,
+            )
+        })
+    }
+
+    pub fn enqueue(
+        &mut self,
+        topic: &str,
+        qos: client::QoS,
+        retain: bool,
+        payload: &[u8],
+    ) -> Result<client::MessageId, EspError> {
+        let c_topic = CString::new(topic).unwrap();
+
+        Self::check(unsafe {
+            esp_mqtt_client_enqueue(
+                self.raw_client,
+                c_topic.as_ptr(),
+                payload.as_ptr() as _,
+                payload.len() as _,
+                qos as _,
+                retain as _,
+                true,
+            )
+        })
     }
 
     extern "C" fn handle(
@@ -372,17 +534,11 @@ impl<P> client::Client for EspMqttClient<P> {
         topic: &str,
         qos: client::QoS,
     ) -> Result<client::MessageId, Self::Error> {
-        let c_topic = CString::new(topic).unwrap();
-
-        Self::check(unsafe {
-            esp_mqtt_client_subscribe(self.raw_client, c_topic.as_ptr(), qos as _)
-        })
+        EspMqttClient::subscribe(self, topic, qos)
     }
 
     fn unsubscribe(&mut self, topic: &str) -> Result<client::MessageId, Self::Error> {
-        let c_topic = CString::new(topic).unwrap();
-
-        Self::check(unsafe { esp_mqtt_client_unsubscribe(self.raw_client, c_topic.as_ptr()) })
+        EspMqttClient::unsubscribe(self, topic)
     }
 }
 
@@ -394,18 +550,7 @@ impl<P> client::Publish for EspMqttClient<P> {
         retain: bool,
         payload: &[u8],
     ) -> Result<client::MessageId, Self::Error> {
-        let c_topic = CString::new(topic).unwrap();
-
-        Self::check(unsafe {
-            esp_mqtt_client_publish(
-                self.raw_client,
-                c_topic.as_ptr(),
-                payload.as_ptr() as _,
-                payload.len() as _,
-                qos as _,
-                retain as _,
-            )
-        })
+        EspMqttClient::publish(self, topic, qos, retain, payload)
     }
 }
 
@@ -417,19 +562,7 @@ impl<P> client::Enqueue for EspMqttClient<P> {
         retain: bool,
         payload: &[u8],
     ) -> Result<client::MessageId, Self::Error> {
-        let c_topic = CString::new(topic).unwrap();
-
-        Self::check(unsafe {
-            esp_mqtt_client_enqueue(
-                self.raw_client,
-                c_topic.as_ptr(),
-                payload.as_ptr() as _,
-                payload.len() as _,
-                qos as _,
-                retain as _,
-                true,
-            )
-        })
+        EspMqttClient::enqueue(self, topic, qos, retain, payload)
     }
 }
 
@@ -480,6 +613,44 @@ impl<'a> EspMqttMessage<'a> {
         message
     }
 
+    pub fn id(&self) -> MessageId {
+        self.event.msg_id as _
+    }
+
+    pub fn data(&self) -> &[u8] {
+        if self.event.data_len > 0 {
+            unsafe {
+                slice::from_raw_parts(
+                    (self.event.data as *const u8).as_ref().unwrap(),
+                    self.event.data_len as _,
+                )
+            }
+        } else {
+            &[]
+        }
+    }
+
+    pub fn topic(&self) -> Option<&str> {
+        let ptr = self.event.topic;
+
+        if ptr.is_null() {
+            None
+        } else {
+            let len = self.event.topic_len;
+
+            let topic = unsafe {
+                let slice = slice::from_raw_parts(ptr as _, len.try_into().unwrap());
+                core::str::from_utf8(slice).unwrap()
+            };
+
+            Some(topic)
+        }
+    }
+
+    pub fn details(&self) -> &Details {
+        &self.details
+    }
+
     fn fill_chunk_details(&mut self) {
         if self.event.data_len < self.event.total_data_len {
             if self.event.current_data_offset == 0 {
@@ -510,45 +681,23 @@ impl<'a> Debug for EspMqttMessage<'a> {
 
 impl<'a> client::Message for EspMqttMessage<'a> {
     fn id(&self) -> client::MessageId {
-        self.event.msg_id as _
+        EspMqttMessage::id(self)
     }
 
     fn data(&self) -> &[u8] {
-        if self.event.data_len > 0 {
-            unsafe {
-                slice::from_raw_parts(
-                    (self.event.data as *const u8).as_ref().unwrap(),
-                    self.event.data_len as _,
-                )
-            }
-        } else {
-            &[]
-        }
+        EspMqttMessage::data(self)
     }
 
     fn topic(&self) -> Option<&str> {
-        let ptr = self.event.topic;
-
-        if ptr.is_null() {
-            None
-        } else {
-            let len = self.event.topic_len;
-
-            let topic = unsafe {
-                let slice = slice::from_raw_parts(ptr as _, len.try_into().unwrap());
-                core::str::from_utf8(slice).unwrap()
-            };
-
-            Some(topic)
-        }
+        EspMqttMessage::topic(self)
     }
 
     fn details(&self) -> &client::Details {
-        &self.details
+        EspMqttMessage::details(self)
     }
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 mod asyncify {
     use core::fmt::Debug;
 
@@ -556,21 +705,22 @@ mod asyncify {
 
     use alloc::sync::Arc;
 
-    use embedded_svc::mqtt::client::MessageImpl;
-    use embedded_svc::mqtt::client::{self, utils::ConnStateGuard};
+    use embedded_svc::mqtt::client::{self, MessageImpl};
     use embedded_svc::utils::asyncify::mqtt::client::{
         AsyncClient, AsyncConnState, AsyncConnection, AsyncPostbox, Blocking, Publishing,
     };
     use embedded_svc::utils::asyncify::{Asyncify, UnblockingAsyncify};
-
-    use esp_idf_hal::mutex::{Condvar, Mutex};
+    use embedded_svc::utils::mqtt::client::ConnStateGuard;
+    use embedded_svc::utils::mutex::Mutex;
 
     use esp_idf_sys::EspError;
+
+    use crate::private::mutex::{RawCondvar, RawMutex};
 
     use super::{EspMqttClient, EspMqttMessage, MqttClientConfiguration};
 
     impl<P> UnblockingAsyncify for super::EspMqttClient<P> {
-        type AsyncWrapper<U, S> = AsyncClient<U, Arc<Mutex<S>>>;
+        type AsyncWrapper<U, S> = AsyncClient<U, Arc<Mutex<RawMutex, S>>>;
     }
 
     impl<P> Asyncify for super::EspMqttClient<P> {
@@ -585,12 +735,12 @@ mod asyncify {
     pub type EspMqttAsyncConnection = EspMqttConvertingAsyncConnection<MessageImpl, EspError>;
 
     pub type EspMqttConvertingUnblockingAsyncClient<U, M, E> =
-        AsyncClient<U, Arc<Mutex<EspMqttClient<AsyncConnState<M, E>>>>>;
+        AsyncClient<U, Arc<Mutex<RawMutex, EspMqttClient<AsyncConnState<M, E>>>>>;
 
     pub type EspMqttConvertingAsyncClient<M, E> =
         AsyncClient<(), EspMqttClient<AsyncConnState<M, E>>>;
 
-    pub type EspMqttConvertingAsyncConnection<M, E> = AsyncConnection<Condvar, M, E>;
+    pub type EspMqttConvertingAsyncConnection<M, E> = AsyncConnection<RawCondvar, M, E>;
 
     impl EspMqttClient<AsyncConnState<MessageImpl, EspError>> {
         pub fn new_with_async_conn<'a>(

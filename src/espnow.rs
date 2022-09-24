@@ -2,18 +2,22 @@ use ::log::info;
 
 use alloc::boxed::Box;
 
-use esp_idf_hal::mutex::Mutex;
 use esp_idf_sys::*;
+
+use crate::private::mutex::{Mutex, RawMutex};
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
-#[allow(clippy::type_complexity)]
-static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> = Mutex::new(None);
-#[allow(clippy::type_complexity)]
-static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> = Mutex::new(None);
+pub const BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 
-pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-static TAKEN: Mutex<bool> = Mutex::new(false);
+#[allow(clippy::type_complexity)]
+static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> =
+    Mutex::wrap(RawMutex::new(), None);
+#[allow(clippy::type_complexity)]
+static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> =
+    Mutex::wrap(RawMutex::new(), None);
+
+static TAKEN: Mutex<bool> = Mutex::wrap(RawMutex::new(), false);
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -33,14 +37,10 @@ impl From<u32> for SendStatus {
 
 pub type PeerInfo = esp_now_peer_info_t;
 
-#[derive(Debug)]
-struct PrivateData;
+pub struct EspNow(());
 
-#[derive(Debug)]
-pub struct EspNowClient(PrivateData);
-
-impl EspNowClient {
-    pub fn new() -> Result<Self, EspError> {
+impl EspNow {
+    pub fn take() -> Result<Self, EspError> {
         let mut taken = TAKEN.lock();
 
         if *taken {
@@ -56,7 +56,8 @@ impl EspNowClient {
         esp!(unsafe { esp_now_init() })?;
 
         *taken = true;
-        Ok(Self(PrivateData))
+
+        Ok(Self(()))
     }
 
     pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {
@@ -169,9 +170,12 @@ impl EspNowClient {
     }
 }
 
-impl Drop for EspNowClient {
+impl Drop for EspNow {
     fn drop(&mut self) {
+        let mut taken = TAKEN.lock();
+
         esp!(unsafe { esp_now_deinit() }).unwrap();
+
         let send_cb = &mut *SEND_CALLBACK.lock();
         if send_cb.is_some() {
             *send_cb = None;
@@ -181,5 +185,7 @@ impl Drop for EspNowClient {
         if recv_cb.is_some() {
             *recv_cb = None;
         }
+
+        *taken = false;
     }
 }

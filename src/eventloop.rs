@@ -17,29 +17,28 @@ use embedded_svc::event_bus::{self, ErrorType};
 use esp_idf_hal::cpu::Core;
 use esp_idf_hal::delay::TickType;
 use esp_idf_hal::interrupt;
-use esp_idf_hal::mutex;
+use esp_idf_hal::task;
 
 use esp_idf_sys::*;
 
+use crate::handle::RawHandle;
 use crate::private::cstr::RawCstrs;
+use crate::private::mutex;
 
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 pub use asyncify::*;
 
 pub type EspSystemSubscription = EspSubscription<System>;
 pub type EspBackgroundSubscription = EspSubscription<User<Background>>;
 pub type EspExplicitSubscription = EspSubscription<User<Explicit>>;
-pub type EspPinnedSubscription = EspSubscription<User<Pinned>>;
 
 pub type EspSystemEventLoop = EspEventLoop<System>;
 pub type EspBackgroundEventLoop = EspEventLoop<User<Background>>;
 pub type EspExplicitEventLoop = EspEventLoop<User<Explicit>>;
-pub type EspPinnedEventLoop = EspEventLoop<User<Pinned>>;
 
 pub type EspSystemPostbox = EspPostbox<EspEventLoop<System>>;
 pub type EspBackgroundPostbox = EspPostbox<EspEventLoop<User<Background>>>;
 pub type EspExplicitPostbox = EspPostbox<EspEventLoop<User<Explicit>>>;
-pub type EspPinnedPostbox = EspPostbox<EspEventLoop<User<Pinned>>>;
 
 #[derive(Debug)]
 pub struct BackgroundLoopConfiguration<'a> {
@@ -98,7 +97,7 @@ impl From<&ExplicitLoopConfiguration> for esp_event_loop_args_t {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
 #[derive(Clone, Debug)]
 pub struct System;
@@ -108,8 +107,6 @@ pub struct User<T>(esp_event_loop_handle_t, PhantomData<fn() -> T>);
 pub struct Background;
 #[derive(Clone, Debug)]
 pub struct Explicit;
-#[derive(Clone, Debug)]
-pub struct Pinned;
 
 unsafe impl Send for User<Background> {}
 unsafe impl Sync for User<Background> {}
@@ -299,6 +296,17 @@ where
     }
 }
 
+impl<T> RawHandle for EspSubscription<User<T>>
+where
+    T: EspEventLoopType,
+{
+    type Handle = esp_event_handler_instance_t;
+
+    unsafe fn handle(&self) -> Self::Handle {
+        self.handler_instance
+    }
+}
+
 #[derive(Debug)]
 struct EventLoopHandle<T>(T)
 where
@@ -344,12 +352,6 @@ impl EventLoopHandle<User<Explicit>> {
     }
 }
 
-impl EventLoopHandle<User<Pinned>> {
-    fn new(conf: &ExplicitLoopConfiguration) -> Result<Self, EspError> {
-        Self::new_internal(&conf.into())
-    }
-}
-
 impl<T> Drop for EventLoopHandle<T>
 where
     T: EspEventLoopType,
@@ -387,7 +389,7 @@ where
 {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn subscribe_raw(
-        &mut self,
+        &self,
         source: *const c_types::c_char,
         event_id: i32,
         mut callback: impl for<'a> FnMut(&EspEventFetchData) + 'static,
@@ -436,7 +438,7 @@ where
     }
 
     pub fn post_raw(
-        &mut self,
+        &self,
         data: &EspEventPostData,
         wait: Option<Duration>,
     ) -> Result<bool, EspError> {
@@ -476,7 +478,7 @@ where
     }
 
     #[cfg(esp_idf_esp_event_post_from_isr)]
-    pub fn isr_post_raw(&mut self, data: &EspEventPostData) -> Result<bool, EspError> {
+    pub fn isr_post_raw(&self, data: &EspEventPostData) -> Result<bool, EspError> {
         let mut higher_prio_task_woken: BaseType_t = Default::default();
 
         let result = if T::is_system() {
@@ -506,7 +508,7 @@ where
         };
 
         if higher_prio_task_woken != 0 {
-            interrupt::task::do_yield();
+            task::do_yield();
         }
 
         if result == ESP_FAIL {
@@ -515,6 +517,41 @@ where
             esp!(result)?;
 
             Ok(true)
+        }
+    }
+
+    pub fn subscribe<P>(
+        &self,
+        mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
+    ) -> Result<EspSubscription<T>, EspError>
+    where
+        P: EspTypedEventDeserializer<P>,
+    {
+        self.subscribe_raw(
+            P::source(),
+            P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
+            move |raw_event| P::deserialize(raw_event, &mut callback),
+        )
+    }
+
+    pub fn post<P>(&self, payload: &P, wait: Option<Duration>) -> Result<bool, EspError>
+    where
+        P: EspTypedEventSerializer<P>,
+    {
+        if interrupt::active() {
+            #[cfg(esp_idf_esp_event_post_from_isr)]
+            let result = P::serialize(payload, |raw_event| self.isr_post_raw(raw_event));
+
+            #[cfg(not(esp_idf_esp_event_post_from_isr))]
+            let result = {
+                panic!("Trying to post from an ISR handler. Enable `CONFIG_ESP_EVENT_POST_FROM_ISR` in `sdkconfig.defaults`");
+
+                Err(EspError::from(ESP_FAIL).unwrap())
+            };
+
+            result
+        } else {
+            P::serialize(payload, |raw_event| self.post_raw(raw_event, wait))
         }
     }
 
@@ -527,8 +564,22 @@ where
     }
 }
 
+impl<T> EspEventLoop<User<T>> {
+    pub fn spin(&mut self, duration: Option<Duration>) -> Result<(), EspError> {
+        esp!(unsafe { esp_event_loop_run(self.0 .0 .0, TickType::from(duration).0,) })
+    }
+}
+
+impl<T> RawHandle for EspEventLoop<User<T>> {
+    type Handle = esp_event_loop_handle_t;
+
+    unsafe fn handle(&self) -> Self::Handle {
+        self.0 .0 .0
+    }
+}
+
 impl EspEventLoop<System> {
-    pub fn new() -> Result<Self, EspError> {
+    pub fn take() -> Result<Self, EspError> {
         Ok(Self(Arc::new(EventLoopHandle::<System>::new()?)))
     }
 }
@@ -546,12 +597,6 @@ impl EspEventLoop<User<Explicit>> {
         Ok(Self(Arc::new(EventLoopHandle::<User<Explicit>>::new(
             conf,
         )?)))
-    }
-}
-
-impl EspEventLoop<User<Pinned>> {
-    pub fn new(conf: &ExplicitLoopConfiguration) -> Result<Self, EspError> {
-        Ok(Self(Arc::new(EventLoopHandle::<User<Pinned>>::new(conf)?)))
     }
 }
 
@@ -575,8 +620,8 @@ where
 }
 
 impl<T> event_bus::Spin for EspEventLoop<User<T>> {
-    fn spin(&mut self, duration: Option<Duration>) -> Result<(), EspError> {
-        esp!(unsafe { esp_event_loop_run(self.0 .0 .0, TickType::from(duration).0,) })
+    fn spin(&mut self, duration: Option<Duration>) -> Result<(), Self::Error> {
+        EspEventLoop::spin(self, duration)
     }
 }
 
@@ -601,22 +646,8 @@ where
     P: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
-    fn post(&mut self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        if interrupt::active() {
-            #[cfg(esp_idf_esp_event_post_from_isr)]
-            let result = P::serialize(payload, |raw_event| self.isr_post_raw(raw_event));
-
-            #[cfg(not(esp_idf_esp_event_post_from_isr))]
-            let result = {
-                panic!("Trying to post from an ISR handler. Enable `CONFIG_ESP_EVENT_POST_FROM_ISR` in `sdkconfig.defaults`");
-
-                Err(EspError::from(ESP_FAIL).unwrap())
-            };
-
-            result
-        } else {
-            P::serialize(payload, |raw_event| self.post_raw(raw_event, wait))
-        }
+    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
+        EspEventLoop::post(self, payload, wait)
     }
 }
 
@@ -628,14 +659,10 @@ where
     type Subscription = EspSubscription<T>;
 
     fn subscribe(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
-    ) -> Result<Self::Subscription, EspError> {
-        self.subscribe_raw(
-            P::source(),
-            P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| P::deserialize(raw_event, &mut callback),
-        )
+        &self,
+        callback: impl for<'b> FnMut(&'b P) + Send + 'static,
+    ) -> Result<Self::Subscription, Self::Error> {
+        EspEventLoop::subscribe(self, callback)
     }
 }
 
@@ -667,7 +694,7 @@ where
     P: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
-    fn post(&mut self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
+    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
         self.0.post(payload, wait)
     }
 }
@@ -679,29 +706,11 @@ where
 {
     type Postbox = EspPostbox<T>;
 
-    fn postbox(&mut self) -> Result<Self::Postbox, Self::Error>
+    fn postbox(&self) -> Result<Self::Postbox, Self::Error>
     where
         P: EspTypedEventSerializer<P>,
     {
         Ok(EspPostbox(self.clone()))
-    }
-}
-
-impl<P> event_bus::PinnedEventBus<P> for EspEventLoop<User<Pinned>>
-where
-    P: EspTypedEventDeserializer<P>,
-{
-    type Subscription = EspSubscription<User<Pinned>>;
-
-    fn subscribe(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) + 'static,
-    ) -> Result<Self::Subscription, EspError> {
-        self.subscribe_raw(
-            P::source(),
-            P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| P::deserialize(raw_event, &mut callback),
-        )
     }
 }
 
@@ -718,6 +727,18 @@ impl<M, P, L> EspTypedEventLoop<M, P, L> {
             _serde: PhantomData,
             _payload: PhantomData,
         }
+    }
+}
+
+impl<M, P, T> EspTypedEventLoop<M, P, EspEventLoop<T>>
+where
+    M: EspTypedEventSerializer<P>,
+    T: EspEventLoopType,
+{
+    pub fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, EspError> {
+        M::serialize(payload, |raw_event| {
+            self.untyped_event_loop.post_raw(raw_event, wait)
+        })
     }
 }
 
@@ -746,19 +767,17 @@ where
     M: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
-    fn post(&mut self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        M::serialize(payload, |raw_event| {
-            self.untyped_event_loop.post_raw(raw_event, wait)
-        })
+    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
+        EspTypedEventLoop::post(self, payload, wait)
     }
 }
 
-impl<'a, M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, &'a mut EspEventLoop<T>>
+impl<'a, M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, &'a EspEventLoop<T>>
 where
     M: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
-    fn post(&mut self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
+    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
         M::serialize(payload, |raw_event| {
             self.untyped_event_loop.post_raw(raw_event, wait)
         })
@@ -773,7 +792,7 @@ where
     type Subscription = EspSubscription<T>;
 
     fn subscribe(
-        &mut self,
+        &self,
         mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
     ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
@@ -784,7 +803,7 @@ where
     }
 }
 
-impl<'a, M, P, T> event_bus::EventBus<P> for EspTypedEventLoop<M, P, &'a mut EspEventLoop<T>>
+impl<'a, M, P, T> event_bus::EventBus<P> for EspTypedEventLoop<M, P, &'a EspEventLoop<T>>
 where
     M: EspTypedEventDeserializer<P>,
     T: EspEventLoopType,
@@ -792,7 +811,7 @@ where
     type Subscription = EspSubscription<T>;
 
     fn subscribe(
-        &mut self,
+        &self,
         mut callback: impl for<'b> FnMut(&'b P) + Send + 'static,
     ) -> Result<Self::Subscription, EspError> {
         self.untyped_event_loop.subscribe_raw(
@@ -831,7 +850,7 @@ where
     M: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
-    fn post(&mut self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
+    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
         self.0.post(payload, wait)
     }
 }
@@ -843,88 +862,51 @@ where
 {
     type Postbox = EspTypedPostbox<M, P, T>;
 
-    fn postbox(&mut self) -> Result<Self::Postbox, Self::Error> {
+    fn postbox(&self) -> Result<Self::Postbox, Self::Error> {
         Ok(EspTypedPostbox(Self::new(self.untyped_event_loop.clone())))
     }
 }
 
-impl<'a, M, P, T> event_bus::PostboxProvider<P> for EspTypedEventLoop<M, P, &'a mut EspEventLoop<T>>
+impl<'a, M, P, T> event_bus::PostboxProvider<P> for EspTypedEventLoop<M, P, &'a EspEventLoop<T>>
 where
     M: EspTypedEventSerializer<P>,
     T: EspEventLoopType,
 {
     type Postbox = EspTypedPostbox<M, P, T>;
 
-    fn postbox(&mut self) -> Result<Self::Postbox, Self::Error> {
+    fn postbox(&self) -> Result<Self::Postbox, Self::Error> {
         Ok(EspTypedPostbox(EspTypedEventLoop::new(
             self.untyped_event_loop.clone(),
         )))
     }
 }
 
-impl<M, P> event_bus::PinnedEventBus<P> for EspTypedEventLoop<M, P, EspEventLoop<User<Pinned>>>
-where
-    M: EspTypedEventDeserializer<P>,
-{
-    type Subscription = EspSubscription<User<Pinned>>;
-
-    fn subscribe(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) + 'static,
-    ) -> Result<Self::Subscription, EspError> {
-        self.untyped_event_loop.subscribe_raw(
-            M::source(),
-            M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| M::deserialize(raw_event, &mut callback),
-        )
-    }
-}
-
-impl<'a, M, P> event_bus::PinnedEventBus<P>
-    for EspTypedEventLoop<M, P, &'a mut EspEventLoop<User<Pinned>>>
-where
-    M: EspTypedEventDeserializer<P>,
-{
-    type Subscription = EspSubscription<User<Pinned>>;
-
-    fn subscribe(
-        &mut self,
-        mut callback: impl for<'b> FnMut(&'b P) + 'static,
-    ) -> Result<Self::Subscription, EspError> {
-        self.untyped_event_loop.subscribe_raw(
-            M::source(),
-            M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| M::deserialize(raw_event, &mut callback),
-        )
-    }
-}
-
-#[cfg(feature = "experimental")]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 mod asyncify {
     use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
     use embedded_svc::utils::asyncify::{Asyncify, UnblockingAsyncify};
 
-    use esp_idf_hal::mutex::Condvar;
+    use crate::private::mutex::RawCondvar;
 
     impl<T> Asyncify for super::EspEventLoop<T>
     where
         T: super::EspEventLoopType,
     {
-        type AsyncWrapper<S> = AsyncEventBus<(), Condvar, S>;
+        type AsyncWrapper<S> = AsyncEventBus<(), RawCondvar, S>;
     }
 
     impl<T> UnblockingAsyncify for super::EspEventLoop<T>
     where
         T: super::EspEventLoopType,
     {
-        type AsyncWrapper<U, S> = AsyncEventBus<U, Condvar, S>;
+        type AsyncWrapper<U, S> = AsyncEventBus<U, RawCondvar, S>;
     }
 
     impl<M, P, L> Asyncify for super::EspTypedEventLoop<M, P, L> {
-        type AsyncWrapper<S> = AsyncEventBus<(), Condvar, S>;
+        type AsyncWrapper<S> = AsyncEventBus<(), RawCondvar, S>;
     }
 
     impl<M, P, L> UnblockingAsyncify for super::EspTypedEventLoop<M, P, L> {
-        type AsyncWrapper<U, S> = AsyncEventBus<U, Condvar, S>;
+        type AsyncWrapper<U, S> = AsyncEventBus<U, RawCondvar, S>;
     }
 }
