@@ -78,7 +78,7 @@ pub struct EspHttpClient {
     follow_redirects_policy: FollowRedirectsPolicy,
     event_handler: Box<Option<Box<dyn Fn(&esp_http_client_event_t) -> esp_err_t>>>,
     _client_cert_pem: Option<CString>,
-    _client_key_pem: Option<CString>
+    _client_key_pem: Option<CString>,
 }
 
 impl EspHttpClient {
@@ -113,8 +113,9 @@ impl EspHttpClient {
             native_config.buffer_size_tx = buffer_size_tx as _;
         }
 
-        if let (Some(cert), Some(key)) = (configuration.client_cert_pem, configuration.client_key_pem) {
-
+        if let (Some(cert), Some(key)) =
+            (configuration.client_cert_pem, configuration.client_key_pem)
+        {
             // Convert client cert and key to CString
             client_cert_pem = Some(CString::new(cert).unwrap());
             client_key_pem = Some(CString::new(key).unwrap());
@@ -137,7 +138,7 @@ impl EspHttpClient {
                 follow_redirects_policy: configuration.follow_redirects_policy,
                 event_handler,
                 _client_cert_pem: client_cert_pem,
-                _client_key_pem: client_key_pem
+                _client_key_pem: client_key_pem,
             })
         }
     }
