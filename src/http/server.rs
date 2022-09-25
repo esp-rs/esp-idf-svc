@@ -226,7 +226,7 @@ impl EspHttpServer {
     pub fn new(conf: &Configuration) -> Result<Self, EspIOError> {
         let mut handle: httpd_handle_t = ptr::null_mut();
         let handle_ref = &mut handle;
-        
+
         #[cfg(not(esp_idf_esp_https_server_enable))]
         {
             let mut config: Newtype<httpd_config_t> = conf.into();
