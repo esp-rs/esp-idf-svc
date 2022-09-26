@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use core::fmt::{Debug, Display};
+use core::fmt::{Debug, Display, Formatter};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
 use core::{mem, ptr};
@@ -27,8 +27,13 @@ use uncased::{Uncased, UncasedStr};
 use crate::errors::EspIOError;
 use crate::handle::RawHandle;
 use crate::private::common::Newtype;
-use crate::private::cstr::{CStr, CString};
+use crate::private::cstr::{CStr, CString, to_ptr_with_len};
 use crate::private::mutex::{Mutex, RawMutex};
+
+//Cannot specialize drop impl
+#[derive(Debug)]
+pub struct CHttpsSslConfig(pub httpd_ssl_config_t);
+
 
 #[derive(Copy, Clone, Debug)]
 pub struct Configuration {
@@ -84,6 +89,78 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             close_fn: None,
             uri_match_fn: None,
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct SslConfiguration<'a> {
+    pub http_configuration: Configuration,
+    pub client_verify_cert: Option<&'a str>,
+    pub cacert: Option<&'a str>,
+    pub prvtkey: Option<&'a str>,
+    pub transport_mode_secure: bool,
+    pub session_tickets: bool,
+}
+
+impl<'a> From<&SslConfiguration<'a>> for Newtype<httpd_config_t> {
+    fn from(conf: &SslConfiguration<'a>) -> Self {
+        Self::from(&conf.http_configuration)
+    }
+}
+
+impl<'a> From<&SslConfiguration<'a>> for CHttpsSslConfig {
+    fn from(conf: &SslConfiguration) -> Self {
+        let client_verify_cert = conf.client_verify_cert.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+        let cacert = conf.cacert.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+        let pkey = conf.prvtkey.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+
+        Self(httpd_ssl_config_t {
+            httpd: httpd_config_t {
+                ..Newtype::<httpd_config_t>::from(conf).0
+            },
+            client_verify_cert_pem: client_verify_cert.0 as _,
+            client_verify_cert_len: client_verify_cert.1 as _,
+            cacert_pem: cacert.0 as _,
+            cacert_len: cacert.1 as _,
+            prvtkey_pem: pkey.0 as _,
+            prvtkey_len: pkey.1 as _,
+            transport_mode: httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+            port_secure: conf.http_configuration.https_port,
+            port_insecure: conf.http_configuration.http_port,
+            session_tickets: conf.session_tickets,
+            user_cb: None
+        })
+    }
+}
+
+impl<'a> Default for SslConfiguration<'a> {
+    fn default() -> Self {
+        SslConfiguration {
+            http_configuration: Default::default(),
+            client_verify_cert: None,
+            cacert: None,
+            prvtkey: None,
+            transport_mode_secure: true,
+            session_tickets: false
+        }
+    }
+}
+
+impl Drop for CHttpsSslConfig {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.0.client_verify_cert_pem.is_null() {
+                drop(CString::from_raw(self.0.client_verify_cert_pem as _));
+            }
+
+            if !self.0.cacert_pem.is_null() {
+                drop(CString::from_raw(self.0.cacert_pem as _));
+            }
+
+            if !self.0.prvtkey_pem.is_null() {
+                drop(CString::from_raw(self.0.prvtkey_pem as _));
+            }
+        }
     }
 }
 
@@ -182,7 +259,9 @@ pub struct EspHttpServer {
 }
 
 impl EspHttpServer {
-    pub fn new(conf: &Configuration) -> Result<Self, EspIOError> {
+    pub fn new<T: Into<Newtype<httpd_config_t>> + Debug>(conf: T) -> Result<Self, EspIOError> {
+        info!("Starting Httpd server with config {:?}", conf);
+
         let mut config: Newtype<httpd_config_t> = conf.into();
         config.0.close_fn = Some(Self::close_fn);
 
@@ -191,18 +270,43 @@ impl EspHttpServer {
 
         esp!(unsafe { httpd_start(handle_ref, &config.0 as *const _) })?;
 
-        info!("Started Httpd server with config {:?}", conf);
-
-        let server = EspHttpServer {
-            sd: handle,
-            registrations: Vec::new(),
-        };
+        info!("Started Httpd server");
 
         unsafe {
-            CLOSE_HANDLERS.lock().insert(server.sd as _, Vec::new());
+            CLOSE_HANDLERS.lock().insert(handle as _, Vec::new());
         }
 
-        Ok(server)
+        Ok(EspHttpServer {
+            sd: handle,
+            registrations: Vec::new(),
+        })
+    }
+
+    pub fn new_https<T: Into<CHttpsSslConfig>>(conf: T) -> Result<Self, EspIOError>
+    {
+        let mut config: CHttpsSslConfig = conf.into();
+
+        config.0.httpd.close_fn = Some(Self::close_fn);
+
+        let mut handle: httpd_handle_t = ptr::null_mut();
+
+        info!("httpd_ssl_start {:?}", config);
+
+        esp!(unsafe { httpd_ssl_start(&mut handle, &mut config.0) })?;
+
+        info!("httpd_ssl_started");
+
+        unsafe {
+            CLOSE_HANDLERS.lock().insert(handle as _, Vec::new());
+        }
+
+        info!("handle");
+
+
+        Ok(EspHttpServer {
+            sd: handle,
+            registrations: Vec::new(),
+        })
     }
 
     fn unregister(&mut self, uri: CString, conf: httpd_uri_t) -> Result<(), EspIOError> {

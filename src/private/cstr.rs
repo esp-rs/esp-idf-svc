@@ -35,6 +35,14 @@ pub fn from_cstr(buf: &[u8]) -> &str {
         .unwrap()
 }
 
+//Since we are using .into_raw(), we are leaking the buffer!
+//Make sure to call drop(CString::from_raw()) at some point!
+pub fn to_ptr_with_len(s: &str) -> (*mut c_types::c_char, usize) {
+    let s = CString::new(s).expect("String must not contain NUL bytes!");
+    let len = s.as_bytes_with_nul().len();
+    (s.into_raw(), len)
+}
+
 #[cfg(feature = "alloc")]
 pub struct RawCstrs(alloc::vec::Vec<CString>);
 
