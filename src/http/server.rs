@@ -99,6 +99,9 @@ pub struct SslConfiguration<'a> {
     pub cacert: Option<&'a str>,
     pub prvtkey: Option<&'a str>,
     pub transport_mode_secure: bool,
+
+    #[cfg(esp_idf_version_major = "5")]
+    pub use_secure_element: bool,
     pub session_tickets: bool,
 }
 
@@ -108,6 +111,37 @@ impl<'a> From<&SslConfiguration<'a>> for Newtype<httpd_config_t> {
     }
 }
 
+
+
+
+#[cfg(esp_idf_version_major = "5")]
+impl<'a> From<&SslConfiguration<'a>> for CHttpsSslConfig {
+    fn from(conf: &SslConfiguration) -> Self {
+        let client_verify_cert = conf.client_verify_cert.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+        let cacert = conf.cacert.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+        let pkey = conf.prvtkey.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
+
+        Self(httpd_ssl_config_t {
+            httpd: httpd_config_t {
+                ..Newtype::<httpd_config_t>::from(conf).0
+            },
+            cacert_pem: client_verify_cert.0 as _,
+            cacert_len: client_verify_cert.1 as _,
+            servercert: cacert.0 as _,
+            servercert_len: cacert.1 as _,
+            prvtkey_pem: pkey.0 as _,
+            prvtkey_len: pkey.1 as _,
+            transport_mode: httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+            use_secure_element: conf.use_secure_element,
+            port_secure: conf.http_configuration.https_port,
+            port_insecure: conf.http_configuration.http_port,
+            session_tickets: conf.session_tickets,
+            user_cb: None,
+        })
+    }
+}
+
+#[cfg(not(esp_idf_version_major = "5"))]
 impl<'a> From<&SslConfiguration<'a>> for CHttpsSslConfig {
     fn from(conf: &SslConfiguration) -> Self {
         let client_verify_cert = conf.client_verify_cert.map(to_ptr_with_len).unwrap_or((ptr::null_mut(), 0));
@@ -127,6 +161,7 @@ impl<'a> From<&SslConfiguration<'a>> for CHttpsSslConfig {
             transport_mode: httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
             port_secure: conf.http_configuration.https_port,
             port_insecure: conf.http_configuration.http_port,
+            use_secure_element: false,
             session_tickets: conf.session_tickets,
             user_cb: None
         })
@@ -146,6 +181,7 @@ impl<'a> Default for SslConfiguration<'a> {
     }
 }
 
+#[cfg(not(esp_idf_version_major = "5"))]
 impl Drop for CHttpsSslConfig {
     fn drop(&mut self) {
         unsafe {
@@ -163,6 +199,26 @@ impl Drop for CHttpsSslConfig {
         }
     }
 }
+
+#[cfg(esp_idf_version_major = "5")]
+impl Drop for CHttpsSslConfig {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.0.servercert.is_null() {
+                drop(CString::from_raw(self.0.servercert as _));
+            }
+
+            if !self.0.cacert_pem.is_null() {
+                drop(CString::from_raw(self.0.cacert_pem as _));
+            }
+
+            if !self.0.prvtkey_pem.is_null() {
+                drop(CString::from_raw(self.0.prvtkey_pem as _));
+            }
+        }
+    }
+}
+
 
 #[allow(non_upper_case_globals)]
 impl From<Newtype<c_types::c_uint>> for Method {
