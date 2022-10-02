@@ -361,8 +361,19 @@ impl EspNetif {
     }
 
     pub fn get_ip_info(&self) -> Result<ipv4::IpInfo, EspError> {
-        // TODO
-        todo!()
+        let mut ip_info: esp_netif_ip_info_t = Default::default();
+
+        esp!(unsafe { esp_netif_get_ip_info(self.0, &mut ip_info) })?;
+
+        Ok(ipv4::IpInfo {
+            ip: Newtype(ip_info.ip).into(),
+            subnet: ipv4::Subnet {
+                gateway: Newtype(ip_info.gw).into(),
+                mask: Newtype(ip_info.netmask).try_into().unwrap()
+            },
+            dns: Some(self.get_dns()?),
+            secondary_dns: Some(self.get_secondary_dns()?)
+        })
     }
 
     pub fn get_key(&self) -> heapless::String<32> {
@@ -394,7 +405,7 @@ impl EspNetif {
         Ok(())
     }
 
-    pub fn get_dns(&self) -> ipv4::Ipv4Addr {
+    pub fn get_dns(&self) -> Result<ipv4::Ipv4Addr, EspError> {
         let mut dns_info = Default::default();
 
         unsafe {
@@ -402,10 +413,9 @@ impl EspNetif {
                 self.0,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
-            ))
-            .unwrap();
+            ))?;
 
-            Newtype(dns_info.ip.u_addr.ip4).into()
+            Ok(Newtype(dns_info.ip.u_addr.ip4).into())
         }
     }
 
@@ -424,7 +434,7 @@ impl EspNetif {
         }
     }
 
-    pub fn get_secondary_dns(&self) -> ipv4::Ipv4Addr {
+    pub fn get_secondary_dns(&self) -> Result<ipv4::Ipv4Addr, EspError> {
         let mut dns_info = Default::default();
 
         unsafe {
@@ -432,10 +442,9 @@ impl EspNetif {
                 self.0,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
-            ))
-            .unwrap();
+            ))?;
 
-            Newtype(dns_info.ip.u_addr.ip4).into()
+            Ok(Newtype(dns_info.ip.u_addr.ip4).into())
         }
     }
 
