@@ -30,10 +30,19 @@ use crate::private::common::Newtype;
 use crate::private::cstr::{CStr, CString};
 use crate::private::mutex::{Mutex, RawMutex};
 
-#[cfg(all(esp_idf_esp_tls_server_sni_hook, esp_idf_comp_esp_http_server_enabled))]
-use super::sni::*;
+#[cfg(all(
+    esp_idf_esp_tls_server_cert_select_hook,
+    esp_idf_comp_esp_http_server_enabled
+))]
+use super::cert_select::*;
 
-#[cfg_attr(not(esp_idf_esp_tls_server_sni_hook), derive(Debug))]
+#[cfg_attr(
+    not(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    )),
+    derive(Debug)
+)]
 pub struct Configuration<'a> {
     pub http_port: u16,
     pub https_port: u16,
@@ -48,10 +57,16 @@ pub struct Configuration<'a> {
     pub server_certificate: Option<&'static str>,
     #[cfg(esp_idf_esp_https_server_enable)]
     pub private_key: Option<&'static str>,
-    #[cfg(all(esp_idf_esp_https_server_enable, esp_idf_esp_tls_server_sni_hook))]
-    pub sni: Option<Box<dyn SNICB<'a>>>,
-    #[cfg(not(all(esp_idf_esp_https_server_enable, esp_idf_esp_tls_server_sni_hook)))]
-    pub _phantom_data: std::marker::PhantomData<&'a ()>
+    #[cfg(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    ))]
+    pub cert_select: Option<Box<dyn CertSelectCallback<'a>>>,
+    #[cfg(not(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    )))]
+    pub _phantom_data: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a> Default for Configuration<'a> {
@@ -73,25 +88,40 @@ impl<'a> Default for Configuration<'a> {
             server_certificate: None,
             #[cfg(esp_idf_esp_https_server_enable)]
             private_key: None,
-            #[cfg(all(esp_idf_esp_https_server_enable, esp_idf_esp_tls_server_sni_hook))]
-            sni: None,
-            #[cfg(not(all(esp_idf_esp_https_server_enable, esp_idf_esp_tls_server_sni_hook)))]
-            _phantom_data: Default::default()
+            #[cfg(all(
+                esp_idf_esp_https_server_enable,
+                esp_idf_esp_tls_server_cert_select_hook
+            ))]
+            cert_select: None,
+            #[cfg(not(all(
+                esp_idf_esp_https_server_enable,
+                esp_idf_esp_tls_server_cert_select_hook
+            )))]
+            _phantom_data: Default::default(),
         }
     }
 }
 
-//TODO: Can we simply ignore the sni field in the Derive macro somehow? Derivative crate is supposed to be for that, but can't get it to work
-#[cfg(esp_idf_esp_tls_server_sni_hook)]
+//TODO: Can we simply ignore the cert select field in the Derive macro somehow? Derivative crate is supposed to be for that, but can't get it to work
+#[cfg(all(
+    esp_idf_esp_https_server_enable,
+    esp_idf_esp_tls_server_cert_select_hook
+))]
 impl<'a> Debug for Configuration<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-
-        let sni_s = if self.sni.is_some() {
-            "Some(..)"
-        } else { "None" };
+        let cert_select_s = if self.cert_select.is_some() {
+            let ptr = self
+                .cert_select
+                .as_ref()
+                .map(|cb| cb as *const _ as *mut c_types::c_void)
+                .unwrap_or(ptr::null_mut());
+            format!("Some({:?})", ptr)
+        } else {
+            "None".into()
+        };
 
         f.write_fmt(format_args!(
-            "Configuration {{ http_port = {}, https_port = {}, max_sessions = {}, session_timeout = {:?}, stack_size = {}, max_open_sockets = {}, max_uri_handlers = {}, max_resp_handlers = {}, lru_purge_enable = {}, server_certificate = {:?}, private_key = {:?}, sni = {} }}",
+            "Configuration {{ http_port = {}, https_port = {}, max_sessions = {}, session_timeout = {:?}, stack_size = {}, max_open_sockets = {}, max_uri_handlers = {}, max_resp_handlers = {}, lru_purge_enable = {}, server_certificate = {:?}, private_key = {:?}, cert_select = {} }}",
             self.http_port,
             self.https_port,
             self.max_sessions,
@@ -103,7 +133,7 @@ impl<'a> Debug for Configuration<'a> {
             self.lru_purge_enable,
             self.server_certificate,
             self.private_key,
-            sni_s
+            cert_select_s
         ))
     }
 }
@@ -187,8 +217,11 @@ impl<'a> From<&Configuration<'a>> for Newtype<httpd_ssl_config_t> {
         let http_config: Newtype<httpd_config_t> = conf.into();
         // start in insecure mode if no certificates are set
 
-        #[cfg(not(esp_idf_esp_tls_server_sni_hook))]
-        let transport_mode = match (conf.server_certificate.is_some(), conf.private_key.is_some()) {
+        #[cfg(not(esp_idf_esp_tls_server_cert_select_hook))]
+        let transport_mode = match (
+            conf.server_certificate.is_some(),
+            conf.private_key.is_some(),
+        ) {
             (true, true) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
             _ => {
                 warn!("Starting server in insecure mode because no certificates were set in the http config.");
@@ -196,16 +229,19 @@ impl<'a> From<&Configuration<'a>> for Newtype<httpd_ssl_config_t> {
             }
         };
 
-        #[cfg(esp_idf_esp_tls_server_sni_hook)]
-        let transport_mode = match (conf.server_certificate.is_some(), conf.private_key.is_some(), conf.sni.is_some()) {
+        #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+        let transport_mode = match (
+            conf.server_certificate.is_some(),
+            conf.private_key.is_some(),
+            conf.cert_select.is_some(),
+        ) {
             (_, _, true) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
             (true, true, _) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
             _ => {
-                warn!("Starting server in insecure mode because no certificates were set in the http config and no SNI callback is defined.");
+                warn!("Starting server in insecure mode because no certificates were set in the http config and no certificate selection callback is defined.");
                 httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_INSECURE
             }
         };
-
 
         // Default values taken from: https://github.com/espressif/esp-idf/blob/master/components/esp_https_server/include/esp_https_server.h#L114
         Self(httpd_ssl_config_t {
@@ -218,15 +254,27 @@ impl<'a> From<&Configuration<'a>> for Newtype<httpd_ssl_config_t> {
             cacert_len: 0,
             prvtkey_pem: ptr::null(),
             prvtkey_len: 0,
+            #[cfg(esp_idf_version_major = "5")]
             servercert: ptr::null(),
+            #[cfg(esp_idf_version_major = "5")]
             servercert_len: 0,
+            #[cfg(esp_idf_version_major = "4")]
+            client_verify_cert_pem: ptr::null(),
+            #[cfg(esp_idf_version_major = "4")]
+            client_verify_cert_len: 0,
             user_cb: None,
             #[cfg(esp_idf_version_major = "5")]
             use_secure_element: false,
-            #[cfg(esp_idf_esp_tls_server_sni_hook)]
-            sni_callback: Some(sni_trampoline),
-            #[cfg(esp_idf_esp_tls_server_sni_hook)]
-            sni_callback_p_info: conf.sni.as_ref().map(|cb| cb as *const _ as *mut c_types::c_void).unwrap_or(ptr::null_mut()),
+            #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+            cert_select_cb: Some(cert_select_trampoline),
+            #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+            ssl_userdata: conf
+                .cert_select
+                .as_ref()
+                .map(|cb| cb as *const _ as *mut c_types::c_void)
+                .unwrap_or(ptr::null_mut()),
+            #[cfg(not(esp_idf_esp_tls_server_cert_select_hook))]
+            ssl_userdata: ptr::null_mut(),
         })
     }
 }
@@ -325,12 +373,12 @@ impl EspHttpServer {
                     config.0.prvtkey_len = private_key.len() as u32;
                 };
 
+                //See above why this is duplicated
+                esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
+            } else {
+                esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
             }
-
-            esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
         }
-
-        info!("Started Httpd server with config {:?}", conf);
 
         let server = EspHttpServer {
             sd: handle,
