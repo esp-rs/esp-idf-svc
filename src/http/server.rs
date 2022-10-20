@@ -11,7 +11,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use log::{info, warn};
+use ::log::{info, warn};
 
 use embedded_svc::http::server::{registry::Registry, Handler, HandlerError, Request, Response};
 use embedded_svc::http::*;
@@ -600,6 +600,8 @@ impl<'a> EspHttpResponseHeaders {
 
         esp!(unsafe { httpd_resp_set_status(raw_req, c_status.as_ptr() as _) })?;
 
+        self.names.push(c_status);
+
         for (key, value) in &self.headers {
             if key == "Content-Type" {
                 esp!(unsafe { httpd_resp_set_type(raw_req, value.as_ptr()) })?;
@@ -721,8 +723,8 @@ pub mod ws {
     extern crate alloc;
     use alloc::sync::Arc;
 
+    use ::log::*;
     use embedded_svc::ws::server::registry::Registry;
-    use log::*;
 
     use embedded_svc::http::Method;
     use embedded_svc::ws::server::*;
