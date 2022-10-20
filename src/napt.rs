@@ -7,7 +7,10 @@ use esp_idf_sys::*;
 use crate::private::common::*;
 
 #[derive(Debug)]
-pub struct EspNapt(());
+struct PrivateData;
+
+#[derive(Debug)]
+pub struct EspNapt(PrivateData);
 
 pub enum Protocol {
     UDP,
@@ -23,7 +26,7 @@ impl Protocol {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
 impl EspNapt {
     pub fn new() -> Result<Self, EspError> {
@@ -34,7 +37,7 @@ impl EspNapt {
         }
 
         *taken = true;
-        Ok(Self(()))
+        Ok(Self(PrivateData))
     }
 
     pub fn add_portmap(

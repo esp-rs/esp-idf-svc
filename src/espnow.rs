@@ -2,22 +2,18 @@ use ::log::info;
 
 use alloc::boxed::Box;
 
+use esp_idf_hal::mutex::Mutex;
 use esp_idf_sys::*;
-
-use crate::private::mutex::{Mutex, RawMutex};
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
-pub const BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-
 #[allow(clippy::type_complexity)]
-static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> =
-    Mutex::wrap(RawMutex::new(), None);
+static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> = Mutex::new(None);
 #[allow(clippy::type_complexity)]
-static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> =
-    Mutex::wrap(RawMutex::new(), None);
+static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> = Mutex::new(None);
 
-static TAKEN: Mutex<bool> = Mutex::wrap(RawMutex::new(), false);
+pub static BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+static TAKEN: Mutex<bool> = Mutex::new(false);
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -37,14 +33,18 @@ impl From<u32> for SendStatus {
 
 pub type PeerInfo = esp_now_peer_info_t;
 
-pub struct EspNow(());
+#[derive(Debug)]
+struct PrivateData;
 
-impl EspNow {
-    pub fn take() -> Result<Self, EspError> {
+#[derive(Debug)]
+pub struct EspNowClient(PrivateData);
+
+impl EspNowClient {
+    pub fn new() -> Result<Self, EspError> {
         let mut taken = TAKEN.lock();
 
         if *taken {
-            esp!(ESP_ERR_INVALID_STATE)?;
+            esp!(ESP_ERR_INVALID_STATE as i32)?;
         }
 
         // disable modem sleep, otherwise messages queue up and we're not able
@@ -56,8 +56,7 @@ impl EspNow {
         esp!(unsafe { esp_now_init() })?;
 
         *taken = true;
-
-        Ok(Self(()))
+        Ok(Self(PrivateData))
     }
 
     pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {
@@ -68,25 +67,21 @@ impl EspNow {
                 data.len() as size_t,
             )
         })?;
-
         Ok(())
     }
 
     pub fn add_peer(&self, peer_info: PeerInfo) -> Result<(), EspError> {
         esp!(unsafe { esp_now_add_peer(&peer_info) })?;
-
         Ok(())
     }
 
     pub fn del_peer(&self, peer_addr: [u8; 6]) -> Result<(), EspError> {
         esp!(unsafe { esp_now_del_peer(&peer_addr as *const u8) })?;
-
         Ok(())
     }
 
     pub fn mod_peer(&self, peer_info: PeerInfo) -> Result<(), EspError> {
         esp!(unsafe { esp_now_mod_peer(&peer_info) })?;
-
         Ok(())
     }
 
@@ -98,7 +93,6 @@ impl EspNow {
                 &mut peer_info as *mut esp_now_peer_info_t,
             )
         })?;
-
         Ok(peer_info)
     }
 
@@ -114,7 +108,6 @@ impl EspNow {
 
     pub fn set_pmk(&self, pmk: &[u8]) -> Result<(), EspError> {
         esp!(unsafe { esp_now_set_pmk(pmk.as_ptr()) })?;
-
         Ok(())
     }
 
@@ -130,14 +123,12 @@ impl EspNow {
     ) -> Result<(), EspError> {
         *RECV_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_recv_cb(Some(Self::recv_callback)) })?;
-
         Ok(())
     }
 
     pub fn unregister_recv_cb(&self) -> Result<(), EspError> {
         esp!(unsafe { esp_now_unregister_recv_cb() })?;
         *RECV_CALLBACK.lock() = None;
-
         Ok(())
     }
 
@@ -147,14 +138,12 @@ impl EspNow {
     ) -> Result<(), EspError> {
         *SEND_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_send_cb(Some(Self::send_callback)) })?;
-
         Ok(())
     }
 
     pub fn unregister_send_cb(&self) -> Result<(), EspError> {
         esp!(unsafe { esp_now_unregister_send_cb() })?;
         *SEND_CALLBACK.lock() = None;
-
         Ok(())
     }
 
@@ -180,12 +169,9 @@ impl EspNow {
     }
 }
 
-impl Drop for EspNow {
+impl Drop for EspNowClient {
     fn drop(&mut self) {
-        let mut taken = TAKEN.lock();
-
         esp!(unsafe { esp_now_deinit() }).unwrap();
-
         let send_cb = &mut *SEND_CALLBACK.lock();
         if send_cb.is_some() {
             *send_cb = None;
@@ -195,7 +181,5 @@ impl Drop for EspNow {
         if recv_cb.is_some() {
             *recv_cb = None;
         }
-
-        *taken = false;
     }
 }

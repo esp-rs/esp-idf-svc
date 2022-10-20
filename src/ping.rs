@@ -21,37 +21,6 @@ impl EspPing {
         Self(interface_index)
     }
 
-    pub fn ping(&mut self, ip: ipv4::Ipv4Addr, conf: &Configuration) -> Result<Summary, EspError> {
-        info!(
-            "About to run a summary ping {} with configuration {:?}",
-            ip, conf
-        );
-
-        let mut tracker = Tracker::new(Some(&nop_callback));
-
-        self.run_ping(ip, conf, &mut tracker)?;
-
-        Ok(tracker.summary)
-    }
-
-    pub fn ping_details<F: Fn(&Summary, &Reply)>(
-        &mut self,
-        ip: ipv4::Ipv4Addr,
-        conf: &Configuration,
-        reply_callback: &F,
-    ) -> Result<Summary, EspError> {
-        info!(
-            "About to run a detailed ping {} with configuration {:?}",
-            ip, conf
-        );
-
-        let mut tracker = Tracker::new(Some(reply_callback));
-
-        self.run_ping(ip, conf, &mut tracker)?;
-
-        Ok(tracker.summary)
-    }
-
     fn run_ping<F: Fn(&Summary, &Reply)>(
         &self,
         ip: ipv4::Ipv4Addr,
@@ -186,8 +155,8 @@ impl EspPing {
                 &Reply::Success(Info {
                     addr,
                     seqno: seqno as u32,
-                    ttl,
-                    recv_len,
+                    ttl: ttl as u8,
+                    recv_len: recv_len as u32,
                     elapsed_time: Duration::from_millis(elapsed_time as u64),
                 }),
             );
@@ -290,7 +259,16 @@ impl Ping for EspPing {
     type Error = EspError;
 
     fn ping(&mut self, ip: ipv4::Ipv4Addr, conf: &Configuration) -> Result<Summary, Self::Error> {
-        EspPing::ping(self, ip, conf)
+        info!(
+            "About to run a summary ping {} with configuration {:?}",
+            ip, conf
+        );
+
+        let mut tracker = Tracker::new(Some(&nop_callback));
+
+        self.run_ping(ip, conf, &mut tracker)?;
+
+        Ok(tracker.summary)
     }
 
     fn ping_details<F: Fn(&Summary, &Reply)>(
@@ -299,7 +277,16 @@ impl Ping for EspPing {
         conf: &Configuration,
         reply_callback: &F,
     ) -> Result<Summary, Self::Error> {
-        EspPing::ping_details(self, ip, conf, reply_callback)
+        info!(
+            "About to run a detailed ping {} with configuration {:?}",
+            ip, conf
+        );
+
+        let mut tracker = Tracker::new(Some(reply_callback));
+
+        self.run_ping(ip, conf, &mut tracker)?;
+
+        Ok(tracker.summary)
     }
 }
 

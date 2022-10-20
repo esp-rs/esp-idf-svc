@@ -9,16 +9,12 @@ use alloc::vec::Vec;
 use embedded_svc::event_bus::{ErrorType, EventBus, Postbox, PostboxProvider};
 
 use esp_idf_hal::cpu::Core;
-use esp_idf_hal::task;
+use esp_idf_hal::interrupt;
+use esp_idf_hal::mutex::Mutex;
 
 use esp_idf_sys::*;
 
-use crate::handle::RawHandle;
 use crate::private::cstr::RawCstrs;
-use crate::private::mutex::Mutex;
-
-#[cfg(all(feature = "nightly", feature = "experimental"))]
-pub use asyncify::*;
 
 #[allow(clippy::type_complexity)]
 pub struct EspSubscriptionsRegistry {
@@ -179,7 +175,7 @@ impl EspNotify {
         let registry = unsafe { Weak::from_raw(registry) };
 
         loop {
-            let notification = task::wait_notification(Some(Duration::from_millis(100)));
+            let notification = interrupt::task::wait_notification(Some(Duration::from_millis(100)));
 
             if let Some(registry) = Weak::upgrade(&registry) {
                 if let Some(notification) = notification {
@@ -194,22 +190,6 @@ impl EspNotify {
             vTaskDelete(ptr::null_mut());
         }
     }
-
-    pub fn subscribe(
-        &self,
-        callback: impl for<'a> FnMut(&'a u32) + Send + 'static,
-    ) -> Result<EspSubscription, EspError> {
-        self.registry
-            .subscribe(callback)
-            .map(|subscription_id| EspSubscription {
-                subscription_id,
-                state: self.registry.clone(),
-            })
-    }
-
-    pub fn post(&self, payload: &u32) -> Result<bool, EspError> {
-        Ok(unsafe { task::notify(*self.task, *payload) })
-    }
 }
 
 unsafe impl Send for EspNotify {}
@@ -223,14 +203,6 @@ impl Clone for EspNotify {
     }
 }
 
-impl RawHandle for EspNotify {
-    type Handle = TaskHandle_t;
-
-    fn handle(&self) -> Self::Handle {
-        *self.task
-    }
-}
-
 impl ErrorType for EspNotify {
     type Error = EspError;
 }
@@ -239,35 +211,40 @@ impl EventBus<u32> for EspNotify {
     type Subscription = EspSubscription;
 
     fn subscribe(
-        &self,
+        &mut self,
         callback: impl for<'a> FnMut(&'a u32) + Send + 'static,
     ) -> Result<Self::Subscription, Self::Error> {
-        EspNotify::subscribe(self, callback)
+        self.registry
+            .subscribe(callback)
+            .map(|subscription_id| EspSubscription {
+                subscription_id,
+                state: self.registry.clone(),
+            })
     }
 }
 
 impl Postbox<u32> for EspNotify {
-    fn post(&self, payload: &u32, _wait: Option<Duration>) -> Result<bool, Self::Error> {
-        EspNotify::post(self, payload)
+    fn post(&mut self, payload: &u32, _wait: Option<Duration>) -> Result<bool, Self::Error> {
+        Ok(unsafe { interrupt::task::notify(*self.task, *payload) })
     }
 }
 
 impl PostboxProvider<u32> for EspNotify {
     type Postbox = Self;
 
-    fn postbox(&self) -> Result<Self::Postbox, Self::Error> {
+    fn postbox(&mut self) -> Result<Self::Postbox, Self::Error> {
         Ok(self.clone())
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+#[cfg(feature = "experimental")]
 mod asyncify {
     use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
     use embedded_svc::utils::asyncify::Asyncify;
 
-    use crate::private::mutex::RawCondvar;
+    use esp_idf_hal::mutex::Condvar;
 
     impl Asyncify for super::EspNotify {
-        type AsyncWrapper<S> = AsyncEventBus<(), RawCondvar, S>;
+        type AsyncWrapper<S> = AsyncEventBus<(), Condvar, S>;
     }
 }

@@ -2,10 +2,11 @@ use core::cmp::min;
 
 use ::log::*;
 
+use esp_idf_hal::mutex;
+
 use esp_idf_sys::*;
 
 use crate::private::cstr::CString;
-use crate::private::mutex;
 
 const SNTP_SERVER_NUM: usize = SNTP_MAX_SERVERS as usize;
 
@@ -113,7 +114,7 @@ impl<'a> Default for SntpConf<'a> {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
 pub struct EspSntp {
     // Needs to be kept around because the C bindings only have a pointer.
@@ -129,7 +130,7 @@ impl EspSntp {
         let mut taken = TAKEN.lock();
 
         if *taken {
-            esp!(ESP_ERR_INVALID_STATE)?;
+            esp!(ESP_ERR_INVALID_STATE as i32)?;
         }
 
         let sntp = Self::init(conf)?;
