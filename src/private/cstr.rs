@@ -22,7 +22,7 @@ pub fn set_str(buf: &mut [u8], s: &str) {
 }
 
 pub fn from_cstr_ptr<'a>(ptr: *const c_types::c_char) -> &'a str {
-    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
+    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap()
 }
 
 pub fn from_cstr(buf: &[u8]) -> &str {
@@ -32,7 +32,7 @@ pub fn from_cstr(buf: &[u8]) -> &str {
 
     unsafe { CStr::from_bytes_with_nul_unchecked(&buf[0..len]) }
         .to_str()
-        .unwrap_or("")
+        .unwrap()
 }
 
 #[cfg(feature = "alloc")]

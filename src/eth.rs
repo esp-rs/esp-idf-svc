@@ -63,11 +63,11 @@ pub enum RmiiEthChipset {
     RTL8201,
     LAN87XX,
     DP83848,
-    #[cfg(esp_idf_version_major = "4")]
+    #[cfg(not(esp_idf_version_major = "5"))]
     KSZ8041,
     #[cfg(esp_idf_version = "4.4")]
     KSZ8081,
-    #[cfg(not(esp_idf_version_major = "4"))]
+    #[cfg(esp_idf_version_major = "5")]
     KSZ80XX,
 }
 
@@ -220,8 +220,6 @@ where
         let (mac, phy) = Self::initialize(
             chipset,
             &peripherals.rst,
-            &peripherals.rmii_mdc,
-            &peripherals.rmii_mdio,
             phy_addr,
             &peripherals.rmii_ref_clk_config,
         )?;
@@ -248,13 +246,10 @@ where
     fn initialize(
         chipset: RmiiEthChipset,
         reset: &Option<RST>,
-        mdc: &MDC,
-        mdio: &MDIO,
         phy_addr: Option<u32>,
         clk_config: &RmiiClockConfig,
     ) -> Result<(*mut esp_eth_mac_t, *mut esp_eth_phy_t), EspError> {
-        let mac =
-            EspEth::<RmiiEthPeripherals<MDC, MDIO>>::eth_mac_new(mdc.pin(), mdio.pin(), clk_config);
+        let mac = EspEth::<RmiiEthPeripherals<MDC, MDIO>>::eth_mac_new(clk_config);
 
         let phy_cfg = EspEth::<RmiiEthPeripherals<MDC, MDIO>>::eth_phy_default_config(
             reset.as_ref().map(|p| p.pin()),
@@ -264,16 +259,16 @@ where
         let phy = match chipset {
             RmiiEthChipset::IP101 => unsafe { esp_eth_phy_new_ip101(&phy_cfg) },
             RmiiEthChipset::RTL8201 => unsafe { esp_eth_phy_new_rtl8201(&phy_cfg) },
-            #[cfg(not(esp_idf_version = "4.3"))]
+            #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
             RmiiEthChipset::LAN87XX => unsafe { esp_eth_phy_new_lan87xx(&phy_cfg) },
-            #[cfg(esp_idf_version = "4.3")]
+            #[cfg(not(any(esp_idf_version = "4.4", esp_idf_version_major = "5")))]
             RmiiEthChipset::LAN87XX => unsafe { esp_eth_phy_new_lan8720(&phy_cfg) },
             RmiiEthChipset::DP83848 => unsafe { esp_eth_phy_new_dp83848(&phy_cfg) },
-            #[cfg(esp_idf_version_major = "4")]
+            #[cfg(not(esp_idf_version_major = "5"))]
             RmiiEthChipset::KSZ8041 => unsafe { esp_eth_phy_new_ksz8041(&phy_cfg) },
             #[cfg(esp_idf_version = "4.4")]
             RmiiEthChipset::KSZ8081 => unsafe { esp_eth_phy_new_ksz8081(&phy_cfg) },
-            #[cfg(not(esp_idf_version_major = "4"))]
+            #[cfg(esp_idf_version_major = "5")]
             RmiiEthChipset::KSZ80XX => unsafe { esp_eth_phy_new_ksz80xx(&phy_cfg) },
         };
 
@@ -281,8 +276,8 @@ where
     }
 
     #[cfg(esp_idf_version_major = "4")]
-    fn eth_mac_new(mdc: i32, mdio: i32, clk_config: &RmiiClockConfig) -> *mut esp_eth_mac_t {
-        let mut config = Self::eth_mac_default_config(mdc, mdio);
+    fn eth_mac_new(clk_config: &RmiiClockConfig) -> *mut esp_eth_mac_t {
+        let mut config = Self::eth_mac_default_config();
 
         #[cfg(not(esp_idf_version = "4.3"))]
         {
@@ -293,11 +288,11 @@ where
     }
 
     #[cfg(not(esp_idf_version_major = "4"))]
-    fn eth_mac_new(mdc: i32, mdio: i32, clk_config: &RmiiClockConfig) -> *mut esp_eth_mac_t {
-        let mut esp32_config = Self::eth_esp32_emac_default_config(mdc, mdio);
+    fn eth_mac_new(clk_config: &RmiiClockConfig) -> *mut esp_eth_mac_t {
+        let mut esp32_config = Self::eth_esp32_emac_default_config();
         esp32_config.clock_config = clk_config.eth_mac_clock_config();
 
-        let config = Self::eth_mac_default_config(mdc, mdio);
+        let config = Self::eth_mac_default_config();
 
         unsafe { esp_eth_mac_new_esp32(&esp32_config, &config) }
     }
@@ -315,7 +310,7 @@ impl EspEth<()> {
             esp!(ESP_ERR_INVALID_STATE as i32)?;
         }
 
-        let mac = unsafe { esp_eth_mac_new_openeth(&Self::eth_mac_default_config(0, 0)) };
+        let mac = unsafe { esp_eth_mac_new_openeth(&Self::eth_mac_default_config()) };
         let phy = unsafe { esp_eth_phy_new_dp83848(&Self::eth_phy_default_config(None, None)) };
 
         let eth = Self::init(netif_stack, sys_loop_stack, mac, phy, None, ())?;
@@ -409,7 +404,6 @@ where
 
         let mac_cfg =
             EspEth::<SpiEthPeripherals<INT, SPI, SCLK, SDO, SDI, CS, RST>>::eth_mac_default_config(
-                0, 0,
             );
         let phy_cfg =
             EspEth::<SpiEthPeripherals<INT, SPI, SCLK, SDO, SDI, CS, RST>>::eth_phy_default_config(
@@ -495,7 +489,7 @@ where
     ) -> Result<(), EspError> {
         unsafe { gpio_install_isr_service(0) };
 
-        #[cfg(not(esp_idf_version = "4.3"))]
+        #[cfg(any(esp_idf_version = "4.4", esp_idf_version_major = "5"))]
         let bus_config = spi_bus_config_t {
             flags: SPICOMMON_BUSFLAG_MASTER,
             sclk_io_num: sclk_pin.pin(),
@@ -524,7 +518,7 @@ where
             ..Default::default()
         };
 
-        #[cfg(esp_idf_version = "4.3")]
+        #[cfg(not(any(esp_idf_version = "4.4", esp_idf_version_major = "5")))]
         let bus_config = spi_bus_config_t {
             flags: SPICOMMON_BUSFLAG_MASTER,
             sclk_io_num: sclk_pin.pin(),
@@ -908,13 +902,13 @@ impl<P> EspEth<P> {
     }
 
     #[cfg(esp_idf_version_major = "4")]
-    fn eth_mac_default_config(mdc: i32, mdio: i32) -> eth_mac_config_t {
+    fn eth_mac_default_config() -> eth_mac_config_t {
         eth_mac_config_t {
             sw_reset_timeout_ms: 100,
             rx_task_stack_size: 2048,
             rx_task_prio: 15,
-            smi_mdc_gpio_num: mdc,
-            smi_mdio_gpio_num: mdio,
+            smi_mdc_gpio_num: 23,
+            smi_mdio_gpio_num: 18,
             flags: 0,
             #[cfg(esp_idf_version = "4.4")]
             interface: eth_data_interface_t_EMAC_DATA_INTERFACE_RMII,
@@ -923,7 +917,7 @@ impl<P> EspEth<P> {
     }
 
     #[cfg(not(esp_idf_version_major = "4"))]
-    fn eth_mac_default_config(_mdc: i32, _mdio: i32) -> eth_mac_config_t {
+    fn eth_mac_default_config() -> eth_mac_config_t {
         eth_mac_config_t {
             sw_reset_timeout_ms: 100,
             rx_task_stack_size: 2048,
@@ -934,21 +928,13 @@ impl<P> EspEth<P> {
     }
 
     #[cfg(not(esp_idf_version_major = "4"))]
-    fn eth_esp32_emac_default_config(mdc: i32, mdio: i32) -> eth_esp32_emac_config_t {
+    fn eth_esp32_emac_default_config() -> eth_esp32_emac_config_t {
         eth_esp32_emac_config_t {
-            smi_mdc_gpio_num: mdc,
-            smi_mdio_gpio_num: mdio,
+            smi_mdc_gpio_num: 23,
+            smi_mdio_gpio_num: 18,
             interface: eth_data_interface_t_EMAC_DATA_INTERFACE_RMII,
             ..Default::default()
         }
-    }
-
-    /// Filter wether or not an IpEvent is related to this [`EspEth`] instance.
-    ///
-    /// As an example this can be used to check when the Ip changed.
-    pub fn is_ip_event_for_self(&self, event: &IpEvent) -> bool {
-        let shared = self.waitable.state.lock();
-        shared.is_our_ip_event(event)
     }
 }
 

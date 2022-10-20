@@ -1,3 +1,4 @@
+use core::cmp::min;
 use core::ptr;
 
 extern crate alloc;
@@ -156,8 +157,6 @@ impl RawStorage for EspNvsStorage {
                         // bail on error
                         esp!(err)?;
 
-                        len = buf.len() as _;
-
                         // fetch value if no error
                         esp!(unsafe {
                             nvs_get_blob(
@@ -168,7 +167,7 @@ impl RawStorage for EspNvsStorage {
                             )
                         })?;
 
-                        Ok(Some((&buf[..len as usize], len as _)))
+                        Ok(Some((&buf[..min(buf.len(), len as usize)], len as _)))
                     }
                 }
             }
@@ -178,12 +177,6 @@ impl RawStorage for EspNvsStorage {
 
                 // u64 value was found, decode it
                 let len: u8 = (u64value & 0xff) as u8;
-
-                if buf.len() < len as _ {
-                    // Buffer not large enough
-                    return Err(EspError::from(ESP_ERR_NVS_INVALID_LENGTH).unwrap());
-                }
-
                 u64value >>= 8;
 
                 let array: [u8; 7] = [
@@ -196,9 +189,9 @@ impl RawStorage for EspNvsStorage {
                     ((u64value >> 48) & 0xff) as u8,
                 ];
 
-                buf[..len as usize].copy_from_slice(&array[..len as usize]);
+                buf.copy_from_slice(&array[..min(buf.len(), len as usize)]);
 
-                Ok(Some((&buf[..len as usize], len as _)))
+                Ok(Some((&buf[..min(buf.len(), len as usize)], len as _)))
             }
         }
     }

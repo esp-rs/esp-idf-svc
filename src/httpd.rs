@@ -7,7 +7,7 @@ use std::io;
 
 use ::anyhow::anyhow;
 
-use ::log::{info, log, Level};
+use log::{info, log, Level};
 
 use embedded_svc::httpd::*;
 
@@ -184,7 +184,6 @@ impl<'r> RequestDelegate for IdfRequest<'r> {
 pub struct Configuration {
     pub http_port: u16,
     pub https_port: u16,
-    pub max_uri_handlers: u16,
 }
 
 impl Default for Configuration {
@@ -192,7 +191,6 @@ impl Default for Configuration {
         Configuration {
             http_port: 80,
             https_port: 443,
-            max_uri_handlers: 8,
         }
     }
 }
@@ -238,8 +236,7 @@ pub struct Server {
 
 impl Server {
     fn new(conf: &Configuration) -> Result<Self> {
-        let config =
-            Self::default_configuration(conf.http_port, conf.https_port, conf.max_uri_handlers);
+        let config = Self::default_configuration(conf.http_port, conf.https_port);
 
         let mut handle: esp_idf_sys::httpd_handle_t = ptr::null_mut();
         let handle_ref = &mut handle;
@@ -393,12 +390,7 @@ impl Server {
     }
 
     /// Copied from the definition of HTTPD_DEFAULT_CONFIG() in http_server.h/https_server.h
-    #[allow(clippy::needless_update)]
-    fn default_configuration(
-        http_port: u16,
-        https_port: u16,
-        max_uri_handlers: u16,
-    ) -> esp_idf_sys::httpd_config_t {
+    fn default_configuration(http_port: u16, https_port: u16) -> esp_idf_sys::httpd_config_t {
         esp_idf_sys::httpd_config_t {
             task_priority: 5,
             stack_size: if https_port != 0 { 10240 } else { 4096 },
@@ -406,7 +398,7 @@ impl Server {
             server_port: http_port,
             ctrl_port: 32768,
             max_open_sockets: if https_port != 0 { 4 } else { 7 },
-            max_uri_handlers,
+            max_uri_handlers: 8,
             max_resp_headers: 8,
             backlog_conn: 5,
             lru_purge_enable: https_port != 0,
@@ -419,10 +411,6 @@ impl Server {
             open_fn: None,
             close_fn: None,
             uri_match_fn: None,
-            // Latest 4.4 and master branches have options to control SO linger,
-            // but these are not released yet so we cannot (yet) support these
-            // conditionally
-            ..Default::default()
         }
     }
 }
