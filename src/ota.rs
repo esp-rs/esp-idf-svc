@@ -281,7 +281,9 @@ impl EspOta {
         let err =
             unsafe { esp_ota_get_state_partition(partition as *const _, &mut state as *mut _) };
 
-        Ok(if err == ESP_ERR_NOT_FOUND as i32 {
+        Ok(if err == (ESP_ERR_NOT_FOUND as i32) ||
+            err == (ESP_ERR_NOT_SUPPORTED as i32)  // Factory partition does not support this
+        {
             ota::SlotState::Unknown
         } else {
             esp!(err)?;
