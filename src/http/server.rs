@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use core::fmt::{Debug, Display};
+use core::fmt::{Debug, Display, Formatter};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
 use core::{mem, ptr};
@@ -30,8 +30,20 @@ use crate::private::common::Newtype;
 use crate::private::cstr::{CStr, CString};
 use crate::private::mutex::{Mutex, RawMutex};
 
-#[derive(Copy, Clone, Debug)]
-pub struct Configuration {
+#[cfg(all(
+    esp_idf_esp_tls_server_cert_select_hook,
+    esp_idf_comp_esp_http_server_enabled
+))]
+use super::cert_select::*;
+
+#[cfg_attr(
+    not(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    )),
+    derive(Debug)
+)]
+pub struct Configuration<'a> {
     pub http_port: u16,
     pub https_port: u16,
     pub max_sessions: usize,
@@ -45,9 +57,19 @@ pub struct Configuration {
     pub server_certificate: Option<&'static str>,
     #[cfg(esp_idf_esp_https_server_enable)]
     pub private_key: Option<&'static str>,
+    #[cfg(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    ))]
+    pub cert_select: Option<Box<dyn CertSelectCallback<'a>>>,
+    #[cfg(not(all(
+        esp_idf_esp_https_server_enable,
+        esp_idf_esp_tls_server_cert_select_hook
+    )))]
+    pub _phantom_data: std::marker::PhantomData<&'a ()>,
 }
 
-impl Default for Configuration {
+impl<'a> Default for Configuration<'a> {
     fn default() -> Self {
         Configuration {
             http_port: 80,
@@ -66,13 +88,59 @@ impl Default for Configuration {
             server_certificate: None,
             #[cfg(esp_idf_esp_https_server_enable)]
             private_key: None,
+            #[cfg(all(
+                esp_idf_esp_https_server_enable,
+                esp_idf_esp_tls_server_cert_select_hook
+            ))]
+            cert_select: None,
+            #[cfg(not(all(
+                esp_idf_esp_https_server_enable,
+                esp_idf_esp_tls_server_cert_select_hook
+            )))]
+            _phantom_data: Default::default(),
         }
     }
 }
 
-impl From<&Configuration> for Newtype<httpd_config_t> {
+//TODO: Can we simply ignore the cert select field in the Derive macro somehow? Derivative crate is supposed to be for that, but can't get it to work
+#[cfg(all(
+    esp_idf_esp_https_server_enable,
+    esp_idf_esp_tls_server_cert_select_hook
+))]
+impl<'a> Debug for Configuration<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let cert_select_s = if self.cert_select.is_some() {
+            let ptr = self
+                .cert_select
+                .as_ref()
+                .map(|cb| cb as *const _ as *mut c_types::c_void)
+                .unwrap_or(ptr::null_mut());
+            format!("Some({:?})", ptr)
+        } else {
+            "None".into()
+        };
+
+        f.write_fmt(format_args!(
+            "Configuration {{ http_port = {}, https_port = {}, max_sessions = {}, session_timeout = {:?}, stack_size = {}, max_open_sockets = {}, max_uri_handlers = {}, max_resp_handlers = {}, lru_purge_enable = {}, server_certificate = {:?}, private_key = {:?}, cert_select = {} }}",
+            self.http_port,
+            self.https_port,
+            self.max_sessions,
+            self.session_timeout,
+            self.stack_size,
+            self.max_open_sockets,
+            self.max_uri_handlers,
+            self.max_resp_handlers,
+            self.lru_purge_enable,
+            self.server_certificate,
+            self.private_key,
+            cert_select_s
+        ))
+    }
+}
+
+impl<'a> From<&Configuration<'a>> for Newtype<httpd_config_t> {
     #[allow(clippy::needless_update)]
-    fn from(conf: &Configuration) -> Self {
+    fn from(conf: &Configuration<'a>) -> Self {
         Self(httpd_config_t {
             task_priority: 5,
             stack_size: conf.stack_size as _,
@@ -144,17 +212,37 @@ impl From<Newtype<c_types::c_uint>> for Method {
 }
 
 #[cfg(esp_idf_esp_https_server_enable)]
-impl From<&Configuration> for Newtype<httpd_ssl_config_t> {
-    fn from(conf: &Configuration) -> Self {
+impl<'a> From<&Configuration<'a>> for Newtype<httpd_ssl_config_t> {
+    fn from(conf: &Configuration<'a>) -> Self {
         let http_config: Newtype<httpd_config_t> = conf.into();
         // start in insecure mode if no certificates are set
-        let transport_mode = match (conf.server_certificate, conf.private_key) {
-            (Some(_), Some(_)) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+
+        #[cfg(not(esp_idf_esp_tls_server_cert_select_hook))]
+        let transport_mode = match (
+            conf.server_certificate.is_some(),
+            conf.private_key.is_some(),
+        ) {
+            (true, true) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
             _ => {
                 warn!("Starting server in insecure mode because no certificates were set in the http config.");
                 httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_INSECURE
             }
         };
+
+        #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+        let transport_mode = match (
+            conf.server_certificate.is_some(),
+            conf.private_key.is_some(),
+            conf.cert_select.is_some(),
+        ) {
+            (_, _, true) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+            (true, true, _) => httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_SECURE,
+            _ => {
+                warn!("Starting server in insecure mode because no certificates were set in the http config and no certificate selection callback is defined.");
+                httpd_ssl_transport_mode_t_HTTPD_SSL_TRANSPORT_INSECURE
+            }
+        };
+
         // Default values taken from: https://github.com/espressif/esp-idf/blob/master/components/esp_https_server/include/esp_https_server.h#L114
         Self(httpd_ssl_config_t {
             httpd: http_config.0,
@@ -166,9 +254,27 @@ impl From<&Configuration> for Newtype<httpd_ssl_config_t> {
             cacert_len: 0,
             prvtkey_pem: ptr::null(),
             prvtkey_len: 0,
+            #[cfg(esp_idf_version_major = "5")]
+            servercert: ptr::null(),
+            #[cfg(esp_idf_version_major = "5")]
+            servercert_len: 0,
+            #[cfg(esp_idf_version_major = "4")]
             client_verify_cert_pem: ptr::null(),
+            #[cfg(esp_idf_version_major = "4")]
             client_verify_cert_len: 0,
             user_cb: None,
+            #[cfg(esp_idf_version_major = "5")]
+            use_secure_element: false,
+            #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+            cert_select_cb: Some(cert_select_trampoline),
+            #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+            ssl_userdata: conf
+                .cert_select
+                .as_ref()
+                .map(|cb| cb as *const _ as *mut c_types::c_void)
+                .unwrap_or(ptr::null_mut()),
+            #[cfg(not(esp_idf_esp_tls_server_cert_select_hook))]
+            ssl_userdata: ptr::null_mut(),
         })
     }
 }
@@ -249,19 +355,30 @@ impl EspHttpServer {
                 let cert = CString::new(cert).unwrap().into_bytes_with_nul();
                 let private_key = CString::new(private_key).unwrap().into_bytes_with_nul();
 
-                config.0.cacert_pem = cert.as_ptr();
-                config.0.cacert_len = cert.len() as u32;
+                #[cfg(not(esp_idf_version_major = "5"))]
+                {
+                    config.0.cacert_pem = cert.as_ptr();
+                    config.0.cacert_len = cert.len() as u32;
 
-                config.0.prvtkey_pem = private_key.as_ptr() as _;
-                config.0.prvtkey_len = private_key.len() as u32;
+                    config.0.prvtkey_pem = private_key.as_ptr() as _;
+                    config.0.prvtkey_len = private_key.len() as u32;
+                };
 
+                #[cfg(esp_idf_version_major = "5")]
+                {
+                    config.0.servercert = cert.as_ptr();
+                    config.0.servercert_len = cert.len() as u32;
+
+                    config.0.prvtkey_pem = private_key.as_ptr() as _;
+                    config.0.prvtkey_len = private_key.len() as u32;
+                };
+
+                //See above why this is duplicated
                 esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
             } else {
                 esp!(unsafe { httpd_ssl_start(handle_ref, &mut config.0) })?;
             }
         }
-
-        info!("Started Httpd server with config {:?}", conf);
 
         let server = EspHttpServer {
             sd: handle,
