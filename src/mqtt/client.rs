@@ -19,7 +19,7 @@ use crate::private::mutex::RawCondvar;
 pub use asyncify::*;
 
 use crate::private::cstr::*;
-use crate::tls::X509;
+use crate::tls::{Psk, TlsPsk, X509};
 
 pub use client::{Details, MessageId};
 
@@ -79,8 +79,8 @@ pub struct MqttClientConfiguration<'a> {
     pub client_certificate: Option<X509<'static>>,
     pub private_key: Option<X509<'static>>,
     pub private_key_password: Option<&'a str>,
-    // TODO: Future
-    // pub psk_hint_key: KeyHint,
+
+    pub psk: Option<Psk<'a>>,
     // pub alpn_protos: &'a [&'a str],
     // pub use_secure_element: bool,
     // void *ds_data;                          /*!< carrier of handle for digital signature parameters */
@@ -121,12 +121,16 @@ impl<'a> Default for MqttClientConfiguration<'a> {
             client_certificate: None,
             private_key: None,
             private_key_password: None,
+
+            psk: None,
         }
     }
 }
 
 #[cfg(esp_idf_version_major = "4")]
-impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
+impl<'a> From<&'a MqttClientConfiguration<'a>>
+    for (esp_mqtt_client_config_t, RawCstrs, Option<TlsPsk>)
+{
     fn from(conf: &'a MqttClientConfiguration<'a>) -> Self {
         let mut cstrs = RawCstrs::new();
 
@@ -199,13 +203,17 @@ impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, Ra
             }
         }
 
-        (c_conf, cstrs)
+        let tls_psk_conf = conf.psk.as_ref().map(|psk| psk.into());
+
+        (c_conf, cstrs, tls_psk_conf)
     }
 }
 
 #[allow(clippy::needless_update)]
 #[cfg(not(esp_idf_version_major = "4"))]
-impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, RawCstrs) {
+impl<'a> From<&'a MqttClientConfiguration<'a>>
+    for (esp_mqtt_client_config_t, RawCstrs, Option<TlsPsk>)
+{
     fn from(conf: &'a MqttClientConfiguration<'a>) -> Self {
         let mut cstrs = RawCstrs::new();
 
@@ -299,7 +307,9 @@ impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, Ra
             }
         }
 
-        (c_conf, cstrs)
+        let tls_psk_conf = conf.psk.as_ref().map(|psk| psk.into());
+
+        (c_conf, cstrs, tls_psk_conf)
     }
 }
 
@@ -329,6 +339,7 @@ pub struct EspMqttClient<S = ()> {
     raw_client: esp_mqtt_client_handle_t,
     conn_state_guard: Option<Arc<ConnStateGuard<RawCondvar, S>>>,
     _boxed_raw_callback: Box<dyn FnMut(esp_mqtt_event_handle_t)>,
+    _tls_psk_conf: Option<TlsPsk>,
 }
 
 impl<S> RawHandle for EspMqttClient<S> {
@@ -436,7 +447,7 @@ impl<S> EspMqttClient<S> {
 
         let unsafe_callback = UnsafeCallback::from(&mut boxed_raw_callback);
 
-        let (mut c_conf, mut cstrs) = conf.into();
+        let (mut c_conf, mut cstrs, tls_psk_conf) = conf.into();
 
         #[cfg(esp_idf_version_major = "4")]
         {
@@ -448,6 +459,15 @@ impl<S> EspMqttClient<S> {
             c_conf.broker.address.uri = cstrs.as_ptr(url);
         }
 
+        #[cfg(esp_idf_version_major = "4")]
+        if let Some(ref conf) = tls_psk_conf {
+            c_conf.psk_hint_key = &*conf.psk;
+        }
+        #[cfg(not(esp_idf_version_major = "4"))]
+        if let Some(ref conf) = tls_psk_conf {
+            c_conf.broker.verification.psk_hint_key = &*conf.psk;
+        }
+
         let raw_client = unsafe { esp_mqtt_client_init(&c_conf as *const _) };
         if raw_client.is_null() {
             return Err(EspError::from_infallible::<ESP_FAIL>());
@@ -457,6 +477,7 @@ impl<S> EspMqttClient<S> {
             raw_client,
             _boxed_raw_callback: boxed_raw_callback,
             conn_state_guard,
+            _tls_psk_conf: tls_psk_conf,
         };
 
         esp!(unsafe {

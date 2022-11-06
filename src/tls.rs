@@ -2,13 +2,59 @@
 
 use core::fmt::Debug;
 
-use crate::private::cstr::{c_char, CStr};
+use crate::private::cstr::{c_char, CStr, RawCstrs};
+use crate::hal::sys::psk_hint_key_t;
 
 #[cfg(all(
     esp_idf_comp_esp_tls_enabled,
     any(esp_idf_esp_tls_using_mbedtls, esp_idf_esp_tls_using_wolfssl)
 ))]
 pub use self::esptls::*;
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct Psk<'a> {
+    pub key: &'a [u8],
+    pub hint: &'a str,
+}
+
+impl<'a> Debug for Psk<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        f.debug_struct("Psk")
+            .field("hint", &self.hint)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Helper for holding PSK data for lately initialized TLS connections.
+///
+/// It could be easily converted from the public `Psk` configuration and holds the `psk_hint_key_t`
+/// along with its (string) data as this data typically needs to be around after initializing a TLS
+/// client until it has been started.
+pub(crate) struct TlsPsk {
+    pub(crate) psk: Box<psk_hint_key_t>,
+    pub(crate) _cstrs: RawCstrs,
+}
+
+impl Debug for TlsPsk {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        f.debug_struct("TlsPsk")
+            .field("psk", &self.psk)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> From<&'a Psk<'a>> for TlsPsk {
+    fn from(conf: &Psk) -> Self {
+        let mut cstrs = RawCstrs::new();
+        let psk = Box::new(psk_hint_key_t {
+            key: conf.key.as_ptr(),
+            key_size: conf.key.len(),
+            hint: cstrs.as_ptr(conf.hint),
+        });
+
+        TlsPsk { psk, _cstrs: cstrs }
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct X509<'a>(&'a [u8]);
