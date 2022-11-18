@@ -73,11 +73,11 @@ pub struct MqttClientConfiguration<'a> {
     pub skip_cert_common_name_check: bool,
     #[cfg(not(esp_idf_version = "4.3"))]
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut c_types::c_void) -> esp_err_t>,
+    
+    pub cert_pem: &'a [u8],
+    pub client_cert_pem: &'a [u8],
+    pub client_key_pem: &'a [u8],
     // TODO: Future
-
-    // pub cert_pem: &'a [u8],
-    // pub client_cert_pem: &'a [u8],
-    // pub client_key_pem: &'a [u8],
 
     // pub psk_hint_key: KeyHint,
     // pub alpn_protos: &'a [&'a str],
@@ -117,6 +117,10 @@ impl<'a> Default for MqttClientConfiguration<'a> {
 
             #[cfg(not(esp_idf_version = "4.3"))]
             crt_bundle_attach: Default::default(),
+
+            cert_pem: b"",
+            client_cert_pem: b"",
+            client_key_pem: b"",
         }
     }
 }
@@ -151,6 +155,10 @@ impl<'a> From<&'a MqttClientConfiguration<'a>> for (esp_mqtt_client_config_t, Ra
             skip_cert_common_name_check: conf.skip_cert_common_name_check,
             #[cfg(not(esp_idf_version = "4.3"))]
             crt_bundle_attach: conf.crt_bundle_attach,
+
+            cert_pem: conf.cert_pem.as_ptr() as _,
+            client_cert_pem: conf.client_cert_pem.as_ptr() as _,
+            client_key_pem: conf.client_key_pem.as_ptr() as _,
 
             ..Default::default()
         };
