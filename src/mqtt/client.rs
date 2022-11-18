@@ -74,9 +74,9 @@ pub struct MqttClientConfiguration<'a> {
     #[cfg(not(esp_idf_version = "4.3"))]
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut c_types::c_void) -> esp_err_t>,
 
-    pub cert_pem: &'a [u8],
-    pub client_cert_pem: &'a [u8],
-    pub client_key_pem: &'a [u8],
+    pub cert_pem: &'static str,
+    pub client_cert_pem: &'static str,
+    pub client_key_pem: &'static str,
     // TODO: Future
 
     // pub psk_hint_key: KeyHint,
@@ -118,9 +118,9 @@ impl<'a> Default for MqttClientConfiguration<'a> {
             #[cfg(not(esp_idf_version = "4.3"))]
             crt_bundle_attach: Default::default(),
 
-            cert_pem: b"",
-            client_cert_pem: b"",
-            client_key_pem: b"",
+            cert_pem: "",
+            client_cert_pem: "",
+            client_key_pem: "",
         }
     }
 }
