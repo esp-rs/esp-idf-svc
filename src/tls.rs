@@ -99,7 +99,7 @@ impl<'a> X509<'a> {
 
 impl<'a> Debug for X509<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
-        write!(f, "X509(...)")
+        f.debug_struct("X509").finish_non_exhaustive()
     }
 }
 
