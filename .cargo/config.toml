@@ -1,0 +1,2 @@
+[build.'cfg(esp_idf_version_major = "5")']
+rustflags = ["--cfg", "espidf_time64"]
