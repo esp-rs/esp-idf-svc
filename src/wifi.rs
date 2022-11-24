@@ -370,8 +370,6 @@ impl<'d> WifiDriver<'d> {
     pub fn stop(&mut self) -> Result<(), EspError> {
         info!("Stop requested");
 
-        let _ = esp!(unsafe { esp_wifi_disconnect() });
-
         esp!(unsafe { esp_wifi_stop() })?;
 
         info!("Stopping");
@@ -701,7 +699,8 @@ impl<'d> WifiDriver<'d> {
     fn do_scan(&mut self) -> Result<usize, EspError> {
         info!("About to scan for access points");
 
-        self.stop()?;
+        let _ = self.disconnect();
+        let _ = self.stop();
 
         unsafe {
             esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
