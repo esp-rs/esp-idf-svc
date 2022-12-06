@@ -619,9 +619,9 @@ impl<'a> EspHttpConnection<'a> {
                     esp_nofail!(unsafe {
                         httpd_req_get_hdr_value_str(
                             raw_req,
-                            c_name.as_ptr() as _,
-                            buf.as_mut_ptr() as *mut _,
-                            (len + 1) as size_t,
+                            c_name.as_ptr(),
+                            buf.as_mut_ptr().cast(),
+                            len + 1,
                         )
                     });
 
@@ -717,11 +717,7 @@ impl<'a> EspHttpConnection<'a> {
         self.assert_request();
 
         unsafe {
-            let len = httpd_req_recv(
-                self.request.0,
-                buf.as_mut_ptr() as *mut _,
-                buf.len() as size_t,
-            );
+            let len = httpd_req_recv(self.request.0, buf.as_mut_ptr() as *mut _, buf.len());
 
             if len < 0 {
                 esp!(len)?;
@@ -736,11 +732,7 @@ impl<'a> EspHttpConnection<'a> {
 
         if !buf.is_empty() {
             esp!(unsafe {
-                httpd_resp_send_chunk(
-                    self.request.0,
-                    buf.as_ptr() as *const _,
-                    buf.len() as ssize_t,
-                )
+                httpd_resp_send_chunk(self.request.0, buf.as_ptr().cast(), buf.len() as isize)
             })?;
 
             self.response_headers = None;
@@ -923,6 +915,7 @@ impl<'b> Connection for EspHttpConnection<'b> {
 
 #[cfg(esp_idf_httpd_ws_support)]
 pub mod ws {
+    use core::ffi;
     use core::fmt::Debug;
     use core::sync::atomic::{AtomicBool, Ordering};
 
