@@ -1407,7 +1407,7 @@ impl<'d, 'a> ScanProcess<'d, 'a> {
         info!("Got wifi event: {:?}", event);
 
         if matches!(event, WifiEvent::ScanStarted | WifiEvent::ScanDone) {
-            *waitable.state.lock() = event.clone().into();
+            *waitable.state.lock() = (*event).into();
             waitable.cvar.notify_all();
         }
     }
