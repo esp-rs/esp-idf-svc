@@ -57,25 +57,16 @@ pub mod config {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct ScanTime {
         pub active: (u32, u32),
         pub passive: u32,
     }
 
-    impl Default for ScanTime {
-        fn default() -> Self {
-            Self {
-                active: (0, 0),
-                passive: 0,
-            }
-        }
-    }
-
     #[derive(Default, Debug)]
     pub struct ScanConfig {
-        pub bssid: Option<[u8; 8]>,
-        pub ssid: Option<String>,
+        pub bssid: Option<[u8; 6]>,
+        pub ssid: Option<heapless::String<32>>,
         pub channel: Option<u8>,
         pub scan_type: ScanType,
         pub scan_time: ScanTime,
