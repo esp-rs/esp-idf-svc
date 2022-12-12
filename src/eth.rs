@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use core::ptr;
 use core::time::Duration;
+use core::{ffi, ptr};
 
 use ::log::*;
 
@@ -11,7 +11,6 @@ use alloc::sync::Arc;
 
 use embedded_svc::eth::*;
 
-use esp_idf_hal::gpio::{InputPin, OutputPin};
 use esp_idf_hal::peripheral::{Peripheral, PeripheralRef};
 
 #[cfg(any(
@@ -134,12 +133,12 @@ impl UnsafeCallback {
         Self(boxed.as_mut())
     }
 
-    unsafe fn from_ptr(ptr: *mut c_types::c_void) -> Self {
-        Self(ptr as *mut _)
+    unsafe fn from_ptr(ptr: *mut ffi::c_void) -> Self {
+        Self(ptr.cast())
     }
 
-    fn as_ptr(&self) -> *mut c_types::c_void {
-        self.0 as *mut _
+    fn as_ptr(&self) -> *mut ffi::c_void {
+        self.0.cast()
     }
 
     unsafe fn call(&self, data: &[u8]) {
@@ -175,17 +174,17 @@ impl<'d> EthDriver<'d> {
         _rmii_rdx0: impl Peripheral<P = gpio::Gpio25> + 'd,
         _rmii_rdx1: impl Peripheral<P = gpio::Gpio26> + 'd,
         _rmii_crs_dv: impl Peripheral<P = gpio::Gpio27> + 'd,
-        rmii_mdc: impl Peripheral<P = impl OutputPin> + 'd,
+        rmii_mdc: impl Peripheral<P = impl gpio::OutputPin> + 'd,
         _rmii_txd1: impl Peripheral<P = gpio::Gpio22> + 'd,
         _rmii_tx_en: impl Peripheral<P = gpio::Gpio21> + 'd,
         _rmii_txd0: impl Peripheral<P = gpio::Gpio19> + 'd,
-        rmii_mdio: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
+        rmii_mdio: impl Peripheral<P = impl gpio::InputPin + gpio::OutputPin> + 'd,
         rmii_ref_clk_config: RmiiClockConfig<
             impl Peripheral<P = gpio::Gpio0> + 'd,
             impl Peripheral<P = gpio::Gpio16> + 'd,
             impl Peripheral<P = gpio::Gpio17> + 'd,
         >,
-        rst: Option<impl Peripheral<P = impl OutputPin> + 'd>,
+        rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         chipset: RmiiEthChipset,
         phy_addr: Option<u32>,
         sysloop: EspSystemEventLoop,
@@ -280,6 +279,7 @@ impl<'d> EthDriver<'d> {
             mac,
             unsafe { esp_eth_mac_new_openeth(&Self::eth_mac_default_config(0, 0)) },
             unsafe { esp_eth_phy_new_dp83848(&Self::eth_phy_default_config(None, None)) },
+            None,
             None,
             None,
             sysloop,
@@ -674,7 +674,7 @@ impl<'d> EthDriver<'d> {
         _handle: esp_eth_handle_t,
         buf: *mut u8,
         len: u32,
-        event_handler_arg: *mut c_types::c_void,
+        event_handler_arg: *mut ffi::c_void,
     ) -> esp_err_t {
         UnsafeCallback::from_ptr(event_handler_arg as *mut _)
             .call(core::slice::from_raw_parts(buf, len as _));
@@ -683,10 +683,18 @@ impl<'d> EthDriver<'d> {
     }
 
     fn clear_all(&mut self) -> Result<(), EspError> {
-        self.stop()?;
+        let _ = self.stop(); // Driver might be stopped already
 
         unsafe {
             esp!(esp_eth_driver_uninstall(self.handle))?;
+        }
+
+        if let Some(device) = self.spi_device {
+            esp!(unsafe { spi_bus_remove_device(device) }).unwrap();
+        }
+
+        if let Some(bus) = self.spi_bus {
+            esp!(unsafe { spi_bus_free(bus) }).unwrap();
         }
 
         info!("Driver deinitialized");
@@ -775,14 +783,6 @@ impl<'d> Drop for EthDriver<'d> {
     fn drop(&mut self) {
         self.clear_all().unwrap();
 
-        if let Some(device) = self.spi_device {
-            esp!(unsafe { spi_bus_remove_device(device) }).unwrap();
-        }
-
-        if let Some(bus) = self.spi_bus {
-            esp!(unsafe { spi_bus_free(bus) }).unwrap();
-        }
-
         info!("Dropped");
     }
 }
@@ -797,9 +797,9 @@ impl<'d> RawHandle for EthDriver<'d> {
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub struct EspEth<'d> {
-    driver: EthDriver<'d>,
-    netif: EspNetif,
     glue_handle: *mut esp_eth_netif_glue_t,
+    netif: EspNetif,
+    driver: EthDriver<'d>,
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
@@ -955,7 +955,7 @@ impl EthEvent {
 }
 
 impl EspTypedEventSource for EthEvent {
-    fn source() -> *const c_types::c_char {
+    fn source() -> *const ffi::c_char {
         unsafe { ETH_EVENT }
     }
 }
@@ -987,9 +987,9 @@ impl EspTypedEventDeserializer<EthEvent> for EthEvent {
 }
 
 pub struct EthWait<R> {
-    _driver: R,
-    waitable: Arc<Waitable<()>>,
     _subscription: EspSubscription<System>,
+    waitable: Arc<Waitable<()>>,
+    _driver: R,
 }
 
 impl<R> EthWait<R> {
