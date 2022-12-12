@@ -784,10 +784,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     fn start_scan(&mut self, scan_config: &config::ScanConfig) -> Result<(), EspError> {
-        info!("About to scan for access points");
-
         let scan_config: wifi_scan_config_t = scan_config.into();
-
         esp!(unsafe { esp_wifi_scan_start(&scan_config as *const wifi_scan_config_t, false) })
     }
 
@@ -1403,10 +1400,16 @@ impl<'d, 'a> ScanProcess<'d, 'a> {
         self,
         config: &config::ScanConfig,
     ) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        info!("About to scan for access points");
         self.wifi_driver.start_scan(config)?;
+
         self.waitable
             .wait_while(|state| !matches!(state, ScanState::Done));
-        self.wifi_driver.get_scan_result()
+
+        info!("About to get info for found access points");
+        let scan_res = self.wifi_driver.get_scan_result()?;
+        info!("Got info for {} access points", scan_res.len());
+        Ok(scan_res)
     }
 
     fn on_wifi_event(waitable: &Waitable<ScanState>, event: &WifiEvent) {
