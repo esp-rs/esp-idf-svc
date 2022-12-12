@@ -13,7 +13,7 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use ::log::{info, warn};
+use log::{info, warn};
 
 use embedded_svc::http::headers::content_type;
 use embedded_svc::http::server::{
@@ -25,6 +25,7 @@ use embedded_svc::utils::http::server::registration::{ChainHandler, ChainRoot};
 
 use esp_idf_sys::*;
 
+use serde_json::json;
 use uncased::{Uncased, UncasedStr};
 
 use crate::errors::EspIOError;
@@ -780,6 +781,39 @@ impl<'a> EspHttpConnection<'a> {
     where
         E: Display,
     {
+        if let Some(value) = self.content_type() {
+            match value {
+                "application/json" => {}
+                _ => {
+                    if self.response_headers.is_some() {
+                        info!(
+                            "About to handle internal error [{}], response not sent yet",
+                            &error
+                        );
+
+                        if let Err(error2) = self.render_json_error(&error) {
+                            warn!(
+                                "Internal error[{}] while rendering another internal error:\n{}",
+                                error2, error
+                            );
+                        }
+                    } else {
+                        warn!(
+                            "Unhandled internal error [{}], response is already sent",
+                            error
+                        );
+                    }
+                }
+            }
+        } else {
+            self.default_error(error);
+        }
+    }
+
+    fn default_error<E>(&mut self, error: E)
+    where
+        E: Display,
+    {
         if self.response_headers.is_some() {
             info!(
                 "About to handle internal error [{}], response not sent yet",
@@ -821,6 +855,26 @@ impl<'a> EspHttpConnection<'a> {
             )
             .as_bytes(),
         )?;
+
+        Ok(())
+    }
+
+    fn render_json_error<E>(&mut self, error: E) -> Result<(), EspIOError>
+    where
+        E: Display,
+    {
+        self.initiate_response(
+            500,
+            Some("Internal Error"),
+            &[content_type("application/json")],
+        )?;
+
+        let json = json!({
+            "code": 500,
+            "success": false,
+            "error": &error.to_string()
+        });
+        self.write_all(json.to_string().as_bytes())?;
 
         Ok(())
     }
@@ -922,7 +976,7 @@ pub mod ws {
     extern crate alloc;
     use alloc::sync::Arc;
 
-    use ::log::*;
+    use log::*;
 
     use embedded_svc::http::Method;
     use embedded_svc::utils::mutex::{Condvar, Mutex};
