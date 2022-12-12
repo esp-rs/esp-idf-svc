@@ -1,6 +1,6 @@
 [package]
 name = "esp-idf-svc"
-version = "0.43.4"
+version = "0.44.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2018"
 resolver = "2"
@@ -17,7 +17,7 @@ rust-version = "1.61"
 default = ["std"]
 
 std = ["alloc", "anyhow/std", "log/std", "esp-idf-sys/std", "esp-idf-hal/std", "embedded-svc/std"]
-alloc = ["cstr_core/alloc", "anyhow", "esp-idf-hal/alloc", "embedded-svc/alloc"]
+alloc = ["anyhow", "esp-idf-hal/alloc", "embedded-svc/alloc"]
 nightly = ["embedded-svc/nightly"]
 experimental = ["embedded-svc/experimental"]
 embassy-time-driver = ["embassy-time"]
@@ -27,15 +27,14 @@ embassy-time-isr-queue = ["embassy-sync", "embassy-time"]
 heapless = { version = "0.7", default-features = false }
 enumset = { version = "1", default-features = false }
 log = { version = "0.4", default-features = false }
-cstr_core = "0.2"
 uncased = "0.9.7"
 anyhow = { version = "1", default-features = false, optional = true } # Only used by the deprecated httpd module
-embedded-svc = { version = "0.23.1", default-features = false }
-esp-idf-sys = { version = "0.31.11", default-features = false, features = ["native"] }
-esp-idf-hal = { version = "0.39.3", default-features = false, features = ["esp-idf-sys"] }
+embedded-svc = { version = "0.23.2", default-features = false }
+esp-idf-sys = { version = "0.32", default-features = false, features = ["native"] }
+esp-idf-hal = { version = "0.40", default-features = false, features = ["esp-idf-sys"] }
 embassy-sync = { version = "0.1", optional = true }
 embassy-time = { version = "0.1", optional = true, features = ["tick-hz-1_000_000"] }
 
 [build-dependencies]
-embuild = "0.30.4"
+embuild = "0.31"
 anyhow = "1"
