@@ -430,7 +430,7 @@ impl EspWebSocketClient {
         let handle = unsafe { esp_websocket_client_init(&conf) };
 
         if handle.is_null() {
-            return Err(EspError::from_infallible::<ESP_FAIL>());
+            return Err(EspError::from_infallible::<ESP_FAIL>().into());
         }
 
         let client = Self {
