@@ -569,10 +569,9 @@ impl<'d> WifiDriver<'d> {
     pub fn get_scan_result_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
-        let mut ap_infos_raw: heapless::Vec<wifi_ap_record_t, N> = heapless::Vec::new();
-
         let total_count = self.do_get_scan_amount()?;
 
+        let mut ap_infos_raw: heapless::Vec<wifi_ap_record_t, N> = heapless::Vec::new();
         unsafe {
             ap_infos_raw.set_len(total_count.min(N));
         }
