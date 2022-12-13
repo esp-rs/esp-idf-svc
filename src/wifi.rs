@@ -543,7 +543,7 @@ impl<'d> WifiDriver<'d> {
     pub fn scan_n<const N: usize>(
         &mut self,
         scan_config: &config::ScanConfig,
-    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+    ) -> Result<heapless::Vec<AccessPointInfo, N>, EspError> {
         self.do_scan(scan_config)?;
         self.get_scan_result_n()
     }
@@ -569,7 +569,7 @@ impl<'d> WifiDriver<'d> {
 
     pub fn get_scan_result_n<const N: usize>(
         &mut self,
-    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+    ) -> Result<heapless::Vec<AccessPointInfo, N>, EspError> {
         let total_count = self.do_get_scan_amount()?;
 
         let mut ap_infos_raw: heapless::Vec<wifi_ap_record_t, N> = heapless::Vec::new();
@@ -585,7 +585,7 @@ impl<'d> WifiDriver<'d> {
             .inspect(|ap_info| info!("Found access point {:?}", ap_info))
             .collect();
 
-        Ok((result, real_count))
+        Ok(result)
     }
 
     #[cfg(feature = "alloc")]
@@ -872,7 +872,9 @@ impl<'d> Wifi for WifiDriver<'d> {
         &mut self,
         scan_config: &config::ScanConfig,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        WifiDriver::scan_n(self, scan_config)
+        let res = WifiDriver::scan_n(self, scan_config)?;
+        let res_len = res.len();
+        Ok((res, res_len))
     }
 
     #[cfg(feature = "alloc")]
@@ -894,7 +896,9 @@ impl<'d> Wifi for WifiDriver<'d> {
     fn get_scan_result_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        WifiDriver::get_scan_result_n(self)
+        let res = WifiDriver::get_scan_result_n(self)?;
+        let res_len = res.len();
+        Ok((res, res_len))
     }
 
     fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
@@ -1038,7 +1042,7 @@ impl<'d> EspWifi<'d> {
     pub fn scan_n<const N: usize>(
         &mut self,
         scan_config: &config::ScanConfig,
-    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+    ) -> Result<heapless::Vec<AccessPointInfo, N>, EspError> {
         self.driver_mut().scan_n(scan_config)
     }
 
@@ -1060,7 +1064,7 @@ impl<'d> EspWifi<'d> {
 
     pub fn get_scan_result_n<const N: usize>(
         &mut self,
-    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+    ) -> Result<heapless::Vec<AccessPointInfo, N>, EspError> {
         self.driver_mut().get_scan_result_n()
     }
 
@@ -1153,7 +1157,9 @@ impl<'d> Wifi for EspWifi<'d> {
         &mut self,
         scan_config: &config::ScanConfig,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        EspWifi::scan_n(self, scan_config)
+        let res = EspWifi::scan_n(self, scan_config)?;
+        let res_len = res.len();
+        Ok((res, res_len))
     }
 
     fn scan(
@@ -1174,7 +1180,9 @@ impl<'d> Wifi for EspWifi<'d> {
     fn get_scan_result_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        EspWifi::get_scan_result_n(self)
+        let res = EspWifi::get_scan_result_n(self)?;
+        let res_len = res.len();
+        Ok((res, res_len))
     }
 
     fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
