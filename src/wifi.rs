@@ -954,7 +954,7 @@ impl<'d> EspWifi<'d> {
 
     pub fn swap_netif(
         &mut self,
-        sta_netif: EspNetif,let res = 
+        sta_netif: EspNetif,
         ap_netif: EspNetif,
     ) -> Result<(EspNetif, EspNetif), EspError> {
         self.detach_netif()?;
