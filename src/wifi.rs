@@ -558,6 +558,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     pub fn start_scan(&mut self, scan_config: &config::ScanConfig) -> Result<(), EspError> {
+        info!("About to scan for access points");
         let scan_config: Newtype<wifi_scan_config_t> = scan_config.into();
         esp!(unsafe { esp_wifi_scan_start(&scan_config.0 as *const wifi_scan_config_t, false) })
     }
