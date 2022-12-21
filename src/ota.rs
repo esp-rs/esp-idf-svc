@@ -1,4 +1,5 @@
 use core::cmp::min;
+use core::convert::TryInto;
 use core::fmt::Write;
 use core::mem;
 use core::ptr;
@@ -85,11 +86,10 @@ impl ota::FirmwareInfoLoader for EspFirmwareInfoLoader {
 
     fn get_info(&self) -> Result<ota::FirmwareInfo, Self::Error> {
         if self.is_loaded() {
-            let app_desc_slice = &self.0[0..mem::size_of::<esp_image_header_t>()
-                + mem::size_of::<esp_image_segment_header_t>()];
-
+            let header_size =
+                mem::size_of::<esp_image_header_t>() + mem::size_of::<esp_image_segment_header_t>();
             let app_desc = unsafe {
-                (app_desc_slice.as_ptr() as *const esp_app_desc_t)
+                (self.0.as_ptr().offset(header_size.try_into().unwrap()) as *const esp_app_desc_t)
                     .as_ref()
                     .unwrap()
             };
