@@ -578,7 +578,7 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode AP set");
 
-                self.set_ap_conf(ap_conf)?;
+                self.set_ap_conf_if_changed(ap_conf)?;
             }
             Configuration::Client(client_conf) => {
                 unsafe {
@@ -586,7 +586,7 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode STA set");
 
-                self.set_sta_conf(client_conf)?;
+                self.set_sta_conf_if_changed(client_conf)?;
             }
             Configuration::Mixed(client_conf, ap_conf) => {
                 unsafe {
@@ -594,8 +594,8 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode APSTA set");
 
-                self.set_sta_conf(client_conf)?;
-                self.set_ap_conf(ap_conf)?;
+                self.set_sta_conf_if_changed(client_conf)?;
+                self.set_ap_conf_if_changed(ap_conf)?;
             }
         }
 
@@ -742,6 +742,15 @@ impl<'d> WifiDriver<'d> {
         Ok(result)
     }
 
+    fn set_sta_conf_if_changed(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
+        let curr_config = self.get_sta_conf()?;
+        if !conf.eq(&curr_config) {
+            self.set_sta_conf(conf)?;
+        }
+
+        Ok(())
+    }
+
     fn set_sta_conf(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
         info!("Setting STA configuration: {:?}", conf);
 
@@ -765,6 +774,15 @@ impl<'d> WifiDriver<'d> {
         info!("Providing AP configuration: {:?}", &result);
 
         Ok(result)
+    }
+
+    fn set_ap_conf_if_changed(&mut self, conf: &AccessPointConfiguration) -> Result<(), EspError> {
+        let curr_config = self.get_ap_conf()?;
+        if !conf.eq(&curr_config) {
+            self.set_ap_conf(conf)?;
+        }
+
+        Ok(())
     }
 
     fn set_ap_conf(&mut self, conf: &AccessPointConfiguration) -> Result<(), EspError> {
