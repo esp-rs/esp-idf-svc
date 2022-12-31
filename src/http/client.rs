@@ -1,3 +1,6 @@
+//! HTTP client
+//!
+//! This provides a set of APIs for making HTTP(S) requests.
 use core::cell::UnsafeCell;
 
 extern crate alloc;
