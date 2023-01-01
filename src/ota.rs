@@ -194,6 +194,18 @@ impl EspOta {
         })
     }
 
+    pub fn get_last_invalid_slot(&self) -> Result<Option<Slot>, EspError> {
+        self.check_read()?;
+
+        let partition = unsafe { esp_ota_get_last_invalid_partition().as_ref() };
+
+        if partition.is_some() {
+            Ok(Some(self.get_slot(partition.unwrap()).unwrap()))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn is_factory_reset_supported(&self) -> Result<bool, EspError> {
         self.check_read()?;
 
