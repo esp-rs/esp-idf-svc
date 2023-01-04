@@ -1,4 +1,8 @@
+//! SNTP Time Synchronization
+
 use core::cmp::min;
+use core::time::Duration;
+use std::sync::Mutex;
 
 use ::log::*;
 
@@ -115,6 +119,9 @@ impl<'a> Default for SntpConf<'a> {
 
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
+type SyncCallback = Box<dyn FnMut(Duration) + Send + 'static>;
+static SYNC_CB: Mutex<Option<SyncCallback>> = Mutex::new(None);
+
 pub struct EspSntp {
     // Needs to be kept around because the C bindings only have a pointer.
     _sntp_servers: [CString; SNTP_SERVER_NUM],
@@ -138,6 +145,23 @@ impl EspSntp {
         Ok(sntp)
     }
 
+    pub fn new_with_callback<F>(conf: &SntpConf, callback: F) -> Result<Self, EspError>
+    where
+        F: FnMut(Duration) + Send + 'static,
+    {
+        let mut taken = TAKEN.lock();
+
+        if *taken {
+            esp!(ESP_ERR_INVALID_STATE)?;
+        }
+
+        *SYNC_CB.lock().unwrap() = Some(Box::new(callback));
+        let sntp = Self::init(conf)?;
+
+        *taken = true;
+        Ok(sntp)
+    }
+
     fn init(conf: &SntpConf) -> Result<Self, EspError> {
         info!("Initializing");
 
@@ -153,6 +177,7 @@ impl EspSntp {
 
         unsafe {
             sntp_set_time_sync_notification_cb(Some(Self::sync_cb));
+
             sntp_init();
         };
 
@@ -161,6 +186,10 @@ impl EspSntp {
         Ok(Self {
             _sntp_servers: c_servers,
         })
+    }
+
+    fn unsubscribe(&mut self) {
+        *SYNC_CB.lock().unwrap() = None;
     }
 
     pub fn get_sync_status(&self) -> SyncStatus {
@@ -173,6 +202,13 @@ impl EspSntp {
             (*tv).tv_sec,
             (*tv).tv_usec,
         );
+
+        if let Some(cb) = &mut *SYNC_CB.lock().unwrap() {
+            let duration = Duration::from_secs((*tv).tv_sec as u64)
+                + Duration::from_micros((*tv).tv_usec as u64);
+
+            cb(duration);
+        }
     }
 }
 
@@ -182,6 +218,7 @@ impl Drop for EspSntp {
             let mut taken = TAKEN.lock();
 
             unsafe { sntp_stop() };
+            self.unsubscribe();
             *taken = false;
         }
 
