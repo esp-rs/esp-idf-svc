@@ -75,10 +75,10 @@ pub struct MqttClientConfiguration<'a> {
     #[cfg(not(esp_idf_version = "4.3"))]
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut c_void) -> esp_err_t>,
 
-    pub server_certificate: Option<X509<'static>>,
+    pub server_certificate: Option<X509<'a>>,
 
-    pub client_certificate: Option<X509<'static>>,
-    pub private_key: Option<X509<'static>>,
+    pub client_certificate: Option<X509<'a>>,
+    pub private_key: Option<X509<'a>>,
     pub private_key_password: Option<&'a str>,
     // TODO: Future
     // pub psk_hint_key: KeyHint,
