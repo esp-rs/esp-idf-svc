@@ -198,7 +198,7 @@ impl EspOta {
         self.check_read()?;
 
         if let Some(partition) = unsafe { esp_ota_get_last_invalid_partition().as_ref() } {
-            Ok(Some(self.get_slot(partition).unwrap()))
+            Ok(Some(self.get_slot(partition)?))
         } else {
             Ok(None)
         }
