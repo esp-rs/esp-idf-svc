@@ -575,7 +575,7 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode AP set");
 
-                self.set_ap_conf_if_changed(ap_conf)?;
+                self.set_ap_conf(ap_conf)?;
             }
             Configuration::Client(client_conf) => {
                 unsafe {
@@ -583,7 +583,7 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode STA set");
 
-                self.set_sta_conf_if_changed(client_conf)?;
+                self.set_sta_conf(client_conf)?;
             }
             Configuration::Mixed(client_conf, ap_conf) => {
                 unsafe {
@@ -591,8 +591,8 @@ impl<'d> WifiDriver<'d> {
                 }
                 info!("Wifi mode APSTA set");
 
-                self.set_sta_conf_if_changed(client_conf)?;
-                self.set_ap_conf_if_changed(ap_conf)?;
+                self.set_sta_conf(client_conf)?;
+                self.set_ap_conf(ap_conf)?;
             }
         }
 
@@ -739,23 +739,21 @@ impl<'d> WifiDriver<'d> {
         Ok(result)
     }
 
-    fn set_sta_conf_if_changed(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
-        let curr_config = self.get_sta_conf()?;
-        if !conf.eq(&curr_config) {
-            self.set_sta_conf(conf)?;
-        }
-
-        Ok(())
-    }
-
     fn set_sta_conf(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
-        info!("Setting STA configuration: {:?}", conf);
+        info!("Checking current STA configuration");
+        let current_config = self.get_sta_conf()?;
 
-        let mut wifi_config = wifi_config_t {
-            sta: Newtype::<wifi_sta_config_t>::from(conf).0,
-        };
+        if current_config != *conf {
+            info!("Setting STA configuration: {:?}", conf);
 
-        esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
+            let mut wifi_config = wifi_config_t {
+                sta: Newtype::<wifi_sta_config_t>::from(conf).0,
+            };
+
+            esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
+        } else {
+            info!("Same STA configuration already present");
+        }
 
         info!("STA configuration done");
 
@@ -773,23 +771,21 @@ impl<'d> WifiDriver<'d> {
         Ok(result)
     }
 
-    fn set_ap_conf_if_changed(&mut self, conf: &AccessPointConfiguration) -> Result<(), EspError> {
-        let curr_config = self.get_ap_conf()?;
-        if !conf.eq(&curr_config) {
-            self.set_ap_conf(conf)?;
-        }
-
-        Ok(())
-    }
-
     fn set_ap_conf(&mut self, conf: &AccessPointConfiguration) -> Result<(), EspError> {
-        info!("Setting AP configuration: {:?}", conf);
+        info!("Checking current AP configuration");
+        let current_config = self.get_ap_conf()?;
 
-        let mut wifi_config = wifi_config_t {
-            ap: Newtype::<wifi_ap_config_t>::from(conf).0,
-        };
+        if current_config != *conf {
+            info!("Setting AP configuration: {:?}", conf);
 
-        esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
+            let mut wifi_config = wifi_config_t {
+                ap: Newtype::<wifi_ap_config_t>::from(conf).0,
+            };
+
+            esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
+        } else {
+            info!("Same AP configuration already present");
+        }
 
         info!("AP configuration done");
 
