@@ -1,3 +1,4 @@
+//! WiFi support
 use core::marker::PhantomData;
 use core::time::Duration;
 use core::{cmp, ffi};
@@ -105,11 +106,7 @@ pub mod config {
                     },
                 },
                 channel: s.channel.unwrap_or_default(),
-                scan_type: if matches!(s.scan_type, ScanType::Active { .. }) {
-                    0
-                } else {
-                    1
-                },
+                scan_type: matches!(s.scan_type, ScanType::Active { .. }).into(),
                 show_hidden: s.show_hidden,
             }
         }
