@@ -11,6 +11,9 @@ use esp_idf_sys::*;
 use crate::private::cstr::CString;
 use crate::private::mutex;
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 const SNTP_SERVER_NUM: usize = SNTP_MAX_SERVERS as usize;
 
 const DEFAULT_SERVERS: [&str; 4] = [
@@ -117,7 +120,9 @@ impl<'a> Default for SntpConf<'a> {
     }
 }
 
-type SyncCallback = Box<dyn FnMut(Duration) + Send + 'static>;
+#[cfg(feature = "alloc")]
+type SyncCallback = alloc::boxed::Box<dyn FnMut(Duration) + Send + 'static>;
+#[cfg(feature = "alloc")]
 static SYNC_CB: Mutex<Option<SyncCallback>> = Mutex::new(None);
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
@@ -144,6 +149,7 @@ impl EspSntp {
         Ok(sntp)
     }
 
+    #[cfg(feature = "alloc")]
     pub fn new_with_callback<F>(conf: &SntpConf, callback: F) -> Result<Self, EspError>
     where
         F: FnMut(Duration) + Send + 'static,
@@ -154,7 +160,7 @@ impl EspSntp {
             esp!(ESP_ERR_INVALID_STATE)?;
         }
 
-        *SYNC_CB.lock().unwrap() = Some(Box::new(callback));
+        *SYNC_CB.lock().unwrap() = Some(alloc::boxed::Box::new(callback));
         let sntp = Self::init(conf)?;
 
         *taken = true;
@@ -187,6 +193,7 @@ impl EspSntp {
         })
     }
 
+    #[cfg(feature = "alloc")]
     fn unsubscribe(&mut self) {
         *SYNC_CB.lock().unwrap() = None;
     }
@@ -202,6 +209,7 @@ impl EspSntp {
             (*tv).tv_usec,
         );
 
+        #[cfg(feature = "alloc")]
         if let Some(cb) = &mut *SYNC_CB.lock().unwrap() {
             let duration = Duration::from_secs((*tv).tv_sec as u64)
                 + Duration::from_micros((*tv).tv_usec as u64);
@@ -217,7 +225,10 @@ impl Drop for EspSntp {
             let mut taken = TAKEN.lock();
 
             unsafe { sntp_stop() };
+
+            #[cfg(feature = "alloc")]
             self.unsubscribe();
+
             *taken = false;
         }
 
