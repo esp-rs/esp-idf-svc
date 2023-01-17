@@ -2,7 +2,6 @@
 
 use core::cmp::min;
 use core::time::Duration;
-use std::sync::Mutex;
 
 use ::log::*;
 
@@ -123,7 +122,8 @@ impl<'a> Default for SntpConf<'a> {
 #[cfg(feature = "alloc")]
 type SyncCallback = alloc::boxed::Box<dyn FnMut(Duration) + Send + 'static>;
 #[cfg(feature = "alloc")]
-static SYNC_CB: Mutex<Option<SyncCallback>> = Mutex::new(None);
+static SYNC_CB: mutex::Mutex<Option<SyncCallback>> =
+    mutex::Mutex::wrap(mutex::RawMutex::new(), None);
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
 pub struct EspSntp {
@@ -160,7 +160,7 @@ impl EspSntp {
             esp!(ESP_ERR_INVALID_STATE)?;
         }
 
-        *SYNC_CB.lock().unwrap() = Some(alloc::boxed::Box::new(callback));
+        *SYNC_CB.lock() = Some(alloc::boxed::Box::new(callback));
         let sntp = Self::init(conf)?;
 
         *taken = true;
@@ -195,7 +195,7 @@ impl EspSntp {
 
     #[cfg(feature = "alloc")]
     fn unsubscribe(&mut self) {
-        *SYNC_CB.lock().unwrap() = None;
+        *SYNC_CB.lock() = None;
     }
 
     pub fn get_sync_status(&self) -> SyncStatus {
@@ -210,7 +210,7 @@ impl EspSntp {
         );
 
         #[cfg(feature = "alloc")]
-        if let Some(cb) = &mut *SYNC_CB.lock().unwrap() {
+        if let Some(cb) = &mut *SYNC_CB.lock() {
             let duration = Duration::from_secs((*tv).tv_sec as u64)
                 + Duration::from_micros((*tv).tv_usec as u64);
 
