@@ -74,7 +74,7 @@ impl From<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
         let mut result = wifi_sta_config_t {
             ssid: [0; 32],
             password: [0; 64],
-            scan_method: wifi_scan_method_t_WIFI_FAST_SCAN,
+            scan_method: wifi_scan_method_t_WIFI_ALL_CHANNEL_SCAN,
             bssid_set: conf.bssid.is_some(),
             bssid,
             channel: conf.channel.unwrap_or(0u8),
