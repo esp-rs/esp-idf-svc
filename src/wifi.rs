@@ -1091,8 +1091,8 @@ impl From<Newtype<wifi_event_sta_wps_fail_reason_t>> for StaWpsFailedReason {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WpsApCredential {
-    ssid: heapless::String<32>,
-    passphrase: heapless::String<64>,
+    pub ssid: heapless::String<32>,
+    pub passphrase: heapless::String<64>,
 }
 
 impl From<Newtype<wifi_event_sta_wps_er_success_t__bindgen_ty_1>> for WpsApCredential {
@@ -1106,65 +1106,65 @@ impl From<Newtype<wifi_event_sta_wps_er_success_t__bindgen_ty_1>> for WpsApCrede
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScanDoneData {
-    success: bool,
-    number: u8,
-    scan_id: u8,
+    pub success: bool,
+    pub number: u8,
+    pub scan_id: u8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaConnectedData {
-    ssid: heapless::String<32>,
-    bssid: [u8; 6],
-    channel: u8,
-    authmode: AuthMethod,
+    pub ssid: heapless::String<32>,
+    pub bssid: [u8; 6],
+    pub channel: u8,
+    pub authmode: AuthMethod,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaDisconnectedData {
-    ssid: heapless::String<32>,
-    bssid: [u8; 6],
-    reason: wifi_err_reason_t,
+    pub ssid: heapless::String<32>,
+    pub bssid: [u8; 6],
+    pub reason: wifi_err_reason_t,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaAuthmodeChangedData {
-    old_mode: AuthMethod,
-    new_mode: AuthMethod,
+    pub old_mode: AuthMethod,
+    pub new_mode: AuthMethod,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaBssRssiLowData {
-    rssi: i32,
+    pub rssi: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaWpsSuccessData {
-    ap_cred: heapless::Vec<WpsApCredential, 3>,
+    pub ap_cred: heapless::Vec<WpsApCredential, 3>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaWpsPinData {
-    pin_code: [u8; 8],
+    pub pin_code: [u8; 8],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApStaConnectedData {
-    mac: [u8; 6],
-    aid: u8,
-    is_mesh_child: bool,
+    pub mac: [u8; 6],
+    pub aid: u8,
+    pub is_mesh_child: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApStaDisconnectedData {
-    mac: [u8; 6],
-    aid: u8,
-    is_mesh_child: bool,
+    pub mac: [u8; 6],
+    pub aid: u8,
+    pub is_mesh_child: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApProbeRequestReceivedData {
-    rssi: i32,
-    mac: [u8; 6],
+    pub rssi: i32,
+    pub mac: [u8; 6],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
