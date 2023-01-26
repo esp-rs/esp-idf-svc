@@ -353,32 +353,43 @@ impl<T: NvsPartitionId> EspNvs<T> {
         Ok(true)
     }
 
-    pub fn get_blob<'a>(
-        &self,
-        name: &str,
-        buf: &'a mut [u8],
-    ) -> Result<Option<&'a [u8]>, EspError> {
+    pub fn blob_len(&self, name: &str) -> Result<Option<usize>, EspError> {
         let c_key = CString::new(name).unwrap();
 
-        // check for blob value, by getting blob length
+        #[allow(unused_assignments)]
         let mut len = 0;
+
         match unsafe { nvs_get_blob(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
                 esp!(err)?;
 
-                len = buf.len();
+                Ok(Some(len))
+            }
+        }
+    }
 
-                // fetch value if no error
-                esp!(unsafe {
-                    nvs_get_blob(
-                        self.1,
-                        c_key.as_ptr(),
-                        buf.as_mut_ptr() as *mut _,
-                        &mut len as *mut _,
-                    )
-                })?;
+    pub fn get_blob<'a>(
+        &self,
+        name: &str,
+        buf: &'a mut [u8],
+    ) -> Result<Option<&'a [u8]>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut len = buf.len();
+
+        match unsafe {
+            nvs_get_blob(
+                self.1,
+                c_key.as_ptr(),
+                buf.as_mut_ptr() as *mut _,
+                &mut len as *mut _,
+            )
+        } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
 
                 Ok(Some(&buf[..len]))
             }
@@ -418,10 +429,8 @@ impl<T: NvsPartitionId> EspNvs<T> {
     pub fn get_str<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a str>, EspError> {
         let c_key = CString::new(name).unwrap();
 
-        #[allow(unused_assignments)]
-        let mut len = 0;
+        let mut len = buf.len();
         match unsafe {
-            len = buf.len();
             nvs_get_str(
                 self.1,
                 c_key.as_ptr(),
@@ -583,6 +592,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
     pub fn get_i32(&self, name: &str) -> Result<Option<i32>, EspError> {
         let c_key = CString::new(name).unwrap();
         let mut result: [i32; 1] = [0; 1];
+
         match unsafe { nvs_get_i32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
@@ -607,6 +617,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
     pub fn get_u64(&self, name: &str) -> Result<Option<u64>, EspError> {
         let c_key = CString::new(name).unwrap();
         let mut result: [u64; 1] = [0; 1];
+
         match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
@@ -631,6 +642,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
     pub fn get_i64(&self, name: &str) -> Result<Option<i64>, EspError> {
         let c_key = CString::new(name).unwrap();
         let mut result: [i64; 1] = [0; 1];
+
         match unsafe { nvs_get_i64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
