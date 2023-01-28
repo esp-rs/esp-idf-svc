@@ -99,7 +99,7 @@ impl EspLogger {
         LevelFilter::from(Newtype(CONFIG_LOG_MAXIMUM_LEVEL))
     }
 
-    pub fn set_target_level(&self, target: impl AsRef<str>, level_filter: LevelFilter) {
+    pub fn set_target_level(target: impl AsRef<str>, level_filter: LevelFilter) {
         let ctarget = CString::new(target.as_ref()).unwrap();
 
         unsafe {
@@ -139,10 +139,29 @@ impl EspLogger {
 
     #[cfg(not(all(esp_idf_version_major = "4", esp_idf_version_minor = "3")))]
     fn should_log(record: &Record) -> bool {
+        use alloc::collections::BTreeMap;
+        use crate::private::mutex::Mutex;
+
+        // esp-idf `function esp_log_level_get` builds a cache using the address
+        // of the target and not doing a string compare.  This means we need to
+        // build a cache of our own mapping the string value to a consistant 
+        // c-string value.
+        static TARGET_CACHE: Mutex<BTreeMap<String, CString>> = Mutex::new(BTreeMap::new());
         let level = Newtype::<esp_log_level_t>::from(record.level()).0;
-        let max_level = unsafe {
-            esp_log_level_get(b"rust-logging\0" as *const u8 as *const _) // TODO: use record target?
+        let mut cache = TARGET_CACHE.lock();
+        let ctarget = match cache.get(record.target()) {
+            Some(value) => value,
+            None => {
+                // println!("EspLogger::should_log: add to cache target={}", record.target());
+                let value = CString::new(record.target()).unwrap();
+                cache.insert(record.target().to_string(), value);
+                cache.get(record.target()) .unwrap()
+            }
         };
+        let max_level = unsafe {
+            esp_log_level_get(ctarget.as_c_str().as_ptr())
+        };
+        // println!("EspLogger::should_log: target={} max_level={}", record.target(), max_level);
         level <= max_level
     }
 
