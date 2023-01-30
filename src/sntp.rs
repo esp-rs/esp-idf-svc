@@ -37,10 +37,10 @@ mod esp_sntp {
         }
     }
 
-    pub use esp_idf_sys::esp_sntp_init as sntp_init;
-    pub use esp_idf_sys::esp_sntp_setoperatingmode as sntp_setoperatingmode;
-    pub use esp_idf_sys::esp_sntp_setservername as sntp_setservername;
-    pub use esp_idf_sys::esp_sntp_stop as sntp_stop;
+    pub use esp_sntp_init as sntp_init;
+    pub use esp_sntp_setoperatingmode as sntp_setoperatingmode;
+    pub use esp_sntp_setservername as sntp_setservername;
+    pub use esp_sntp_stop as sntp_stop;
 }
 
 #[cfg(any(esp_idf_version_major = "4", esp_idf_version_minor = "0"))]
