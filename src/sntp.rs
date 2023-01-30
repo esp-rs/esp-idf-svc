@@ -17,6 +17,7 @@ mod esp_sntp {
     pub use esp_idf_sys::*;
 
     impl From<esp_sntp_operatingmode_t> for OperatingMode {
+        #[allow(non_upper_case_globals)]
         fn from(from: esp_sntp_operatingmode_t) -> Self {
             match from {
                 esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL => OperatingMode::Poll,
@@ -27,6 +28,7 @@ mod esp_sntp {
     }
 
     impl From<OperatingMode> for esp_sntp_operatingmode_t {
+        #[allow(non_upper_case_globals)]
         fn from(from: OperatingMode) -> Self {
             match from {
                 OperatingMode::Poll => esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL,
