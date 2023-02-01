@@ -141,12 +141,13 @@ impl EspLogger {
     fn should_log(record: &Record) -> bool {
         use crate::private::mutex::Mutex;
         use alloc::collections::BTreeMap;
+        use once_cell::sync::Lazy;
 
         // esp-idf `function esp_log_level_get` builds a cache using the address
         // of the target and not doing a string compare.  This means we need to
         // build a cache of our own mapping the string value to a consistant
         // c-string value.
-        static TARGET_CACHE: Mutex<BTreeMap<String, CString>> = Mutex::new(BTreeMap::new());
+        static TARGET_CACHE: Lazy<Mutex<BTreeMap<String, CString>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
         let level = Newtype::<esp_log_level_t>::from(record.level()).0;
         let mut cache = TARGET_CACHE.lock();
         let ctarget = match cache.get(record.target()) {
