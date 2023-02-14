@@ -560,7 +560,10 @@ impl<'d> WifiDriver<'d> {
     }
 
     pub fn set_configuration(&mut self, conf: &Configuration) -> Result<(), EspError> {
-        info!("Setting configuration: {:?}", conf);
+        info!(
+            "Setting configuration: {}",
+            format_config_without_password(conf)
+        );
 
         match conf {
             Configuration::None => {
@@ -740,7 +743,10 @@ impl<'d> WifiDriver<'d> {
     }
 
     fn set_sta_conf(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
-        info!("Setting STA configuration: {:?}", conf);
+        info!(
+            "Setting STA configuration: {}",
+            format_client_config_without_password(conf)
+        );
 
         let mut wifi_config = wifi_config_t {
             sta: Newtype::<wifi_sta_config_t>::from(conf).0,
@@ -1272,8 +1278,6 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
             WifiEvent::ActionTxStatus
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_BEACON_TIMEOUT {
             WifiEvent::StaBeaconTimeout
-        } else if event_id == wifi_event_t_WIFI_EVENT_ROC_DONE {
-            WifiEvent::RocDone
         } else {
             panic!("Unknown event ID: {}", event_id);
         };
@@ -1340,4 +1344,22 @@ impl WifiWait {
             waitable.cvar.notify_all();
         }
     }
+}
+
+fn format_config_without_password(config: &Configuration) -> String {
+    match config {
+        Configuration::None => format!("{config:?}"),
+        Configuration::Client(client) => format_client_config_without_password(client),
+        Configuration::AccessPoint(ap) => format!("{ap:?}"),
+        Configuration::Mixed(client, ap) => {
+            format!(
+                "({}, {ap:?})",
+                format_client_config_without_password(client)
+            )
+        }
+    }
+}
+
+fn format_client_config_without_password(config: &ClientConfiguration) -> String {
+    format!("Client(ClientConfiguration {{ ssid: {:?}, bssid: {:?}, auth_method: {:?}, channel: {:?} }})", config.ssid, config.bssid, config.auth_method, config.channel)
 }
