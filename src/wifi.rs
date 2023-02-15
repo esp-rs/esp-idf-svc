@@ -1348,7 +1348,7 @@ impl WifiWait {
     }
 }
 
-fn format_config_without_password(config: &Configuration) -> String {
+fn format_config_without_password(config: &Configuration) -> alloc::string::String {
     match config {
         Configuration::None => format!("{config:?}"),
         Configuration::Client(client) => format_client_config_without_password(client),
@@ -1362,6 +1362,6 @@ fn format_config_without_password(config: &Configuration) -> String {
     }
 }
 
-fn format_client_config_without_password(config: &ClientConfiguration) -> String {
+fn format_client_config_without_password(config: &ClientConfiguration) -> alloc::string::String {
     format!("Client(ClientConfiguration {{ ssid: {:?}, bssid: {:?}, auth_method: {:?}, channel: {:?} }})", config.ssid, config.bssid, config.auth_method, config.channel)
 }
