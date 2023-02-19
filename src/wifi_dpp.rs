@@ -4,17 +4,17 @@
 
 use ::log::*;
 
+use crate::private::common::Newtype;
+use crate::private::mutex;
+use crate::wifi::EspWifi;
+use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use esp_idf_sys::EspError;
+use esp_idf_sys::*;
 use std::ffi::{c_char, CStr, CString};
 use std::fmt::Write;
 use std::ops::Deref;
 use std::ptr;
-use std::sync::mpsc::{Receiver, sync_channel, SyncSender};
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
-use esp_idf_sys::*;
-use esp_idf_sys::EspError;
-use crate::private::common::Newtype;
-use crate::private::mutex;
-use crate::wifi::EspWifi;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 static EVENTS_TX: mutex::Mutex<Option<SyncSender<DppEvent>>> =
     mutex::Mutex::wrap(mutex::RawMutex::new(), None);
@@ -40,10 +40,7 @@ impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
         *dpp_event_relay = Some(events_tx);
         drop(dpp_event_relay);
         esp!(unsafe { esp_supp_dpp_init(Some(Self::dpp_event_cb_unsafe)) })?;
-        Ok(Self {
-            wifi,
-            events_rx,
-        })
+        Ok(Self { wifi, events_rx })
     }
 
     /// Generate a QR code that can be scanned by a mobile phone or other configurator
@@ -64,46 +61,41 @@ impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
         &'b mut self,
         channels: &[u8],
         key: Option<&[u8; 32]>,
-        associated_data: Option<&[u8]>
+        associated_data: Option<&[u8]>,
     ) -> Result<EspDppBootstrapped<'b, QrCode>, EspError> {
-        let mut channels_str = channels.into_iter()
-            .fold(String::new(), |mut a, c| {
-                write!(a, "{c},").unwrap();
-                a
-            });
+        let mut channels_str = channels.into_iter().fold(String::new(), |mut a, c| {
+            write!(a, "{c},").unwrap();
+            a
+        });
         channels_str.pop();
         let channels_cstr = CString::new(channels_str).unwrap();
         let key_ascii_cstr = key.map(|k| {
-            let result = k.iter()
-                .fold(String::new(), |mut a, b| {
-                    write!(a, "{b:02X}").unwrap();
-                    a
-                });
+            let result = k.iter().fold(String::new(), |mut a, b| {
+                write!(a, "{b:02X}").unwrap();
+                a
+            });
             CString::new(result).unwrap()
         });
         let associated_data_cstr = match associated_data {
-            Some(associated_data) => {
-                Some(CString::new(associated_data)
-                    .map_err(|_| {
-                        warn!("associated data contains an embedded NUL character!");
-                        EspError::from_infallible::<ESP_ERR_INVALID_ARG>()
-                    })?)
-            }
+            Some(associated_data) => Some(CString::new(associated_data).map_err(|_| {
+                warn!("associated data contains an embedded NUL character!");
+                EspError::from_infallible::<ESP_ERR_INVALID_ARG>()
+            })?),
             None => None,
         };
         debug!("dpp_bootstrap_gen...");
         esp!(unsafe {
-      esp_supp_dpp_bootstrap_gen(
-          channels_cstr.as_ptr(),
-          dpp_bootstrap_type_DPP_BOOTSTRAP_QR_CODE,
-          key_ascii_cstr.map_or_else(ptr::null, |x| x.as_ptr()),
-          associated_data_cstr.map_or_else(ptr::null, |x| x.as_ptr()))
-    })?;
-        let event = self.events_rx.recv()
-            .map_err(|_| {
-                warn!("Internal error receiving event!");
-                EspError::from_infallible::<ESP_ERR_INVALID_STATE>()
-            })?;
+            esp_supp_dpp_bootstrap_gen(
+                channels_cstr.as_ptr(),
+                dpp_bootstrap_type_DPP_BOOTSTRAP_QR_CODE,
+                key_ascii_cstr.map_or_else(ptr::null, |x| x.as_ptr()),
+                associated_data_cstr.map_or_else(ptr::null, |x| x.as_ptr()),
+            )
+        })?;
+        let event = self.events_rx.recv().map_err(|_| {
+            warn!("Internal error receiving event!");
+            EspError::from_infallible::<ESP_ERR_INVALID_STATE>()
+        })?;
         debug!("dpp_bootstrap_gen got: {event:?}");
         match event {
             DppEvent::UriReady(qrcode) => {
@@ -117,7 +109,7 @@ impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
             _ => {
                 warn!("Got unexpected event: {event:?}");
                 Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())
-            },
+            }
         }
     }
 
@@ -126,9 +118,10 @@ impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
             Configuration::Client(c) => c,
             _ => {
                 let fallback_config = ClientConfiguration::default();
-                self.wifi.set_configuration(&Configuration::Client(fallback_config.clone()))?;
+                self.wifi
+                    .set_configuration(&Configuration::Client(fallback_config.clone()))?;
                 fallback_config
-            },
+            }
         };
         if !self.wifi.is_started()? {
             self.wifi.start()?;
@@ -138,19 +131,19 @@ impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
 
     unsafe extern "C" fn dpp_event_cb_unsafe(
         evt: esp_supp_dpp_event_t,
-        data: *mut ::core::ffi::c_void
+        data: *mut ::core::ffi::c_void,
     ) {
         debug!("dpp_event_cb_unsafe: evt={evt}");
         let event = match evt {
             esp_supp_dpp_event_t_ESP_SUPP_DPP_URI_READY => {
                 DppEvent::UriReady(CStr::from_ptr(data as *mut c_char).to_str().unwrap().into())
-            },
+            }
             esp_supp_dpp_event_t_ESP_SUPP_DPP_CFG_RECVD => {
                 let config = data as *mut wifi_config_t;
                 // TODO: We're losing pmf_cfg.required=true setting due to missing
                 // information in ClientConfiguration.
                 DppEvent::ConfigurationReceived(Newtype((*config).sta).into())
-            },
+            }
             esp_supp_dpp_event_t_ESP_SUPP_DPP_FAIL => {
                 DppEvent::Fail(EspError::from(data as esp_err_t).unwrap())
             }
@@ -171,7 +164,6 @@ fn dpp_event_cb(event: DppEvent) {
         None => warn!("Got spurious {event:?} ???"),
     }
 }
-
 
 #[derive(Debug)]
 enum DppEvent {
@@ -197,11 +189,10 @@ pub struct QrCode(pub String);
 impl<'d, T> EspDppBootstrapped<'d, T> {
     pub fn listen_once(&self) -> Result<ClientConfiguration, EspError> {
         esp!(unsafe { esp_supp_dpp_start_listen() })?;
-        let event = self.events_rx.recv()
-            .map_err(|e| {
-                warn!("Internal receive error: {e}");
-                EspError::from_infallible::<ESP_ERR_INVALID_STATE>()
-            })?;
+        let event = self.events_rx.recv().map_err(|e| {
+            warn!("Internal receive error: {e}");
+            EspError::from_infallible::<ESP_ERR_INVALID_STATE>()
+        })?;
         match event {
             DppEvent::ConfigurationReceived(config) => Ok(config),
             DppEvent::Fail(e) => Err(e),

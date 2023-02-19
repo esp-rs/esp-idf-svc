@@ -25,14 +25,6 @@
 #[macro_use]
 extern crate alloc;
 
-#[cfg(all(
-    feature = "alloc",
-    esp_idf_comp_wpa_supplicant_enabled,
-    any(
-        esp_idf_esp_wifi_dpp_support,
-        esp_idf_wpa_dpp_support
-    )))]
-pub mod wifi_dpp;
 pub mod errors;
 #[cfg(all(
     feature = "alloc",
@@ -100,6 +92,12 @@ pub mod tls;
     esp_idf_comp_esp_event_enabled,
 ))]
 pub mod wifi;
+#[cfg(all(
+    feature = "alloc",
+    esp_idf_comp_wpa_supplicant_enabled,
+    any(esp_idf_esp_wifi_dpp_support, esp_idf_wpa_dpp_support)
+))]
+pub mod wifi_dpp;
 pub mod ws;
 
 mod private;
