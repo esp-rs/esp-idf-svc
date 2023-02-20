@@ -26,10 +26,8 @@ pub struct EspDppBootstrapper<'d, 'w> {
 
 impl<'d, 'w> EspDppBootstrapper<'d, 'w> {
     pub fn new(wifi: &'d mut EspWifi<'w>) -> Result<Self, EspError> {
-        if wifi.is_started()? {
-            wifi.disconnect()?;
-            wifi.stop()?;
-        }
+        let _ = wifi.disconnect();
+        let _ = wifi.stop();
 
         Self::init(wifi)
     }
