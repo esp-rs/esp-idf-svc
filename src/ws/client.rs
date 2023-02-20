@@ -119,7 +119,7 @@ pub enum WebSocketEventType<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
     Ping,
-    Pong
+    Pong,
 }
 
 impl<'a> WebSocketEventType<'a> {
