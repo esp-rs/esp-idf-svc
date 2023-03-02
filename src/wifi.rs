@@ -1141,7 +1141,7 @@ impl<'d> EspWifi<'d> {
         &mut self,
         channels: &[u8],
         key: Option<&[u8; 32]>,
-        associated_data: Option<&[u8]>
+        associated_data: Option<&[u8]>,
     ) -> Result<EspWifiDpp<'_, 'd, QrCode>, EspError> {
         EspWifiDpp::generate_qrcode(self, channels, key, associated_data)
     }

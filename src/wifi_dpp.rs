@@ -41,19 +41,19 @@
 //! }
 //! ```
 
+use alloc::sync::Arc;
+use alloc::sync::Weak;
 use core::fmt::Write;
 use core::marker::PhantomData;
 use core::mem;
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 use core::time::Duration;
-use alloc::sync::Arc;
-use alloc::sync::Weak;
 
 use ::log::*;
 use embedded_svc::wifi::{ClientConfiguration, Configuration};
-use esp_idf_sys::*;
 use esp_idf_sys::EspError;
+use esp_idf_sys::*;
 
 use crate::private::common::Newtype;
 use crate::private::cstr::*;
@@ -117,19 +117,23 @@ impl DppInitialized {
                 match ptr::NonNull::new(data as *mut c_char) {
                     None => {
                         warn!("Unknown input error from esp_dpp: null uri provided!");
-                        Some(DppState::Fail(EspError::from_infallible::<ESP_ERR_INVALID_ARG>()))
-                    },
+                        Some(DppState::Fail(EspError::from_infallible::<
+                            ESP_ERR_INVALID_ARG,
+                        >()))
+                    }
                     Some(ptr) => {
                         let rust_str = from_cstr_ptr(ptr.as_ptr()).into();
                         Some(DppState::BootstrappedUriReady(rust_str))
                     }
                 }
-            },
+            }
             esp_supp_dpp_event_t_ESP_SUPP_DPP_CFG_RECVD => {
                 let config = data as *mut wifi_config_t;
                 // TODO: We're losing pmf_cfg.required=true setting due to missing
                 // information in ClientConfiguration.
-                Some(DppState::ConfigurationReceived(Newtype((*config).sta).into()))
+                Some(DppState::ConfigurationReceived(
+                    Newtype((*config).sta).into(),
+                ))
             }
             esp_supp_dpp_event_t_ESP_SUPP_DPP_FAIL => {
                 Some(DppState::Fail(EspError::from(data as esp_err_t).unwrap()))
@@ -157,9 +161,7 @@ impl DppInitialized {
 
     fn wait_for_next_state(&self) -> DppState {
         self.pending
-            .wait_while_and_get_mut(
-                |state| state.is_none(),
-                |state| state.take().unwrap())
+            .wait_while_and_get_mut(|state| state.is_none(), |state| state.take().unwrap())
     }
 
     fn wait_for_next_state_with_timeout(&self, timeout: Duration) -> Option<DppState> {
@@ -242,7 +244,7 @@ impl<'d, 'w> EspWifiDpp<'d, 'w, QrCode> {
                     bootstrapped_data: QrCode(qrcode),
                     _phantom: PhantomData,
                 })
-            },
+            }
             DppState::Fail(e) => Err(e),
             other => Err(unexpected_state(other)),
         }
@@ -281,8 +283,12 @@ impl<'d, 'w> EspWifiDpp<'d, 'w, QrCode> {
             esp_supp_dpp_bootstrap_gen(
                 channels_cstr.as_ptr(),
                 dpp_bootstrap_type_DPP_BOOTSTRAP_QR_CODE,
-                key_ascii_cstr.as_ref().map_or_else(ptr::null, |x| x.as_ptr()),
-                associated_data_cstr.as_ref().map_or_else(ptr::null, |x| x.as_ptr()),
+                key_ascii_cstr
+                    .as_ref()
+                    .map_or_else(ptr::null, |x| x.as_ptr()),
+                associated_data_cstr
+                    .as_ref()
+                    .map_or_else(ptr::null, |x| x.as_ptr()),
             )
         })?;
 
@@ -313,9 +319,7 @@ impl<'d, 'w, T> EspWifiDppListener<'d, 'w, T> {
     fn start_listen(bootstrapped: EspWifiDpp<'d, 'w, T>) -> Result<Self, EspError> {
         info!("Starting DPP listener...");
         esp!(unsafe { esp_supp_dpp_start_listen() })?;
-        Ok(Self {
-            bootstrapped,
-        })
+        Ok(Self { bootstrapped })
     }
 
     /// Blocking wait for credentials or a possibly retryable error.  Note that user error
@@ -332,11 +336,15 @@ impl<'d, 'w, T> EspWifiDppListener<'d, 'w, T> {
         &self,
         timeout: Duration,
     ) -> Result<ClientConfiguration, Option<EspError>> {
-        match self.bootstrapped.dpp.wait_for_next_state_with_timeout(timeout) {
+        match self
+            .bootstrapped
+            .dpp
+            .wait_for_next_state_with_timeout(timeout)
+        {
             None => {
                 self.stop_listen();
                 Err(None)
-            },
+            }
             Some(state) => Ok(self.handle_next_state(state)?),
         }
     }
@@ -352,7 +360,7 @@ impl<'d, 'w, T> EspWifiDppListener<'d, 'w, T> {
             other => {
                 self.stop_listen();
                 Err(unexpected_state(other))
-            },
+            }
         }
     }
 
@@ -388,23 +396,21 @@ impl<'d, 'w, T> EspWifiDppListener<'d, 'w, T> {
     }
 
     // TODO: Sure would be nice to be able to write esp_idf_version >= 5.1...
-    #[cfg(
-        any(
-            esp_idf_version_major = "4",
-            all(esp_idf_version_major = "5", esp_idf_version_minor = "0")
-        )
-    )]
-    fn is_start_listen_patched() -> bool { false }
+    #[cfg(any(
+        esp_idf_version_major = "4",
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "0")
+    ))]
+    fn is_start_listen_patched() -> bool {
+        false
+    }
 
-    #[cfg(
-        not(
-            any(
-                esp_idf_version_major = "4",
-                all(esp_idf_version_major = "5", esp_idf_version_minor = "0")
-            )
-        )
-    )]
-    fn is_start_listen_patched() -> bool { true }
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "0")
+    )))]
+    fn is_start_listen_patched() -> bool {
+        true
+    }
 }
 
 fn unexpected_state(state: DppState) -> EspError {
@@ -432,7 +438,9 @@ fn frame_key(unframed: &[u8; 32]) -> &[u8] {
 /// ESP-IDF 5.x requires the caller put the key into the PEM format
 fn frame_key(unframed: &[u8; 32]) -> Vec<u8> {
     let prefix = [0x30, 0x31, 0x02, 0x01, 0x01, 0x04, 0x20];
-    let postfix = [0xa0, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
+    let postfix = [
+        0xa0, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+    ];
 
     let mut ret = Vec::with_capacity(prefix.len() + unframed.len() + postfix.len());
     ret.extend(prefix);
