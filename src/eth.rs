@@ -295,13 +295,9 @@ impl<'d> EthDriver<'d> {
     esp_idf_eth_spi_ethernet_ksz8851snl
 ))]
 impl<'d> EthDriver<'d> {
-    pub fn new_spi<P: spi::Spi + 'd>(
-        spi: impl Peripheral<P = P> + 'd,
+    pub fn new_spi(
+        spi_driver: &spi::SpiDriver<'d>,
         int: impl Peripheral<P = impl gpio::InputPin> + 'd,
-        sclk: impl Peripheral<P = impl gpio::OutputPin> + 'd,
-        sdo: impl Peripheral<P = impl gpio::OutputPin> + 'd,
-        sdi: impl Peripheral<P = impl gpio::InputPin + gpio::OutputPin> + 'd,
-        dma: esp_idf_hal::spi::Dma,
         cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         chipset: SpiEthChipset,
@@ -310,27 +306,23 @@ impl<'d> EthDriver<'d> {
         phy_addr: Option<u32>,
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
-        esp_idf_hal::into_ref!(spi, int, sclk, sdo, sdi);
+        esp_idf_hal::into_ref!(int);
 
-        let (mac, phy, spi_device) = Self::init_spi::<P>(
+        let (mac, phy, spi_device) = Self::init_spi(
+            spi_driver.host(),
             chipset,
             baudrate,
             int.pin(),
-            sclk.pin(),
-            sdo.pin(),
-            sdi.pin(),
-            dma,
             cs.map(|pin| pin.into_ref().pin()),
             rst.map(|pin| pin.into_ref().pin()),
             phy_addr,
         )?;
 
         let eth = Self::init(
-            spi,
             mac,
             phy,
             mac_addr,
-            Some(P::device()),
+            Some(spi_driver.host()),
             spi_device,
             sysloop,
         )?;
@@ -338,14 +330,11 @@ impl<'d> EthDriver<'d> {
         Ok(eth)
     }
 
-    fn init_spi<P: spi::Spi>(
+    fn init_spi(
+        host: spi_host_device_t,
         chipset: SpiEthChipset,
         baudrate: Hertz,
         int: i32,
-        sclk: i32,
-        sdo: i32,
-        sdi: i32,
-        dma: esp_idf_hal::spi::Dma,
         cs: Option<i32>,
         rst: Option<i32>,
         phy_addr: Option<u32>,
@@ -357,7 +346,7 @@ impl<'d> EthDriver<'d> {
         ),
         EspError,
     > {
-        Self::init_spi_bus::<P>(sclk, sdo, sdi, dma)?;
+        unsafe { gpio_install_isr_service(0) };
 
         let mac_cfg = EthDriver::eth_mac_default_config(0, 0);
         let phy_cfg = EthDriver::eth_phy_default_config(rst.map(|pin| pin), phy_addr);
@@ -368,7 +357,7 @@ impl<'d> EthDriver<'d> {
                 let spi_devcfg = Self::get_spi_conf(cs, 1, 7, baudrate);
 
                 #[cfg(esp_idf_version_major = "4")]
-                let spi_handle = Some(Self::init_spi_device::<P>(&spi_devcfg)?);
+                let spi_handle = Some(Self::init_spi_device(host, &spi_devcfg)?);
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let spi_handle = None;
@@ -396,7 +385,7 @@ impl<'d> EthDriver<'d> {
                 let spi_devcfg = Self::get_spi_conf(cs, 16, 8, baudrate);
 
                 #[cfg(esp_idf_version_major = "4")]
-                let spi_handle = Some(Self::init_spi_device::<P>(&spi_devcfg)?);
+                let spi_handle = Some(Self::init_spi_device(host, &spi_devcfg)?);
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let spi_handle = None;
@@ -424,7 +413,7 @@ impl<'d> EthDriver<'d> {
                 let spi_devcfg = Self::get_spi_conf(cs, 0, 0, baudrate);
 
                 #[cfg(esp_idf_version_major = "4")]
-                let spi_handle = Some(Self::init_spi_device::<P>(&spi_devcfg)?);
+                let spi_handle = Some(Self::init_spi_device(host, &spi_devcfg)?);
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let spi_handle = None;
@@ -470,76 +459,20 @@ impl<'d> EthDriver<'d> {
     }
 
     #[cfg(esp_idf_version_major = "4")]
-    fn init_spi_device<P: spi::Spi>(
+    fn init_spi_device(
+        host: spi_host_device_t,
         conf: &spi_device_interface_config_t,
     ) -> Result<spi_device_handle_t, EspError> {
         let mut spi_handle: spi_device_handle_t = ptr::null_mut();
 
-        esp!(unsafe { spi_bus_add_device(P::device(), conf, &mut spi_handle) })?;
+        esp!(unsafe { spi_bus_add_device(host, conf, &mut spi_handle) })?;
 
         Ok(spi_handle)
-    }
-
-    fn init_spi_bus<P: spi::Spi>(
-        sclk: i32,
-        sdo: i32,
-        sdi: i32,
-        dma: esp_idf_hal::spi::Dma,
-    ) -> Result<(), EspError> {
-        unsafe { gpio_install_isr_service(0) };
-
-        #[cfg(not(esp_idf_version = "4.3"))]
-        let bus_config = spi_bus_config_t {
-            flags: SPICOMMON_BUSFLAG_MASTER,
-            sclk_io_num: sclk,
-
-            data4_io_num: -1,
-            data5_io_num: -1,
-            data6_io_num: -1,
-            data7_io_num: -1,
-            __bindgen_anon_1: spi_bus_config_t__bindgen_ty_1 {
-                mosi_io_num: sdo,
-                //data0_io_num: -1,
-            },
-            __bindgen_anon_2: spi_bus_config_t__bindgen_ty_2 {
-                miso_io_num: sdi,
-                //data1_io_num: -1,
-            },
-            __bindgen_anon_3: spi_bus_config_t__bindgen_ty_3 {
-                quadwp_io_num: -1,
-                //data2_io_num: -1,
-            },
-            __bindgen_anon_4: spi_bus_config_t__bindgen_ty_4 {
-                quadhd_io_num: -1,
-                //data3_io_num: -1,
-            },
-            max_transfer_sz: dma.max_transfer_size() as _,
-            ..Default::default()
-        };
-
-        #[cfg(esp_idf_version = "4.3")]
-        let bus_config = spi_bus_config_t {
-            flags: SPICOMMON_BUSFLAG_MASTER,
-            sclk_io_num: sclk,
-
-            mosi_io_num: sdo,
-            miso_io_num: sdi,
-            quadwp_io_num: -1,
-            quadhd_io_num: -1,
-
-            max_transfer_sz: dma.max_transfer_size() as _,
-            ..Default::default()
-        };
-
-        esp!(unsafe { spi_bus_initialize(P::device(), &bus_config, dma.into()) })?;
-
-        Ok(())
     }
 }
 
 impl<'d> EthDriver<'d> {
-    fn init<P>(
-        _peripheral: PeripheralRef<'d, P>,
+    fn init(
         mac: *mut esp_eth_mac_t,
         phy: *mut esp_eth_phy_t,
         mac_addr: Option<&[u8; 6]>,
