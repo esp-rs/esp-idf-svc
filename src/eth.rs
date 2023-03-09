@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 
 use embedded_svc::eth::*;
 
-use esp_idf_hal::peripheral::{Peripheral, PeripheralRef};
+use esp_idf_hal::peripheral::Peripheral;
 
 #[cfg(any(
     all(esp32, esp_idf_eth_use_esp32_emac),
@@ -170,7 +170,7 @@ pub struct EthDriver<'d> {
 impl<'d> EthDriver<'d> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_rmii(
-        mac: impl Peripheral<P = esp_idf_hal::mac::MAC> + 'd,
+        _mac: impl Peripheral<P = esp_idf_hal::mac::MAC> + 'd,
         _rmii_rdx0: impl Peripheral<P = gpio::Gpio25> + 'd,
         _rmii_rdx1: impl Peripheral<P = gpio::Gpio26> + 'd,
         _rmii_crs_dv: impl Peripheral<P = gpio::Gpio27> + 'd,
@@ -189,12 +189,11 @@ impl<'d> EthDriver<'d> {
         phy_addr: Option<u32>,
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
-        esp_idf_hal::into_ref!(mac, rmii_mdc, rmii_mdio);
+        esp_idf_hal::into_ref!(rmii_mdc, rmii_mdio);
 
         let rst = rst.map(|rst| rst.into_ref().pin());
 
         let eth = Self::init(
-            mac,
             Self::rmii_mac(rmii_mdc.pin(), rmii_mdio.pin(), &rmii_ref_clk_config),
             Self::rmii_phy(chipset, rst, phy_addr)?,
             None,
@@ -270,13 +269,10 @@ impl<'d> EthDriver<'d> {
 #[cfg(esp_idf_eth_use_openeth)]
 impl<'d> EthDriver<'d> {
     pub fn new_openeth(
-        mac: impl Peripheral<P = esp_idf_hal::mac::MAC> + 'd,
+        _mac: impl Peripheral<P = esp_idf_hal::mac::MAC> + 'd,
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
-        esp_idf_hal::into_ref!(mac);
-
         let eth = Self::init(
-            mac,
             unsafe { esp_eth_mac_new_openeth(&Self::eth_mac_default_config(0, 0)) },
             unsafe { esp_eth_phy_new_dp83848(&Self::eth_phy_default_config(None, None)) },
             None,
