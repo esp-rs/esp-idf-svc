@@ -664,7 +664,7 @@ impl<'d> WifiDriver<'d> {
     /// let _sub = {
     ///     let scan_finish_signal = scan_finish_signal.clone();
     ///     sysloop.subscribe::<WifiEvent>(move |event| {
-    ///         if event == WifiEvent::ScanDone {
+    ///         if *event == WifiEvent::ScanDone {
     ///             scan_finish_signal.notify();
     ///         }
     ///     }).unwrap()
