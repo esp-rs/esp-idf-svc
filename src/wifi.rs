@@ -601,14 +601,12 @@ impl<'d> WifiDriver<'d> {
         Ok(())
     }
 
-    /// Scan for nearby, visible wifi access points.
+    /// Scan for nearby, visible access points.
     ///
     /// It scans for all available access points nearby, but returns only the first `N` access points found.
     /// In addition, it returns the actual amount it found. The function blocks until the scan is done.
     ///
-    /// Before calling this function the wifi driver must be configured and started in either Client or AccessPoint mode.
-    ///
-    /// [ESP-DOC Ref](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html?highlight=wifi%20scan#esp32-wi-fi-scan)
+    /// Before calling this function the Wifi driver must be configured and started in either Client or Mixed mode.
     ///
     /// # Example
     /// ```ignore
@@ -629,7 +627,7 @@ impl<'d> WifiDriver<'d> {
         self.get_scan_result_n()
     }
 
-    /// Scan for nearby, visible wifi access points.
+    /// Scan for nearby, visible access points.
     ///
     /// Unlike [`WifiDriver::scan_n()`], it returns all found access points by allocating memory
     /// dynamically.
@@ -642,7 +640,7 @@ impl<'d> WifiDriver<'d> {
         self.get_scan_result()
     }
 
-    /// Start scanning for nearby, visible wifi access points.
+    /// Start scanning for nearby, visible access points.
     ///
     /// Unlike [`WifiDriver::scan_n()`] or [`WifiDriver::scan()`] it can be called as either blocking or not blocking.
     /// A [`ScanConfig`] can be provided as well. To get the scan result call either [`WifiDriver::get_scan_result_n()`] or
@@ -1146,7 +1144,7 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().disconnect()
     }
 
-    /// Scan for nearby, visible wifi access points.
+    /// Scan for nearby, visible access points.
     ///
     /// For more details see [`WifiDriver::scan_n()`].
     pub fn scan_n<const N: usize>(
@@ -1155,7 +1153,7 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().scan_n()
     }
 
-    /// Scan for nearby, visible wifi access points.
+    /// Scan for nearby, visible access points.
     ///
     /// For more details see [`WifiDriver::scan()`].
     #[cfg(feature = "alloc")]
@@ -1163,7 +1161,7 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().scan()
     }
 
-    /// Start scanning for nearby, visible wifi access points.
+    /// Start scanning for nearby, visible access points.
     ///
     /// For more details see [`WifiDriver::start_scan()`].
     pub fn start_scan(
