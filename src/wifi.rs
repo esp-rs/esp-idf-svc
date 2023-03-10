@@ -611,11 +611,11 @@ impl<'d> WifiDriver<'d> {
     /// # Example
     /// ```ignore
     /// let mut wifi_driver = WifiDriver::new(peripherals.modem, sysloop.clone());
-    /// wifi_driver.start().unwrap();
     /// wifi_driver.set_configuration(
     ///     &Configuration::Client(ClientConfiguration::default())
     /// )
     /// .unwrap();
+    /// wifi_driver.start().unwrap();
     ///
     /// let (scan_result, found_aps) = wifi_driver.scan_n::<10>().unwrap();
     /// ```
@@ -654,11 +654,11 @@ impl<'d> WifiDriver<'d> {
     ///
     /// ```ignore
     /// let mut wifi_driver = WifiDriver::new(peripherals.modem, sysloop.clone());
-    /// wifi_driver.start().unwrap();
     /// wifi_driver.set_configuration(
     ///     &Configuration::Client(ClientConfiguration::default())
     /// )
     /// .unwrap();
+    /// wifi_driver.start().unwrap();
     ///
     /// let scan_finish_signal = Arc::new(channel_bridge::notification::Notification::new());
     /// let _sub = {
