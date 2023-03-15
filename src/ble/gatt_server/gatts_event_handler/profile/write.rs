@@ -94,7 +94,7 @@ impl Profile {
                                     );
 
                                     if let Some(write_callback) =
-                                        descriptor.read().unwrap().write_callback
+                                        descriptor.read().unwrap().write_callback.clone()
                                     {
                                         let value = unsafe {
                                             std::slice::from_raw_parts(

@@ -14,6 +14,15 @@ fn main() {
 
     info!("Logger initialised.");
 
+    let nvs_storage = EspDefaultNvs::new(
+        EspDefaultNvsPartition::take()
+            .expect("Cannot initialise the default NVS. Did you declare an NVS partition?"),
+        "ble",
+        true,
+    )
+    .expect("Cannot create a new NVS storage. Did you declare an NVS partition?");
+    let nvs_storage = Some(Arc::new(Mutex::new(nvs_storage)));
+
     let char_value_write: Arc<RwLock<Vec<u8>>> =
         Arc::new(RwLock::new("Initial value".as_bytes().to_vec()));
     let char_value_read = char_value_write.clone();
@@ -40,6 +49,7 @@ fn main() {
     .max_value_length(20)
     .show_name()
     .set_value("Initial value.".as_bytes().to_vec())
+    .set_nvs_storage(nvs_storage.clone())
     .build();
 
     // A characteristic that notifies every second.
@@ -52,6 +62,7 @@ fn main() {
     .max_value_length(20)
     .show_name()
     .set_value("Initial value.".as_bytes().to_vec())
+    .set_nvs_storage(nvs_storage)
     .build();
 
     // A writable characteristic.
@@ -93,7 +104,7 @@ fn main() {
         .unwrap()
         .profile(profile)
         .device_name("ESP32-GATT-Server")
-        .appearance(esp_idf_svc::ble::utilities::Appearance::WristWornPulseOximeter)
+        .appearance(ble::utilities::Appearance::WristWornPulseOximeter)
         .advertise_service(&service)
         .start();
 
