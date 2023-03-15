@@ -198,16 +198,6 @@ impl GattServer {
     fn initialise_ble_stack() {
         info!("Initialising BLE stack.");
 
-        // NVS initialisation.
-        unsafe {
-            let result = nvs_flash_init();
-            if result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND {
-                warn!("NVS initialisation failed. Erasing NVS.");
-                esp_nofail!(nvs_flash_erase());
-                esp_nofail!(nvs_flash_init());
-            }
-        }
-
         #[cfg(esp32)]
         let default_controller_configuration = esp_bt_controller_config_t {
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as _,
