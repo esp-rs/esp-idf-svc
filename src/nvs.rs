@@ -51,7 +51,7 @@ impl NvsDefault {
                     esp!(unsafe { nvs_flash_erase() })?;
                     esp!(unsafe { nvs_flash_init() })?;
                 }
-                _ => (),
+                _ => return Err(err),
             }
         }
 
@@ -100,7 +100,7 @@ impl NvsCustom {
                         esp!(nvs_flash_erase_partition(c_partition.as_ptr()))?;
                         esp!(nvs_flash_init_partition(c_partition.as_ptr()))?;
                     }
-                    _ => (),
+                    _ => return Err(err),
                 }
             }
         }
