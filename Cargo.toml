@@ -20,7 +20,7 @@ std = ["alloc", "anyhow/std", "log/std", "esp-idf-sys/std", "esp-idf-hal/std", "
 alloc = ["anyhow", "esp-idf-hal/alloc", "embedded-svc/alloc"]
 nightly = ["embedded-svc/nightly"]
 experimental = ["embedded-svc/experimental"]
-embassy-time-driver = ["embassy-time"]
+embassy-time-driver = ["embassy-time", "esp-idf-hal/embassy-sync"]
 embassy-time-isr-queue = ["embassy-sync", "embassy-time", "esp-idf-hal/embassy-sync"]
 
 [dependencies]
