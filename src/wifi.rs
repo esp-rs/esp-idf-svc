@@ -11,6 +11,9 @@ use ::log::*;
 
 use enumset::*;
 
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+use embedded_svc::wifi::asynch;
+
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::modem::WifiModemPeripheral;
@@ -1509,5 +1512,112 @@ impl WifiWait {
         ) {
             waitable.cvar.notify_all();
         }
+    }
+}
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+pub struct EspAsyncWifiDriver<'d> {
+    sync: WifiDriver<'d>,
+}
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+impl<'d> EspAsyncWifiDriver<'d> {
+    #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
+    pub fn new<M: WifiModemPeripheral>(
+        modem: impl Peripheral<P = M> + 'd,
+        sysloop: EspSystemEventLoop,
+        nvs: Option<EspDefaultNvsPartition>,
+    ) -> Result<Self, EspError> {
+        Ok(EspAsyncWifiDriver {
+            sync: WifiDriver::new(modem, sysloop, nvs)?,
+        })
+    }
+}
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+impl<'d> asynch::Wifi for EspAsyncWifiDriver<'d> {
+    type Error = EspError;
+
+    type GetCapabilitiesFuture<'a>
+    = futures::future::Ready<Result<EnumSet<Capability>, Self::Error>> where Self: 'a;
+
+    type GetConfigurationFuture<'a> = futures::future::Ready<Result<Configuration, Self::Error>> where Self: 'a;
+
+    type SetConfigurationFuture<'a> = futures::future::Ready<Result<(), Self::Error>> where Self: 'a;
+
+    type StartFuture<'a> = futures::future::Ready<Result<(), Self::Error>>
+    where
+        Self: 'a;
+
+    type StopFuture<'a> = futures::future::Ready<Result<(), Self::Error>>
+    where
+        Self: 'a;
+
+    type ConnectFuture<'a> = futures::future::Ready<Result<(), Self::Error>>
+    where
+        Self: 'a;
+
+    type DisconnectFuture<'a> = futures::future::Ready<Result<(), Self::Error>>
+    where
+        Self: 'a;
+
+    type IsStartedFuture<'a> = futures::future::Ready<Result<bool, Self::Error>>
+    where
+        Self: 'a;
+
+    type IsConnectedFuture<'a> = futures::future::Ready<Result<bool, Self::Error>>
+    where
+        Self: 'a;
+
+    type ScanNFuture<'a, const N: usize> = futures::future::Ready<Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error>>
+    where
+        Self: 'a;
+
+    type ScanFuture<'a> = futures::future::Ready<Result<alloc::vec::Vec<AccessPointInfo>, Self::Error>>
+    where
+        Self: 'a;
+
+    fn get_capabilities(&self) -> Self::GetCapabilitiesFuture<'_> {
+        futures::future::ready(self.sync.get_capabilities())
+    }
+
+    fn get_configuration(&self) -> Self::GetConfigurationFuture<'_> {
+        futures::future::ready(self.sync.get_configuration())
+    }
+
+    fn set_configuration(&mut self, conf: &Configuration) -> Self::SetConfigurationFuture<'_> {
+        futures::future::ready(self.sync.set_configuration(conf))
+    }
+
+    fn start(&mut self) -> Self::StartFuture<'_> {
+        futures::future::ready(self.sync.start())
+    }
+
+    fn stop(&mut self) -> Self::StopFuture<'_> {
+        futures::future::ready(self.sync.stop())
+    }
+
+    fn connect(&mut self) -> Self::ConnectFuture<'_> {
+        futures::future::ready(self.sync.connect())
+    }
+
+    fn disconnect(&mut self) -> Self::DisconnectFuture<'_> {
+        futures::future::ready(self.sync.disconnect())
+    }
+
+    fn is_started(&self) -> Self::IsStartedFuture<'_> {
+        futures::future::ready(self.sync.is_started())
+    }
+
+    fn is_connected(&self) -> Self::IsConnectedFuture<'_> {
+        futures::future::ready(self.sync.is_connected())
+    }
+
+    fn scan_n<const N: usize>(&mut self) -> Self::ScanNFuture<'_, N> {
+        futures::future::ready(self.sync.scan_n())
+    }
+
+    fn scan(&mut self) -> Self::ScanFuture<'_> {
+        futures::future::ready(self.sync.scan())
     }
 }
