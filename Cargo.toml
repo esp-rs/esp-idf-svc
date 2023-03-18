@@ -33,6 +33,7 @@ embassy-time-isr-queue = [
     "embassy-time",
     "esp-idf-hal/embassy-sync",
 ]
+async = ["embedded-svc/nightly", "embedded-svc/experimental"]
 
 [dependencies]
 heapless = { version = "0.7", default-features = false }
@@ -60,3 +61,7 @@ anyhow = "1"
 [[example]]
 name = "http_request"
 required-features = ["experimental"]
+
+[[example]]
+name = "wifi_async"
+required-features = ["async"]

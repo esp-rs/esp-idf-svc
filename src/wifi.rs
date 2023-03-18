@@ -11,7 +11,7 @@ use ::log::*;
 
 use enumset::*;
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+#[cfg(feature = "async")]
 use embedded_svc::wifi::asynch;
 
 use embedded_svc::wifi::*;
@@ -1446,12 +1446,12 @@ impl WifiWait {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+#[cfg(all(feature = "async"))]
 pub struct EspAsyncWifiDriver<'d> {
     sync: WifiDriver<'d>,
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+#[cfg(all(feature = "async"))]
 impl<'d> EspAsyncWifiDriver<'d> {
     #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
     pub fn new<M: WifiModemPeripheral>(
@@ -1465,7 +1465,7 @@ impl<'d> EspAsyncWifiDriver<'d> {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+#[cfg(all(feature = "async"))]
 impl<'d> asynch::Wifi for EspAsyncWifiDriver<'d> {
     type Error = EspError;
 
