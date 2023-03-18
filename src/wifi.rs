@@ -319,8 +319,12 @@ static mut RX_CALLBACK: Option<
 #[allow(clippy::type_complexity)]
 static mut TX_CALLBACK: Option<Box<dyn FnMut(WifiDeviceId, &[u8], bool) + 'static>> = None;
 
+type ApStatus = Arc<mutex::Mutex<WifiEvent>>;
+type StaStatus = Arc<mutex::Mutex<WifiEvent>>;
+
 pub struct WifiDriver<'d> {
-    status: Arc<mutex::Mutex<(WifiEvent, WifiEvent)>>,
+    ap_status: ApStatus,
+    sta_status: StaStatus,
     _subscription: EspSubscription<System>,
     #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
     _nvs: Option<EspDefaultNvsPartition>,
@@ -336,10 +340,11 @@ impl<'d> WifiDriver<'d> {
     ) -> Result<Self, EspError> {
         Self::init(nvs.is_some())?;
 
-        let (status, subscription) = Self::subscribe(&sysloop)?;
+        let (ap_status, sta_status, subscription) = Self::subscribe(&sysloop)?;
 
         Ok(Self {
-            status,
+            ap_status,
+            sta_status,
             _subscription: subscription,
             _nvs: nvs,
             _p: PhantomData,
@@ -353,10 +358,11 @@ impl<'d> WifiDriver<'d> {
     ) -> Result<Self, EspError> {
         Self::init(false)?;
 
-        let (status, subscription) = Self::subscribe(&sysloop)?;
+        let (ap_status, sta_status, subscription) = Self::subscribe(&sysloop)?;
 
         Ok(Self {
-            status,
+            ap_status,
+            sta_status,
             _subscription: subscription,
             _p: PhantomData,
         })
@@ -365,34 +371,34 @@ impl<'d> WifiDriver<'d> {
     #[allow(clippy::type_complexity)]
     fn subscribe(
         sysloop: &EspEventLoop<System>,
-    ) -> Result<
-        (
-            Arc<mutex::Mutex<(WifiEvent, WifiEvent)>>,
-            EspSubscription<System>,
-        ),
-        EspError,
-    > {
-        let status = Arc::new(mutex::Mutex::wrap(
+    ) -> Result<(ApStatus, StaStatus, EspSubscription<System>), EspError> {
+        let ap_status = Arc::new(mutex::Mutex::wrap(
             mutex::RawMutex::new(),
-            (WifiEvent::StaStopped, WifiEvent::ApStopped),
+            WifiEvent::ApStopped,
         ));
-        let s_status = status.clone();
+        let sta_status = Arc::new(mutex::Mutex::wrap(
+            mutex::RawMutex::new(),
+            WifiEvent::StaStopped,
+        ));
+
+        let s_ap_status_mutex = ap_status.clone();
+        let s_sta_status_mutex = sta_status.clone();
 
         let subscription = sysloop.subscribe(move |event: &WifiEvent| {
-            let mut guard = s_status.lock();
-
             match event {
-                WifiEvent::ApStarted => guard.1 = WifiEvent::ApStarted,
-                WifiEvent::ApStopped => guard.1 = WifiEvent::ApStopped,
-                WifiEvent::StaStarted => guard.0 = WifiEvent::StaStarted,
-                WifiEvent::StaStopped => guard.0 = WifiEvent::StaStopped,
-                WifiEvent::StaConnected => guard.0 = WifiEvent::StaConnected,
-                WifiEvent::StaDisconnected => guard.0 = WifiEvent::StaDisconnected,
+                WifiEvent::ApStarted | WifiEvent::ApStopped => {
+                    let mut ap_status = s_ap_status_mutex.lock();
+                    *ap_status = *event
+                }
+                WifiEvent::StaStarted | WifiEvent::StaStopped | WifiEvent::StaDisconnected => {
+                    let mut sta_status = s_sta_status_mutex.lock();
+                    *sta_status = *event
+                }
                 _ => (),
             };
         })?;
 
-        Ok((status, subscription))
+        Ok((ap_status, sta_status, subscription))
     }
 
     fn init(nvs_enabled: bool) -> Result<(), EspError> {
@@ -494,19 +500,19 @@ impl<'d> WifiDriver<'d> {
     }
 
     pub fn is_ap_started(&self) -> Result<bool, EspError> {
-        Ok(self.status.lock().1 == WifiEvent::ApStarted)
+        Ok(*self.ap_status.lock() == WifiEvent::ApStarted)
     }
 
     pub fn is_sta_started(&self) -> Result<bool, EspError> {
-        let guard = self.status.lock();
+        let sta_status = self.sta_status.lock();
 
-        Ok(guard.0 == WifiEvent::StaStarted
-            || guard.0 == WifiEvent::StaConnected
-            || guard.0 == WifiEvent::StaDisconnected)
+        Ok(*sta_status == WifiEvent::StaStarted
+            || *sta_status == WifiEvent::StaConnected
+            || *sta_status == WifiEvent::StaDisconnected)
     }
 
     pub fn is_sta_connected(&self) -> Result<bool, EspError> {
-        Ok(self.status.lock().0 == WifiEvent::StaConnected)
+        Ok(*self.sta_status.lock() == WifiEvent::StaConnected)
     }
 
     pub fn is_started(&self) -> Result<bool, EspError> {
@@ -530,10 +536,10 @@ impl<'d> WifiDriver<'d> {
         if !ap_enabled && !sta_enabled {
             Ok(false)
         } else {
-            let guard = self.status.lock();
+            let is_ap_started = self.is_ap_started()?;
+            let is_sta_connected = self.is_sta_connected()?;
 
-            Ok((!ap_enabled || guard.1 == WifiEvent::ApStarted)
-                && (!sta_enabled || guard.0 == WifiEvent::StaConnected))
+            Ok((!ap_enabled || is_ap_started) && (!sta_enabled || is_sta_connected))
         }
     }
 
