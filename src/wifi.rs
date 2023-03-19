@@ -18,8 +18,9 @@ use esp_idf_hal::peripheral::Peripheral;
 
 use esp_idf_sys::*;
 
-#[cfg(feature = "nightly")]
 use core::borrow::BorrowMut;
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+use futures::Future;
 
 use crate::eventloop::EspEventLoop;
 use crate::eventloop::{
@@ -1515,7 +1516,6 @@ impl WifiWait {
     }
 }
 
-#[cfg(feature = "nightly")]
 pub struct AsyncWifiDriver<'d, T>
 where
     T: BorrowMut<WifiDriver<'d>>,
@@ -1524,7 +1524,6 @@ where
     _p: PhantomData<WifiDriver<'d>>,
 }
 
-#[cfg(feature = "nightly")]
 impl<'d, T> AsyncWifiDriver<'d, T>
 where
     T: BorrowMut<WifiDriver<'d>>,
@@ -1591,7 +1590,7 @@ where
     }
 }
 
-#[cfg(all(feature = "nighty", feature = "experimental"))]
+#[cfg(all(feature = "nightly", feature = "experimental"))]
 impl<'d, T> asynch::Wifi for AsyncWifiDriver<'d, T>
 where
     T: BorrowMut<WifiDriver<'d>>,
@@ -1601,14 +1600,14 @@ where
     type GetCapabilitiesFuture<'a> = futures::future::Ready<Result<EnumSet<Capability>, EspError>> where Self: 'a;
     type GetConfigurationFuture<'a> = futures::future::Ready<Result<Configuration, EspError>> where Self: 'a;
     type SetConfigurationFuture<'a> = futures::future::Ready<Result<(), EspError>> where Self: 'a;
-    type StartFuture<'a> = Pin<Box<dyn futures::future::Future<Output = Result<(), EspError>> + 'a>> where Self: 'a;
-    type StopFuture<'a> = Pin<Box<dyn futures::future::Future<Output = Result<(), EspError>> + 'a>> where Self: 'a;
-    type ConnectFuture<'a> = Pin<Box<dyn futures::future::Future<Output = Result<(), EspError>> + 'a>> where Self: 'a;
-    type DisconnectFuture<'a> = Pin<Box<dyn futures::future::Future<Output = Result<(), EspError>> + 'a>> where Self: 'a;
     type IsStartedFuture<'a> = futures::future::Ready<Result<bool, EspError>> where Self: 'a;
     type IsConnectedFuture<'a> = futures::future::Ready<Result<bool, EspError>> where Self: 'a;
-    type ScanNFuture<'a, const N: usize> = Pin<Box<dyn futures::future::Future<Output = Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError>> + 'a>> where Self: 'a;
-    type ScanFuture<'a> = Pin<Box<dyn futures::future::Future<Output = Result<alloc::vec::Vec<AccessPointInfo>, EspError>> + 'a>> where Self: 'a;
+    type StartFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+    type StopFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+    type ConnectFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+    type DisconnectFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+    type ScanNFuture<'a, const N: usize> = impl Future<Output = Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error>> + 'a where Self: 'a;
+    type ScanFuture<'a> = impl Future<Output = Result<alloc::vec::Vec<AccessPointInfo>, Self::Error>> + 'a where Self: 'a;
 
     fn get_capabilities(&self) -> Self::GetCapabilitiesFuture<'_> {
         futures::future::ready(self.get_capabilities())
@@ -1623,20 +1622,19 @@ where
     }
 
     fn start(&mut self) -> Self::StartFuture<'_> {
-        // let a = self.start();
-        Box::pin(self.start())
+        self.start()
     }
 
     fn stop(&mut self) -> Self::StopFuture<'_> {
-        Box::pin(self.stop())
+        self.stop()
     }
 
     fn connect(&mut self) -> Self::ConnectFuture<'_> {
-        Box::pin(self.connect())
+        self.connect()
     }
 
     fn disconnect(&mut self) -> Self::DisconnectFuture<'_> {
-        Box::pin(self.disconnect())
+        self.disconnect()
     }
 
     fn is_started(&self) -> Self::IsStartedFuture<'_> {
@@ -1648,10 +1646,10 @@ where
     }
 
     fn scan_n<const N: usize>(&mut self) -> Self::ScanNFuture<'_, N> {
-        Box::pin(self.scan_n())
+        self.scan_n()
     }
 
     fn scan(&mut self) -> Self::ScanFuture<'_> {
-        Box::pin(self.scan())
+        self.scan()
     }
 }
