@@ -1515,7 +1515,7 @@ where
         self.base_driver.borrow_mut().scan_n()
     }
 
-    pub async fn scan(&mut self) -> Result<Vec<AccessPointInfo>, EspError> {
+    pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
         let base: &mut WifiDriver<'d> = self.base_driver.borrow_mut();
         base.scan()
     }
