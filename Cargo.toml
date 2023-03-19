@@ -22,7 +22,6 @@ nightly = ["embedded-svc/nightly"]
 experimental = ["embedded-svc/experimental"]
 embassy-time-driver = ["embassy-time"]
 embassy-time-isr-queue = ["embassy-sync", "embassy-time", "esp-idf-hal/embassy-sync"]
-async = ["embedded-svc/nightly", "embedded-svc/experimental", "nightly"]
 
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc.git" }
@@ -50,4 +49,4 @@ required-features = ["experimental"]
 
 [[example]]
 name = "wifi_async"
-required-features = ["async"]
+required-features = ["nightly"]
