@@ -1588,7 +1588,7 @@ where
     }
 
     pub async fn start(&mut self) -> Result<(), WifiError> {
-        self.event_wait_helper(
+        self.event_dual_wait_helper(
             WifiEvent::StaStarted,
             Ok(()),
             WifiEvent::StaStopped,
@@ -1599,30 +1599,28 @@ where
     }
 
     pub async fn stop(&mut self) -> Result<(), WifiError> {
-        self.event_wait_helper(
-            WifiEvent::StaStopped,
-            Ok(()),
-            WifiEvent::StaStarted,
-            Err(WifiError::Unknown),
-            |s: &mut Self| s.base_driver.borrow_mut().stop(),
-        )
+        self.event_wait(WifiEvent::StaStopped, |s: &mut Self| {
+            s.base_driver.borrow_mut().stop()
+        })
         .await
     }
 
     pub async fn connect(&mut self) -> Result<(), WifiError> {
-        self.base_driver
-            .borrow_mut()
-            .connect()
-            .map_err(|err| err.into())
-        // TODO: wait until connect is complete
+        self.event_dual_wait_helper(
+            WifiEvent::StaConnected,
+            Ok(()),
+            WifiEvent::StaDisconnected,
+            Err(WifiError::Disconnected),
+            |s: &mut Self| s.base_driver.borrow_mut().connect(),
+        )
+        .await
     }
 
     pub async fn disconnect(&mut self) -> Result<(), WifiError> {
-        self.base_driver
-            .borrow_mut()
-            .disconnect()
-            .map_err(|err| err.into())
-        // TODO: wait until stop is complete
+        self.event_wait(WifiEvent::StaDisconnected, |s: &mut Self| {
+            s.base_driver.borrow_mut().disconnect()
+        })
+        .await
     }
 
     pub async fn scan_n<const N: usize>(
@@ -1641,7 +1639,21 @@ where
         base.scan().map_err(|err| err.into())
     }
 
-    async fn event_wait_helper<F>(
+    async fn event_wait<F>(&mut self, trigger_event: WifiEvent, action: F) -> Result<(), WifiError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), EspError>,
+    {
+        let mut future = WifiEventFuture::new();
+        let sysloop = &self.base_driver.borrow().sysloop;
+        future.start(sysloop, trigger_event)?;
+
+        action(self)?;
+
+        future.await;
+        Ok(())
+    }
+
+    async fn event_dual_wait_helper<F>(
         &mut self,
         event1: WifiEvent,
         result1: Result<(), WifiError>,
@@ -1753,6 +1765,51 @@ where
         me.resolution = Some(resolution);
         me.atomic_waker.wake();
         me.subscription.take();
+    }
+}
+
+struct WifiEventFuture {
+    internal_data: Arc<Mutex<WifiEventFutureData<()>>>,
+}
+
+impl WifiEventFuture {
+    pub fn new() -> Self {
+        Self {
+            internal_data: Arc::new(Mutex::new(WifiEventFutureData::new())),
+        }
+    }
+
+    pub fn start(
+        &mut self,
+        sysloop: &EspEventLoop<System>,
+        trigger_event: WifiEvent,
+    ) -> Result<(), EspError> {
+        let mut copied_data = self.internal_data.clone();
+        let mut internal_data = self.internal_data.borrow_mut().lock();
+
+        internal_data.subscription = Some(sysloop.subscribe(move |event: &WifiEvent| {
+            if *event == trigger_event {
+                WifiEventFutureData::resolve(&mut copied_data, ())
+            }
+        })?);
+        Ok(())
+    }
+}
+
+impl core::future::Future for WifiEventFuture {
+    type Output = ();
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let mut internal_data = self.internal_data.lock();
+        internal_data.atomic_waker.register(cx.waker());
+        if internal_data.resolution.is_some() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }
 
