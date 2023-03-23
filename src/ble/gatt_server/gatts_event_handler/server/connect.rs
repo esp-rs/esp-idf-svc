@@ -10,4 +10,8 @@ impl GattServer {
         info!("GATT client {} connected.", Connection::from(param));
         self.active_connections.insert(param.into());
     }
+
+    pub fn is_client_connected(&self) -> bool {
+        !self.active_connections.is_empty()
+    }
 }
