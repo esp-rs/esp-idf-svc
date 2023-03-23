@@ -106,10 +106,10 @@ impl GattServer {
     /// # Panics
     ///
     /// Panics if a profile's lock is poisoned.
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> &mut Self {
         if self.started {
             warn!("GATT server already started.");
-            return;
+            return self;
         }
 
         self.started = true;
@@ -119,6 +119,8 @@ impl GattServer {
         self.profiles.iter().for_each(|profile| {
             profile.write().unwrap().register_self();
         });
+
+        self
     }
 
     /// Sets the name to be advertised in GAP packets.
@@ -185,6 +187,18 @@ impl GattServer {
         }
 
         self.profiles.push(profile);
+        self
+    }
+
+    /// Setup GattServer mtu that will be used to negotiate mtu during request from client peer
+    /// # Arguments
+    /// * `mtu` -  value to set local mtu, should be larger than 23 and lower or equal to 517
+    #[allow(unused)]
+    pub fn set_mtu(&mut self, mtu: u16) -> &mut Self {
+        unsafe {
+            esp_idf_sys::esp_nofail!(esp_idf_sys::esp_ble_gatt_set_local_mtu(mtu));
+        }
+
         self
     }
 
