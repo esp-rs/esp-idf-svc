@@ -289,12 +289,19 @@ impl EspHttpConnection {
 
         // workaround since esp_http_client_read does not yet return EAGAIN error in ESP-IDF v4.
         // in ESP-IDF v5 esp_http_client_read will return EAGAIN and this should not be needed.
-        match result {
-            Ok(0) if unsafe { !esp_http_client_is_complete_data_received(self.raw_client) } => {
-                // no error but read 0 bytes and body is not yet complete, probably caused by EAGAIN
-                Err(EspError::from_infallible::<ESP_ERR_HTTP_EAGAIN>())
+        #[cfg(esp_idf_version_major = "4")]
+        {
+            match result {
+                Ok(0) if unsafe { !esp_http_client_is_complete_data_received(self.raw_client) } => {
+                    // no error but read 0 bytes and body is not yet complete, probably caused by EAGAIN
+                    Err(EspError::from_infallible::<ESP_ERR_HTTP_EAGAIN>())
+                }
+                other => other,
             }
-            other => other,
+        }
+        #[cfg(not(esp_idf_version_major = "4"))]
+        {
+            result
         }
     }
 
