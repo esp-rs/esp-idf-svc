@@ -1,6 +1,7 @@
 //! WiFi support
+#[cfg(feature = "nightly")]
+use core::future::Future;
 use core::marker::PhantomData;
-use core::task::Poll;
 use core::time::Duration;
 use core::{cmp, ffi};
 
@@ -9,12 +10,11 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use ::log::*;
-#[cfg(all(feature = "nightly", feature = "experimental"))]
-use futures::future::Future;
-use futures::task::AtomicWaker;
 
 use enumset::*;
 
+#[cfg(feature = "experimental")]
+use embedded_svc::utils::asyncify::{event_bus::*, timer::*};
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::modem::WifiModemPeripheral;
@@ -32,22 +32,10 @@ use crate::netif::*;
 use crate::nvs::EspDefaultNvsPartition;
 use crate::private::common::*;
 use crate::private::cstr::*;
-use crate::private::mutex::{self, Mutex};
+use crate::private::mutex;
 use crate::private::waitable::*;
-use core::borrow::BorrowMut;
-
-#[derive(Debug, Clone, Copy)]
-pub enum WifiError {
-    EspError(EspError),
-    Unknown,
-    Disconnected,
-}
-
-impl From<EspError> for WifiError {
-    fn from(value: EspError) -> Self {
-        WifiError::EspError(value)
-    }
-}
+#[cfg(feature = "experimental")]
+use crate::timer::{EspTaskTimerService, EspTimer};
 
 pub mod config {
     use core::time::Duration;
@@ -337,10 +325,60 @@ static mut RX_CALLBACK: Option<
 #[allow(clippy::type_complexity)]
 static mut TX_CALLBACK: Option<Box<dyn FnMut(WifiDeviceId, &[u8], bool) + 'static>> = None;
 
+pub trait NonBlocking {
+    fn is_scan_done(&self) -> Result<bool, EspError>;
+
+    fn start_scan(
+        &mut self,
+        scan_config: &config::ScanConfig,
+        blocking: bool,
+    ) -> Result<(), EspError>;
+
+    fn stop_scan(&mut self) -> Result<(), EspError>;
+
+    fn get_scan_result_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError>;
+
+    #[cfg(feature = "alloc")]
+    fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError>;
+}
+
+impl<T> NonBlocking for &mut T
+where
+    T: NonBlocking,
+{
+    fn is_scan_done(&self) -> Result<bool, EspError> {
+        (**self).is_scan_done()
+    }
+
+    fn start_scan(
+        &mut self,
+        scan_config: &config::ScanConfig,
+        blocking: bool,
+    ) -> Result<(), EspError> {
+        (**self).start_scan(scan_config, blocking)
+    }
+
+    fn stop_scan(&mut self) -> Result<(), EspError> {
+        (**self).stop_scan()
+    }
+
+    fn get_scan_result_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+        (**self).get_scan_result_n()
+    }
+
+    #[cfg(feature = "alloc")]
+    fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        (**self).get_scan_result()
+    }
+}
+
 pub struct WifiDriver<'d> {
     status: Arc<mutex::Mutex<(WifiEvent, WifiEvent)>>,
     _subscription: EspSubscription<System>,
-    sysloop: EspSystemEventLoop,
     #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
     _nvs: Option<EspDefaultNvsPartition>,
     _p: PhantomData<&'d mut ()>,
@@ -355,11 +393,10 @@ impl<'d> WifiDriver<'d> {
     ) -> Result<Self, EspError> {
         Self::init(nvs.is_some())?;
 
-        let (status, subscription) = Self::subscribe_statuses(&sysloop)?;
+        let (status, subscription) = Self::subscribe(&sysloop)?;
 
         Ok(Self {
             status,
-            sysloop,
             _subscription: subscription,
             _nvs: nvs,
             _p: PhantomData,
@@ -373,7 +410,7 @@ impl<'d> WifiDriver<'d> {
     ) -> Result<Self, EspError> {
         Self::init(false)?;
 
-        let (status, subscription) = Self::subscribe_statuses(&sysloop)?;
+        let (status, subscription) = Self::subscribe(&sysloop)?;
 
         Ok(Self {
             status,
@@ -383,7 +420,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn subscribe_statuses(
+    fn subscribe(
         sysloop: &EspEventLoop<System>,
     ) -> Result<
         (
@@ -408,6 +445,7 @@ impl<'d> WifiDriver<'d> {
                 WifiEvent::StaStopped => guard.0 = WifiEvent::StaStopped,
                 WifiEvent::StaConnected => guard.0 = WifiEvent::StaConnected,
                 WifiEvent::StaDisconnected => guard.0 = WifiEvent::StaDisconnected,
+                WifiEvent::ScanDone => guard.0 = WifiEvent::ScanDone,
                 _ => (),
             };
         })?;
@@ -540,6 +578,7 @@ impl<'d> WifiDriver<'d> {
 
         Ok(guard.0 == WifiEvent::StaStarted
             || guard.0 == WifiEvent::StaConnected
+            || guard.0 == WifiEvent::ScanDone
             || guard.0 == WifiEvent::StaDisconnected)
     }
 
@@ -573,6 +612,12 @@ impl<'d> WifiDriver<'d> {
             Ok((!ap_enabled || guard.1 == WifiEvent::ApStarted)
                 && (!sta_enabled || guard.0 == WifiEvent::StaConnected))
         }
+    }
+
+    pub fn is_scan_done(&self) -> Result<bool, EspError> {
+        let guard = self.status.lock();
+
+        Ok(guard.0 == WifiEvent::ScanDone)
     }
 
     #[allow(non_upper_case_globals)]
@@ -1041,6 +1086,35 @@ impl<'d> WifiDriver<'d> {
 
 unsafe impl<'d> Send for WifiDriver<'d> {}
 
+impl<'d> NonBlocking for WifiDriver<'d> {
+    fn is_scan_done(&self) -> Result<bool, EspError> {
+        WifiDriver::is_scan_done(self)
+    }
+
+    fn start_scan(
+        &mut self,
+        scan_config: &config::ScanConfig,
+        blocking: bool,
+    ) -> Result<(), EspError> {
+        WifiDriver::start_scan(self, scan_config, blocking)
+    }
+
+    fn stop_scan(&mut self) -> Result<(), EspError> {
+        WifiDriver::stop_scan(self)
+    }
+
+    fn get_scan_result_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+        WifiDriver::get_scan_result_n(self)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        WifiDriver::get_scan_result(self)
+    }
+}
+
 impl<'d> Drop for WifiDriver<'d> {
     fn drop(&mut self) {
         self.clear_all().unwrap();
@@ -1233,6 +1307,10 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().disconnect()
     }
 
+    pub fn is_scan_done(&self) -> Result<bool, EspError> {
+        self.driver().is_scan_done()
+    }
+
     /// Scan for nearby, visible access points.
     ///
     /// For more details see [`WifiDriver::scan_n()`].
@@ -1325,6 +1403,36 @@ impl<'d> Drop for EspWifi<'d> {
 unsafe impl<'d> Send for EspWifi<'d> {}
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
+impl<'d> NonBlocking for EspWifi<'d> {
+    fn is_scan_done(&self) -> Result<bool, EspError> {
+        EspWifi::is_scan_done(self)
+    }
+
+    fn start_scan(
+        &mut self,
+        scan_config: &config::ScanConfig,
+        blocking: bool,
+    ) -> Result<(), EspError> {
+        EspWifi::start_scan(self, scan_config, blocking)
+    }
+
+    fn stop_scan(&mut self) -> Result<(), EspError> {
+        EspWifi::stop_scan(self)
+    }
+
+    fn get_scan_result_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+        EspWifi::get_scan_result_n(self)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn get_scan_result(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        EspWifi::get_scan_result(self)
+    }
+}
+
+#[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<'d> Wifi for EspWifi<'d> {
     type Error = EspError;
 
@@ -1379,7 +1487,6 @@ impl<'d> Wifi for EspWifi<'d> {
 pub enum WifiEvent {
     Ready,
 
-    ScanStarted,
     ScanDone,
 
     StaStarted,
@@ -1526,167 +1633,331 @@ impl WifiWait {
                 | WifiEvent::StaStopped
                 | WifiEvent::StaConnected
                 | WifiEvent::StaDisconnected
+                | WifiEvent::ScanDone
         ) {
             waitable.cvar.notify_all();
         }
     }
 }
 
-pub struct AsyncWifiDriver<'d, T>
-where
-    T: BorrowMut<WifiDriver<'d>>,
-{
-    base_driver: T,
-    _p: PhantomData<WifiDriver<'d>>,
+#[cfg(feature = "experimental")]
+pub struct AsyncWifiWait {
+    subscription:
+        AsyncSubscription<crate::private::mutex::RawCondvar, WifiEvent, EspSubscription<System>>,
+    timer: AsyncTimer<EspTimer>,
 }
 
-impl<'d, T> AsyncWifiDriver<'d, T>
-where
-    T: BorrowMut<WifiDriver<'d>>,
-{
-    #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
-    pub fn new(base_driver: T) -> Self {
-        AsyncWifiDriver {
-            base_driver,
-            _p: PhantomData,
+#[cfg(feature = "experimental")]
+impl AsyncWifiWait {
+    pub fn new(
+        sysloop: &EspEventLoop<System>,
+        timer_service: &EspTaskTimerService,
+    ) -> Result<Self, EspError> {
+        Ok(Self {
+            subscription: AsyncEventBus::new((), sysloop.clone()).subscribe()?,
+            timer: AsyncTimerService::new(timer_service.clone()).timer()?,
+        })
+    }
+
+    pub async fn wait(&mut self, matcher: impl Fn() -> bool) {
+        info!("About to wait");
+
+        Self::wait_sub(&mut self.subscription, matcher).await;
+
+        info!("Waiting done - success");
+    }
+
+    pub async fn wait_with_timeout(&mut self, dur: Duration, matcher: impl Fn() -> bool) -> bool {
+        info!("About to wait for duration {:?}", dur);
+
+        let subscription_wait = Self::wait_sub(&mut self.subscription, matcher);
+        let timer_wait = self.timer.after(dur).unwrap(); // TODO
+
+        match embassy_futures::select::select(subscription_wait, timer_wait).await {
+            embassy_futures::select::Either::First(_) => {
+                info!("Waiting done - success");
+                true
+            }
+            embassy_futures::select::Either::Second(_) => {
+                info!("Timeout while waiting");
+                false
+            }
         }
     }
 
-    pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, WifiError> {
-        self.base_driver
-            .borrow()
-            .get_capabilities()
-            .map_err(|err| err.into())
+    async fn wait_sub(
+        subscription: &mut AsyncSubscription<
+            crate::private::mutex::RawCondvar,
+            WifiEvent,
+            EspSubscription<System>,
+        >,
+        matcher: impl Fn() -> bool,
+    ) {
+        while !matcher() {
+            subscription.recv().await;
+        }
     }
+}
 
-    pub fn get_configuration(&self) -> Result<Configuration, WifiError> {
-        self.base_driver
-            .borrow()
-            .get_configuration()
-            .map_err(|err| err.into())
-    }
+pub struct BlockingWifi<T> {
+    wifi: T,
+    wait: WifiWait,
+}
 
-    pub fn set_configuration(&mut self, conf: &Configuration) -> Result<(), WifiError> {
-        self.base_driver
-            .borrow_mut()
-            .set_configuration(conf)
-            .map_err(|err| err.into())
-    }
-
-    pub fn is_started(&self) -> Result<bool, WifiError> {
-        self.base_driver
-            .borrow()
-            .is_started()
-            .map_err(|err| err.into())
-    }
-
-    pub fn is_connected(&self) -> Result<bool, WifiError> {
-        self.base_driver
-            .borrow()
-            .is_connected()
-            .map_err(|err| err.into())
-    }
-
-    pub async fn start(&mut self) -> Result<(), WifiError> {
-        self.event_dual_wait_helper(
-            WifiEvent::StaStarted,
-            Ok(()),
-            WifiEvent::StaStopped,
-            Err(WifiError::Disconnected),
-            |s: &mut Self| s.base_driver.borrow_mut().start(),
-        )
-        .await
-    }
-
-    pub async fn stop(&mut self) -> Result<(), WifiError> {
-        self.event_wait(WifiEvent::StaStopped, |s: &mut Self| {
-            s.base_driver.borrow_mut().stop()
+impl<T> BlockingWifi<T>
+where
+    T: Wifi<Error = EspError> + NonBlocking,
+{
+    pub fn wrap(wifi: T, sysloop: &EspSystemEventLoop) -> Result<Self, EspError> {
+        Ok(Self {
+            wifi,
+            wait: WifiWait::new(sysloop)?,
         })
-        .await
     }
 
-    pub async fn connect(&mut self) -> Result<(), WifiError> {
-        self.event_dual_wait_helper(
-            WifiEvent::StaConnected,
-            Ok(()),
-            WifiEvent::StaDisconnected,
-            Err(WifiError::Disconnected),
-            |s: &mut Self| s.base_driver.borrow_mut().connect(),
-        )
-        .await
+    pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, EspError> {
+        self.wifi.get_capabilities()
     }
 
-    pub async fn disconnect(&mut self) -> Result<(), WifiError> {
-        self.event_wait(WifiEvent::StaDisconnected, |s: &mut Self| {
-            s.base_driver.borrow_mut().disconnect()
+    pub fn get_configuration(&self) -> Result<Configuration, EspError> {
+        self.wifi.get_configuration()
+    }
+
+    pub fn set_configuration(&mut self, conf: &Configuration) -> Result<(), EspError> {
+        self.wifi.set_configuration(conf)
+    }
+
+    pub fn is_started(&self) -> Result<bool, EspError> {
+        self.wifi.is_started()
+    }
+
+    pub fn is_connected(&self) -> Result<bool, EspError> {
+        self.wifi.is_connected()
+    }
+
+    pub fn start(&mut self) -> Result<(), EspError> {
+        self.wifi.start()?;
+
+        self.wait.wait(|| self.wifi.is_started().unwrap_or(true));
+
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> Result<(), EspError> {
+        self.wifi.stop()?;
+
+        self.wait.wait(|| !self.wifi.is_started().unwrap_or(false));
+
+        Ok(())
+    }
+
+    pub fn connect(&mut self) -> Result<(), EspError> {
+        self.wifi.connect()?;
+
+        self.wait.wait(|| self.wifi.is_connected().unwrap_or(true));
+
+        Ok(())
+    }
+
+    pub fn disconnect(&mut self) -> Result<(), EspError> {
+        self.wifi.disconnect()?;
+
+        self.wait
+            .wait(|| !self.wifi.is_connected().unwrap_or(false));
+
+        Ok(())
+    }
+
+    pub fn scan_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+        self.wifi.scan_n()
+    }
+
+    #[cfg(feature = "alloc")]
+    pub fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        self.wifi.scan()
+    }
+}
+
+impl<T> Wifi for BlockingWifi<T>
+where
+    T: Wifi<Error = EspError> + NonBlocking,
+{
+    type Error = T::Error;
+
+    fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
+        BlockingWifi::get_capabilities(self)
+    }
+
+    fn get_configuration(&self) -> Result<Configuration, Self::Error> {
+        BlockingWifi::get_configuration(self)
+    }
+
+    fn set_configuration(&mut self, conf: &Configuration) -> Result<(), Self::Error> {
+        BlockingWifi::set_configuration(self, conf)
+    }
+
+    fn is_started(&self) -> Result<bool, Self::Error> {
+        BlockingWifi::is_started(self)
+    }
+
+    fn is_connected(&self) -> Result<bool, Self::Error> {
+        BlockingWifi::is_connected(self)
+    }
+
+    fn start(&mut self) -> Result<(), Self::Error> {
+        BlockingWifi::start(self)
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        BlockingWifi::stop(self)
+    }
+
+    fn connect(&mut self) -> Result<(), Self::Error> {
+        BlockingWifi::connect(self)
+    }
+
+    fn disconnect(&mut self) -> Result<(), Self::Error> {
+        BlockingWifi::disconnect(self)
+    }
+
+    fn scan_n<const N: usize>(
+        &mut self,
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
+        BlockingWifi::scan_n(self)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
+        BlockingWifi::scan(self)
+    }
+}
+
+#[cfg(feature = "experimental")]
+pub struct AsyncWifi<T> {
+    wifi: T,
+    wait: AsyncWifiWait,
+}
+
+#[cfg(feature = "experimental")]
+impl<T> AsyncWifi<T>
+where
+    T: Wifi<Error = EspError> + NonBlocking,
+{
+    pub fn wrap(
+        wifi: T,
+        sysloop: &EspSystemEventLoop,
+        timer_service: &EspTaskTimerService,
+    ) -> Result<Self, EspError> {
+        Ok(Self {
+            wifi,
+            wait: AsyncWifiWait::new(sysloop, timer_service)?,
         })
-        .await
+    }
+
+    pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, EspError> {
+        self.wifi.get_capabilities()
+    }
+
+    pub fn get_configuration(&self) -> Result<Configuration, EspError> {
+        self.wifi.get_configuration()
+    }
+
+    pub fn set_configuration(&mut self, conf: &Configuration) -> Result<(), EspError> {
+        self.wifi.set_configuration(conf)
+    }
+
+    pub fn is_started(&self) -> Result<bool, EspError> {
+        self.wifi.is_started()
+    }
+
+    pub fn is_connected(&self) -> Result<bool, EspError> {
+        self.wifi.is_connected()
+    }
+
+    pub async fn start(&mut self) -> Result<(), EspError> {
+        self.wifi.start()?;
+
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_started().unwrap_or(true))
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> Result<(), EspError> {
+        self.wifi.stop()?;
+
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_started().unwrap_or(false))
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn connect(&mut self) -> Result<(), EspError> {
+        self.wifi.connect()?;
+
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_connected().unwrap_or(true))
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn disconnect(&mut self) -> Result<(), EspError> {
+        self.wifi.disconnect()?;
+
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_connected().unwrap_or(false))
+            .await;
+
+        Ok(())
     }
 
     pub async fn scan_n<const N: usize>(
         &mut self,
-    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), WifiError> {
-        // TODO: rewrite to do async waiting here while scanning
-        // Also, it would be nice to have an API that returned entries as they were discovered
-        self.base_driver
-            .borrow_mut()
-            .scan_n()
-            .map_err(|err| err.into())
+    ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
+        self.wifi.start_scan(&Default::default(), false)?;
+
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_scan_done().unwrap_or(true))
+            .await;
+
+        self.wifi.get_scan_result_n()
     }
 
-    pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
-        let base: &mut WifiDriver<'d> = self.base_driver.borrow_mut();
-        base.scan().map_err(|err| err.into())
-    }
+    #[cfg(feature = "alloc")]
+    pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
+        self.wifi.start_scan(&Default::default(), false)?;
 
-    async fn event_wait<F>(&mut self, trigger_event: WifiEvent, action: F) -> Result<(), WifiError>
-    where
-        F: FnOnce(&mut Self) -> Result<(), EspError>,
-    {
-        let mut future = WifiEventFuture::new();
-        let sysloop = &self.base_driver.borrow().sysloop;
-        future.start(sysloop, trigger_event)?;
+        let wifi = &self.wifi;
+        self.wait
+            .wait(move || wifi.is_scan_done().unwrap_or(true))
+            .await;
 
-        action(self)?;
-
-        future.await;
-        Ok(())
-    }
-
-    async fn event_dual_wait_helper<F>(
-        &mut self,
-        event1: WifiEvent,
-        result1: Result<(), WifiError>,
-        event2: WifiEvent,
-        result2: Result<(), WifiError>,
-        action: F,
-    ) -> Result<(), WifiError>
-    where
-        F: FnOnce(&mut Self) -> Result<(), EspError>,
-    {
-        let mut future =
-            WifiDualEventFuture::<Result<(), WifiError>>::new(event1, result1, event2, result2);
-        let sysloop = &self.base_driver.borrow().sysloop;
-        future.start(sysloop)?;
-
-        action(self)?;
-
-        future.await
+        self.wifi.get_scan_result()
     }
 }
 
 #[cfg(all(feature = "nightly", feature = "experimental"))]
-impl<'d, T> asynch::Wifi for AsyncWifiDriver<'d, T>
+impl<T> asynch::Wifi for AsyncWifi<T>
 where
-    T: BorrowMut<WifiDriver<'d>>,
+    T: Wifi<Error = EspError> + NonBlocking,
 {
-    type Error = WifiError;
+    type Error = T::Error;
 
-    type GetCapabilitiesFuture<'a> = futures::future::Ready<Result<EnumSet<Capability>, Self::Error>> where Self: 'a;
-    type GetConfigurationFuture<'a> = futures::future::Ready<Result<Configuration, Self::Error>> where Self: 'a;
-    type SetConfigurationFuture<'a> = futures::future::Ready<Result<(), Self::Error>> where Self: 'a;
-    type IsStartedFuture<'a> = futures::future::Ready<Result<bool, Self::Error>> where Self: 'a;
-    type IsConnectedFuture<'a> = futures::future::Ready<Result<bool, Self::Error>> where Self: 'a;
+    type GetCapabilitiesFuture<'a> = impl Future<Output = Result<EnumSet<Capability>, Self::Error>> + 'a where Self: 'a;
+    type GetConfigurationFuture<'a> = impl Future<Output = Result<Configuration, Self::Error>> + 'a where Self: 'a;
+    type SetConfigurationFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+    type IsStartedFuture<'a> = impl Future<Output = Result<bool, Self::Error>> + 'a where Self: 'a;
+    type IsConnectedFuture<'a> = impl Future<Output = Result<bool, Self::Error>> + 'a where Self: 'a;
     type StartFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
     type StopFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
     type ConnectFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
@@ -1695,178 +1966,50 @@ where
     type ScanFuture<'a> = impl Future<Output = Result<alloc::vec::Vec<AccessPointInfo>, Self::Error>> + 'a where Self: 'a;
 
     fn get_capabilities(&self) -> Self::GetCapabilitiesFuture<'_> {
-        futures::future::ready(self.get_capabilities())
+        async move { AsyncWifi::get_capabilities(self) }
     }
 
     fn get_configuration(&self) -> Self::GetConfigurationFuture<'_> {
-        futures::future::ready(self.get_configuration())
+        async move { AsyncWifi::get_configuration(self) }
     }
 
-    fn set_configuration(&mut self, conf: &Configuration) -> Self::SetConfigurationFuture<'_> {
-        futures::future::ready(self.set_configuration(conf))
+    fn set_configuration<'a>(
+        &'a mut self,
+        conf: &'a Configuration,
+    ) -> Self::SetConfigurationFuture<'a> {
+        async move { AsyncWifi::set_configuration(self, conf) }
     }
 
     fn start(&mut self) -> Self::StartFuture<'_> {
-        self.start()
+        AsyncWifi::start(self)
     }
 
     fn stop(&mut self) -> Self::StopFuture<'_> {
-        self.stop()
+        AsyncWifi::stop(self)
     }
 
     fn connect(&mut self) -> Self::ConnectFuture<'_> {
-        self.connect()
+        AsyncWifi::connect(self)
     }
 
     fn disconnect(&mut self) -> Self::DisconnectFuture<'_> {
-        self.disconnect()
+        AsyncWifi::disconnect(self)
     }
 
     fn is_started(&self) -> Self::IsStartedFuture<'_> {
-        futures::future::ready(self.is_started())
+        async move { AsyncWifi::is_started(self) }
     }
 
     fn is_connected(&self) -> Self::IsConnectedFuture<'_> {
-        futures::future::ready(self.is_connected())
+        async move { AsyncWifi::is_connected(self) }
     }
 
     fn scan_n<const N: usize>(&mut self) -> Self::ScanNFuture<'_, N> {
-        self.scan_n()
+        AsyncWifi::scan_n(self)
     }
 
+    #[cfg(feature = "alloc")]
     fn scan(&mut self) -> Self::ScanFuture<'_> {
-        self.scan()
-    }
-}
-
-struct WifiEventFutureData<T>
-where
-    T: 'static + Send,
-{
-    atomic_waker: AtomicWaker,
-    subscription: Option<EspSubscription<System>>,
-    resolution: Option<T>,
-}
-
-impl<T> WifiEventFutureData<T>
-where
-    T: 'static + Send,
-{
-    pub fn new() -> Self {
-        Self {
-            atomic_waker: AtomicWaker::new(),
-            subscription: None,
-            resolution: None,
-        }
-    }
-
-    pub fn resolve(self_lock: &mut Arc<Mutex<WifiEventFutureData<T>>>, resolution: T) {
-        let mut me = self_lock.lock();
-        me.resolution = Some(resolution);
-        me.atomic_waker.wake();
-        me.subscription.take();
-    }
-}
-
-struct WifiEventFuture {
-    internal_data: Arc<Mutex<WifiEventFutureData<()>>>,
-}
-
-impl WifiEventFuture {
-    pub fn new() -> Self {
-        Self {
-            internal_data: Arc::new(Mutex::new(WifiEventFutureData::new())),
-        }
-    }
-
-    pub fn start(
-        &mut self,
-        sysloop: &EspEventLoop<System>,
-        trigger_event: WifiEvent,
-    ) -> Result<(), EspError> {
-        let mut copied_data = self.internal_data.clone();
-        let mut internal_data = self.internal_data.borrow_mut().lock();
-
-        internal_data.subscription = Some(sysloop.subscribe(move |event: &WifiEvent| {
-            if *event == trigger_event {
-                WifiEventFutureData::resolve(&mut copied_data, ())
-            }
-        })?);
-        Ok(())
-    }
-}
-
-impl core::future::Future for WifiEventFuture {
-    type Output = ();
-
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        let mut internal_data = self.internal_data.lock();
-        internal_data.atomic_waker.register(cx.waker());
-        if internal_data.resolution.is_some() {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
-struct WifiDualEventFuture<T: 'static + Send> {
-    event1: WifiEvent,
-    resolution1: Option<T>,
-    event2: WifiEvent,
-    resolution2: Option<T>,
-    internal_data: Arc<Mutex<WifiEventFutureData<T>>>,
-}
-
-impl<T> WifiDualEventFuture<T>
-where
-    T: Send + Clone + 'static,
-{
-    pub fn new(event1: WifiEvent, resolution1: T, event2: WifiEvent, resolution2: T) -> Self {
-        Self {
-            event1,
-            resolution1: Some(resolution1),
-            event2,
-            resolution2: Some(resolution2),
-            internal_data: Arc::new(Mutex::new(WifiEventFutureData::new())),
-        }
-    }
-
-    pub fn start(&mut self, sysloop: &EspEventLoop<System>) -> Result<(), EspError> {
-        let mut copied_data = self.internal_data.clone();
-        let mut internal_data = self.internal_data.borrow_mut().lock();
-        let trigger_event1 = self.event1;
-        let trigger_event2 = self.event2;
-        let mut resolution1 = self.resolution1.take();
-        let mut resolution2 = self.resolution2.take();
-
-        internal_data.subscription = Some(sysloop.subscribe(move |event: &WifiEvent| {
-            if *event == trigger_event1 {
-                WifiEventFutureData::resolve(&mut copied_data, resolution1.take().unwrap())
-            } else if *event == trigger_event2 {
-                WifiEventFutureData::resolve(&mut copied_data, resolution2.take().unwrap())
-            }
-        })?);
-        Ok(())
-    }
-}
-
-impl<T: Clone + Send> core::future::Future for WifiDualEventFuture<T> {
-    type Output = T;
-
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        let mut internal_data = self.internal_data.lock();
-        internal_data.atomic_waker.register(cx.waker());
-        if internal_data.resolution.is_some() {
-            Poll::Ready(internal_data.resolution.take().unwrap())
-        } else {
-            Poll::Pending
-        }
+        AsyncWifi::scan(self)
     }
 }
