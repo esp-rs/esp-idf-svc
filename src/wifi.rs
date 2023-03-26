@@ -502,7 +502,7 @@ impl<'d> WifiDriver<'d> {
         };
         esp!(unsafe { esp_wifi_init(&cfg) })?;
 
-        info!("Driver initialized");
+        debug!("Driver initialized");
 
         Ok(())
     }
@@ -510,47 +510,47 @@ impl<'d> WifiDriver<'d> {
     pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, EspError> {
         let caps = Capability::Client | Capability::AccessPoint | Capability::Mixed;
 
-        info!("Providing capabilities: {:?}", caps);
+        debug!("Providing capabilities: {:?}", caps);
 
         Ok(caps)
     }
 
     pub fn start(&mut self) -> Result<(), EspError> {
-        info!("Start requested");
+        debug!("Start requested");
 
         esp!(unsafe { esp_wifi_start() })?;
 
-        info!("Starting");
+        debug!("Starting");
 
         Ok(())
     }
 
     pub fn stop(&mut self) -> Result<(), EspError> {
-        info!("Stop requested");
+        debug!("Stop requested");
 
         esp!(unsafe { esp_wifi_stop() })?;
 
-        info!("Stopping");
+        debug!("Stopping");
 
         Ok(())
     }
 
     pub fn connect(&mut self) -> Result<(), EspError> {
-        info!("Connect requested");
+        debug!("Connect requested");
 
         esp!(unsafe { esp_wifi_connect() })?;
 
-        info!("Connecting");
+        debug!("Connecting");
 
         Ok(())
     }
 
     pub fn disconnect(&mut self) -> Result<(), EspError> {
-        info!("Disconnect requested");
+        debug!("Disconnect requested");
 
         esp!(unsafe { esp_wifi_disconnect() })?;
 
-        info!("Disconnecting");
+        debug!("Disconnecting");
 
         Ok(())
     }
@@ -622,7 +622,7 @@ impl<'d> WifiDriver<'d> {
 
     #[allow(non_upper_case_globals)]
     pub fn get_configuration(&self) -> Result<Configuration, EspError> {
-        info!("Getting configuration");
+        debug!("Getting configuration");
 
         let mut mode: wifi_mode_t = 0;
         esp!(unsafe { esp_wifi_get_mode(&mut mode) })?;
@@ -637,26 +637,26 @@ impl<'d> WifiDriver<'d> {
             _ => panic!(),
         };
 
-        info!("Configuration gotten: {:?}", &conf);
+        debug!("Configuration gotten: {:?}", &conf);
 
         Ok(conf)
     }
 
     pub fn set_configuration(&mut self, conf: &Configuration) -> Result<(), EspError> {
-        info!("Setting configuration: {:?}", conf);
+        debug!("Setting configuration: {:?}", conf);
 
         match conf {
             Configuration::None => {
                 unsafe {
                     esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_NULL))?;
                 }
-                info!("Wifi mode NULL set");
+                debug!("Wifi mode NULL set");
             }
             Configuration::AccessPoint(ap_conf) => {
                 unsafe {
                     esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_AP))?;
                 }
-                info!("Wifi mode AP set");
+                debug!("Wifi mode AP set");
 
                 self.set_ap_conf(ap_conf)?;
             }
@@ -664,7 +664,7 @@ impl<'d> WifiDriver<'d> {
                 unsafe {
                     esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
                 }
-                info!("Wifi mode STA set");
+                debug!("Wifi mode STA set");
 
                 self.set_sta_conf(client_conf)?;
             }
@@ -672,14 +672,14 @@ impl<'d> WifiDriver<'d> {
                 unsafe {
                     esp!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA))?;
                 }
-                info!("Wifi mode APSTA set");
+                debug!("Wifi mode APSTA set");
 
                 self.set_sta_conf(client_conf)?;
                 self.set_ap_conf(ap_conf)?;
             }
         }
 
-        info!("Configuration set");
+        debug!("Configuration set");
 
         Ok(())
     }
@@ -764,7 +764,7 @@ impl<'d> WifiDriver<'d> {
         scan_config: &config::ScanConfig,
         blocking: bool,
     ) -> Result<(), EspError> {
-        info!("About to scan for access points");
+        debug!("About to scan for access points");
 
         let scan_config: wifi_scan_config_t = scan_config.into();
         esp!(unsafe { esp_wifi_scan_start(&scan_config as *const wifi_scan_config_t, blocking) })
@@ -772,7 +772,7 @@ impl<'d> WifiDriver<'d> {
 
     /// Stops a previous started access point scan.
     pub fn stop_scan(&mut self) -> Result<(), EspError> {
-        info!("About to stop scan for access points");
+        debug!("About to stop scan for access points");
 
         esp!(unsafe { esp_wifi_scan_stop() })
     }
@@ -796,7 +796,7 @@ impl<'d> WifiDriver<'d> {
         let result = ap_infos_raw[..fetched_count]
             .iter()
             .map::<AccessPointInfo, _>(|ap_info_raw| Newtype(ap_info_raw).into())
-            .inspect(|ap_info| info!("Found access point {:?}", ap_info))
+            .inspect(|ap_info| debug!("Found access point {:?}", ap_info))
             .collect();
 
         Ok((result, scanned_count))
@@ -825,7 +825,7 @@ impl<'d> WifiDriver<'d> {
         let result = ap_infos_raw[..fetched_count]
             .iter()
             .map::<AccessPointInfo, _>(|ap_info_raw| Newtype(ap_info_raw).into())
-            .inspect(|ap_info| info!("Found access point {:?}", ap_info))
+            .inspect(|ap_info| debug!("Found access point {:?}", ap_info))
             .collect();
 
         Ok(result)
@@ -939,17 +939,17 @@ impl<'d> WifiDriver<'d> {
 
         let result: ClientConfiguration = unsafe { Newtype(wifi_config.sta).into() };
 
-        info!("Providing STA configuration: {:?}", &result);
+        debug!("Providing STA configuration: {:?}", &result);
 
         Ok(result)
     }
 
     fn set_sta_conf(&mut self, conf: &ClientConfiguration) -> Result<(), EspError> {
-        info!("Checking current STA configuration");
+        debug!("Checking current STA configuration");
         let current_config = self.get_sta_conf()?;
 
         if current_config != *conf {
-            info!("Setting STA configuration: {:?}", conf);
+            debug!("Setting STA configuration: {:?}", conf);
 
             let mut wifi_config = wifi_config_t {
                 sta: Newtype::<wifi_sta_config_t>::from(conf).0,
@@ -957,10 +957,10 @@ impl<'d> WifiDriver<'d> {
 
             esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
         } else {
-            info!("Same STA configuration already present");
+            debug!("Same STA configuration already present");
         }
 
-        info!("STA configuration done");
+        debug!("STA configuration done");
 
         Ok(())
     }
@@ -971,17 +971,17 @@ impl<'d> WifiDriver<'d> {
 
         let result: AccessPointConfiguration = unsafe { Newtype(wifi_config.ap).into() };
 
-        info!("Providing AP configuration: {:?}", &result);
+        debug!("Providing AP configuration: {:?}", &result);
 
         Ok(result)
     }
 
     fn set_ap_conf(&mut self, conf: &AccessPointConfiguration) -> Result<(), EspError> {
-        info!("Checking current AP configuration");
+        debug!("Checking current AP configuration");
         let current_config = self.get_ap_conf()?;
 
         if current_config != *conf {
-            info!("Setting AP configuration: {:?}", conf);
+            debug!("Setting AP configuration: {:?}", conf);
 
             let mut wifi_config = wifi_config_t {
                 ap: Newtype::<wifi_ap_config_t>::from(conf).0,
@@ -989,10 +989,10 @@ impl<'d> WifiDriver<'d> {
 
             esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
         } else {
-            info!("Same AP configuration already present");
+            debug!("Same AP configuration already present");
         }
 
-        info!("AP configuration done");
+        debug!("AP configuration done");
 
         Ok(())
     }
@@ -1011,7 +1011,7 @@ impl<'d> WifiDriver<'d> {
             TX_CALLBACK = None;
         }
 
-        info!("Driver deinitialized");
+        debug!("Driver deinitialized");
 
         Ok(())
     }
@@ -1020,7 +1020,7 @@ impl<'d> WifiDriver<'d> {
         let mut found_ap: u16 = 0;
         esp!(unsafe { esp_wifi_scan_get_ap_num(&mut found_ap as *mut _) })?;
 
-        info!("Found {} access points", found_ap);
+        debug!("Found {} access points", found_ap);
 
         Ok(found_ap as usize)
     }
@@ -1029,13 +1029,13 @@ impl<'d> WifiDriver<'d> {
         &mut self,
         ap_infos_raw: &mut [wifi_ap_record_t],
     ) -> Result<usize, EspError> {
-        info!("About to get info for found access points");
+        debug!("About to get info for found access points");
 
         let mut ap_count: u16 = ap_infos_raw.len() as u16;
 
         esp!(unsafe { esp_wifi_scan_get_ap_records(&mut ap_count, ap_infos_raw.as_mut_ptr(),) })?;
 
-        info!("Got info for {} access points", ap_count);
+        debug!("Got info for {} access points", ap_count);
 
         Ok(ap_count as usize)
     }
@@ -1119,7 +1119,7 @@ impl<'d> Drop for WifiDriver<'d> {
     fn drop(&mut self) {
         self.clear_all().unwrap();
 
-        info!("Dropped");
+        debug!("Dropped");
     }
 }
 
@@ -1599,31 +1599,31 @@ impl WifiWait {
     }
 
     pub fn wait(&self, matcher: impl Fn() -> bool) {
-        info!("About to wait");
+        debug!("About to wait");
 
         self.waitable.wait_while(|_| !matcher());
 
-        info!("Waiting done - success");
+        debug!("Waiting done - success");
     }
 
     pub fn wait_with_timeout(&self, dur: Duration, matcher: impl Fn() -> bool) -> bool {
-        info!("About to wait for duration {:?}", dur);
+        debug!("About to wait for duration {:?}", dur);
 
         let (timeout, _) = self
             .waitable
             .wait_timeout_while_and_get(dur, |_| !matcher(), |_| ());
 
         if !timeout {
-            info!("Waiting done - success");
+            debug!("Waiting done - success");
             true
         } else {
-            info!("Timeout while waiting");
+            debug!("Timeout while waiting");
             false
         }
     }
 
     fn on_wifi_event(waitable: &Waitable<()>, event: &WifiEvent) {
-        info!("Got wifi event: {:?}", event);
+        debug!("Got wifi event: {:?}", event);
 
         if matches!(
             event,
@@ -1660,26 +1660,26 @@ impl AsyncWifiWait {
     }
 
     pub async fn wait(&mut self, matcher: impl Fn() -> bool) {
-        info!("About to wait");
+        debug!("About to wait");
 
         Self::wait_sub(&mut self.subscription, matcher).await;
 
-        info!("Waiting done - success");
+        debug!("Waiting done - success");
     }
 
     pub async fn wait_with_timeout(&mut self, dur: Duration, matcher: impl Fn() -> bool) -> bool {
-        info!("About to wait for duration {:?}", dur);
+        debug!("About to wait for duration {:?}", dur);
 
         let subscription_wait = Self::wait_sub(&mut self.subscription, matcher);
         let timer_wait = self.timer.after(dur).unwrap(); // TODO
 
         match embassy_futures::select::select(subscription_wait, timer_wait).await {
             embassy_futures::select::Either::First(_) => {
-                info!("Waiting done - success");
+                debug!("Waiting done - success");
                 true
             }
             embassy_futures::select::Either::Second(_) => {
-                info!("Timeout while waiting");
+                debug!("Timeout while waiting");
                 false
             }
         }
