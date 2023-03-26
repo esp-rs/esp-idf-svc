@@ -1754,7 +1754,13 @@ where
     pub fn connect(&mut self) -> Result<(), EspError> {
         self.wifi.connect()?;
 
-        self.wait.wait(|| self.wifi.is_connected().unwrap_or(true));
+        let success = self.wait.wait_with_timeout(Duration::from_secs(15), || {
+            self.wifi.is_connected().unwrap_or(true)
+        });
+
+        if !success {
+            esp!(ESP_ERR_TIMEOUT)?;
+        }
 
         Ok(())
     }
@@ -1902,9 +1908,16 @@ where
         self.wifi.connect()?;
 
         let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_connected().unwrap_or(true))
+        let success = self
+            .wait
+            .wait_with_timeout(Duration::from_secs(15), move || {
+                wifi.is_connected().unwrap_or(true)
+            })
             .await;
+
+        if !success {
+            esp!(ESP_ERR_TIMEOUT)?;
+        }
 
         Ok(())
     }
