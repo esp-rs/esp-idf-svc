@@ -276,9 +276,14 @@ impl EspHttpConnection {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
         self.assert_response();
 
-        let result = Self::check(unsafe {
+        let result = unsafe {
             esp_http_client_read(self.raw_client, buf.as_mut_ptr() as _, buf.len() as _)
-        });
+        };
+
+        let result = match EspError::from(result) {
+            Some(err) if result < 0 => Err(err),
+            _ => Ok(result as _),
+        };
 
         // workaround since esp_http_client_read does not yet return EAGAIN error in ESP-IDF v4.
         // in ESP-IDF v5 esp_http_client_read will return EAGAIN and this should not be needed.
