@@ -83,11 +83,9 @@ impl Profile {
 
     pub(crate) fn register_services(&mut self) {
         debug!("Registering {}'s services.", &self);
+        let interface = self.interface.unwrap();
         self.services.iter_mut().for_each(|service| {
-            service
-                .write()
-                .unwrap()
-                .register_self(self.interface.unwrap());
+            service.write().unwrap().register_self(interface);
         });
     }
 }
