@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::gatt_server::service::Service;
+use crate::ble::gatt_server::service::Service;
 use esp_idf_sys::*;
 use log::debug;
 

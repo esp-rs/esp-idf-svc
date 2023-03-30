@@ -12,8 +12,8 @@ use lazy_static::lazy_static;
 use log::{info, warn};
 
 use crate::{
+    ble::utilities::{Appearance, Connection},
     leaky_box_raw,
-    utilities::{Appearance, Connection},
 };
 
 pub use characteristic::Characteristic;
@@ -106,10 +106,10 @@ impl GattServer {
     /// # Panics
     ///
     /// Panics if a profile's lock is poisoned.
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> &mut Self {
         if self.started {
             warn!("GATT server already started.");
-            return;
+            return self;
         }
 
         self.started = true;
@@ -119,6 +119,8 @@ impl GattServer {
         self.profiles.iter().for_each(|profile| {
             profile.write().unwrap().register_self();
         });
+
+        self
     }
 
     /// Sets the name to be advertised in GAP packets.
@@ -188,6 +190,18 @@ impl GattServer {
         self
     }
 
+    /// Setup GattServer mtu that will be used to negotiate mtu during request from client peer
+    /// # Arguments
+    /// * `mtu` -  value to set local mtu, should be larger than 23 and lower or equal to 517
+    #[allow(unused)]
+    pub fn set_mtu(&mut self, mtu: u16) -> &mut Self {
+        unsafe {
+            esp_idf_sys::esp_nofail!(esp_idf_sys::esp_ble_gatt_set_local_mtu(mtu));
+        }
+
+        self
+    }
+
     pub(crate) fn get_profile(&self, interface: u8) -> Option<Arc<RwLock<Profile>>> {
         self.profiles
             .iter()
@@ -198,16 +212,6 @@ impl GattServer {
     #[allow(clippy::too_many_lines)]
     fn initialise_ble_stack() {
         info!("Initialising BLE stack.");
-
-        // NVS initialisation.
-        unsafe {
-            let result = nvs_flash_init();
-            if result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND {
-                warn!("NVS initialisation failed. Erasing NVS.");
-                esp_nofail!(nvs_flash_erase());
-                esp_nofail!(nvs_flash_init());
-            }
-        }
 
         #[cfg(esp32)]
         let default_controller_configuration = esp_bt_controller_config_t {
