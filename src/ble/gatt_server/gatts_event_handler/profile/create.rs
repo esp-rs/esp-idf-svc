@@ -1,5 +1,5 @@
-use crate::ble::gatt_server::Profile;
-use crate::ble::utilities::BleUuid;
+use crate::gatt_server::Profile;
+use crate::utilities::BleUuid;
 use esp_idf_sys::*;
 use log::{info, warn};
 

@@ -1,6 +1,6 @@
 use crate::{
-    ble::gatt_server::characteristic::Characteristic, ble::gatt_server::descriptor::Descriptor,
-    ble::utilities::BleUuid, leaky_box_raw,
+    gatt_server::characteristic::Characteristic, gatt_server::descriptor::Descriptor,
+    leaky_box_raw, utilities::BleUuid,
 };
 use esp_idf_sys::*;
 use log::debug;

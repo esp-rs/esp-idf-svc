@@ -12,8 +12,8 @@ use lazy_static::lazy_static;
 use log::{info, warn};
 
 use crate::{
-    ble::utilities::{Appearance, Connection},
     leaky_box_raw,
+    utilities::{Appearance, Connection},
 };
 
 pub use characteristic::Characteristic;
@@ -106,10 +106,10 @@ impl GattServer {
     /// # Panics
     ///
     /// Panics if a profile's lock is poisoned.
-    pub fn start(&mut self) -> &mut Self {
+    pub fn start(&mut self) {
         if self.started {
             warn!("GATT server already started.");
-            return self;
+            return;
         }
 
         self.started = true;
@@ -119,8 +119,6 @@ impl GattServer {
         self.profiles.iter().for_each(|profile| {
             profile.write().unwrap().register_self();
         });
-
-        self
     }
 
     /// Sets the name to be advertised in GAP packets.
@@ -190,18 +188,6 @@ impl GattServer {
         self
     }
 
-    /// Setup GattServer mtu that will be used to negotiate mtu during request from client peer
-    /// # Arguments
-    /// * `mtu` -  value to set local mtu, should be larger than 23 and lower or equal to 517
-    #[allow(unused)]
-    pub fn set_mtu(&mut self, mtu: u16) -> &mut Self {
-        unsafe {
-            esp_idf_sys::esp_nofail!(esp_idf_sys::esp_ble_gatt_set_local_mtu(mtu));
-        }
-
-        self
-    }
-
     pub(crate) fn get_profile(&self, interface: u8) -> Option<Arc<RwLock<Profile>>> {
         self.profiles
             .iter()
@@ -209,8 +195,19 @@ impl GattServer {
             .cloned()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn initialise_ble_stack() {
         info!("Initialising BLE stack.");
+
+        // NVS initialisation.
+        unsafe {
+            let result = nvs_flash_init();
+            if result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND {
+                warn!("NVS initialisation failed. Erasing NVS.");
+                esp_nofail!(nvs_flash_erase());
+                esp_nofail!(nvs_flash_init());
+            }
+        }
 
         #[cfg(esp32)]
         let default_controller_configuration = esp_bt_controller_config_t {
@@ -236,6 +233,7 @@ impl GattServer {
             pcm_polar: CONFIG_BTDM_CTRL_PCM_POLAR_EFF as _,
             hli: BTDM_CTRL_HLI != 0,
             magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
+            dup_list_refresh_period: SCAN_DUPL_CACHE_REFRESH_PERIOD as u16,
         };
 
         #[cfg(esp32c3)]
@@ -266,46 +264,61 @@ impl GattServer {
             normal_adv_size: NORMAL_SCAN_DUPLICATE_CACHE_SIZE as u16,
             mesh_adv_size: MESH_DUPLICATE_SCAN_CACHE_SIZE as u16,
             coex_phy_coded_tx_rx_time_limit: CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as u8,
+            #[cfg(any(esp_idf_version = "4.4", esp_idf_version = "5.0"))]
             hw_target_code: BLE_HW_TARGET_CODE_ESP32C3_CHIP_ECO0,
+            #[cfg(esp_idf_version = "5.1")]
+            hw_target_code: BLE_HW_TARGET_CODE_CHIP_ECO0,
             slave_ce_len_min: SLAVE_CE_LEN_MIN_DEFAULT as u8,
             hw_recorrect_en: AGC_RECORRECT_EN as u8,
             cca_thresh: CONFIG_BT_CTRL_HW_CCA_VAL as u8,
-        };
-        #[cfg(esp32s3)]
-        let default_controller_configuration = esp_bt_controller_config_t {
-            magic: esp_idf_sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL,
-            version: esp_idf_sys::ESP_BT_CTRL_CONFIG_VERSION,
-            controller_task_stack_size: esp_idf_sys::ESP_TASK_BT_CONTROLLER_STACK as u16,
-            controller_task_prio: esp_idf_sys::ESP_TASK_BT_CONTROLLER_PRIO as u8,
-            controller_task_run_cpu: esp_idf_sys::CONFIG_BT_CTRL_PINNED_TO_CORE as u8,
-            bluetooth_mode: esp_idf_sys::CONFIG_BT_CTRL_MODE_EFF as u8,
-            ble_max_act: esp_idf_sys::CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as u8,
-            sleep_mode: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_MODE_EFF as u8,
-            sleep_clock: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as u8,
-            ble_st_acl_tx_buf_nb: esp_idf_sys::CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as u8,
-            ble_hw_cca_check: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_EFF as u8,
-            ble_adv_dup_filt_max: esp_idf_sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as u16,
-            coex_param_en: false,
-            ce_len_type: esp_idf_sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as u8,
-            coex_use_hooks: false,
-            hci_tl_type: esp_idf_sys::CONFIG_BT_CTRL_HCI_TL_EFF as u8,
-            hci_tl_funcs: std::ptr::null_mut() as *mut esp_idf_sys::esp_bt_hci_tl_t,
-            txant_dft: esp_idf_sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as u8,
-            rxant_dft: esp_idf_sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as u8,
-            txpwr_dft: esp_idf_sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as u8,
-            cfg_mask: esp_idf_sys::CFG_MASK,
-            scan_duplicate_mode: esp_idf_sys::SCAN_DUPLICATE_MODE as u8,
-            scan_duplicate_type: esp_idf_sys::SCAN_DUPLICATE_TYPE_VALUE as u8,
-            normal_adv_size: esp_idf_sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as u16,
-            mesh_adv_size: esp_idf_sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as u16,
-            coex_phy_coded_tx_rx_time_limit:
-                esp_idf_sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as u8,
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0,
-            slave_ce_len_min: esp_idf_sys::SLAVE_CE_LEN_MIN_DEFAULT as u8,
-            hw_recorrect_en: esp_idf_sys::AGC_RECORRECT_EN as u8,
-            cca_thresh: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_VAL as u8,
+            // #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
+            scan_backoff_upperlimitmax: BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
+            // #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
+            dup_list_refresh_period: DUPL_SCAN_CACHE_REFRESH_PERIOD as u16,
+            #[cfg(esp_idf_version = "5.1")]
+            ble_50_feat_supp: BT_CTRL_50_FEATURE_SUPPORT != 0,
         };
 
+        #[cfg(esp32s3)]
+        let default_controller_configuration = esp_bt_controller_config_t {
+            magic: ESP_BT_CTRL_CONFIG_MAGIC_VAL,
+            version: ESP_BT_CTRL_CONFIG_VERSION,
+            controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as u16,
+            controller_task_prio: ESP_TASK_BT_CONTROLLER_PRIO as u8,
+            controller_task_run_cpu: CONFIG_BT_CTRL_PINNED_TO_CORE as u8,
+            bluetooth_mode: CONFIG_BT_CTRL_MODE_EFF as u8,
+            ble_max_act: CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as u8,
+            sleep_mode: CONFIG_BT_CTRL_SLEEP_MODE_EFF as u8,
+            sleep_clock: CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as u8,
+            ble_st_acl_tx_buf_nb: CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as u8,
+            ble_hw_cca_check: CONFIG_BT_CTRL_HW_CCA_EFF as u8,
+            ble_adv_dup_filt_max: CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as u16,
+            coex_param_en: false,
+            ce_len_type: CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as u8,
+            coex_use_hooks: false,
+            hci_tl_type: CONFIG_BT_CTRL_HCI_TL_EFF as u8,
+            hci_tl_funcs: std::ptr::null_mut(),
+            txant_dft: CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as u8,
+            rxant_dft: CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as u8,
+            txpwr_dft: CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as u8,
+            cfg_mask: CFG_MASK,
+            scan_duplicate_mode: SCAN_DUPLICATE_MODE as u8,
+            scan_duplicate_type: SCAN_DUPLICATE_TYPE_VALUE as u8,
+            normal_adv_size: NORMAL_SCAN_DUPLICATE_CACHE_SIZE as u16,
+            mesh_adv_size: MESH_DUPLICATE_SCAN_CACHE_SIZE as u16,
+            coex_phy_coded_tx_rx_time_limit: CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as u8,
+            #[cfg(any(esp_idf_version = "4.4", esp_idf_version = "5.0"))]
+            hw_target_code: BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0,
+            #[cfg(esp_idf_version = "5.1")]
+            hw_target_code: BLE_HW_TARGET_CODE_CHIP_ECO0,
+            slave_ce_len_min: SLAVE_CE_LEN_MIN_DEFAULT as u8,
+            hw_recorrect_en: AGC_RECORRECT_EN as u8,
+            cca_thresh: CONFIG_BT_CTRL_HW_CCA_VAL as u8,
+            scan_backoff_upperlimitmax: BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
+            dup_list_refresh_period: DUPL_SCAN_CACHE_REFRESH_PERIOD as u16,
+            #[cfg(esp_idf_version = "5.1")]
+            ble_50_feat_supp: BT_CTRL_50_FEATURE_SUPPORT != 0,
+        };
         // BLE controller initialisation.
         unsafe {
             esp_nofail!(esp_bt_controller_mem_release(

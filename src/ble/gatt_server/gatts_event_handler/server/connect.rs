@@ -1,5 +1,5 @@
-use crate::ble::gatt_server::GattServer;
-use crate::ble::utilities::Connection;
+use crate::gatt_server::GattServer;
+use crate::utilities::Connection;
 use log::info;
 
 impl GattServer {
@@ -9,9 +9,5 @@ impl GattServer {
     ) {
         info!("GATT client {} connected.", Connection::from(param));
         self.active_connections.insert(param.into());
-    }
-
-    pub fn is_client_connected(&self) -> bool {
-        !self.active_connections.is_empty()
     }
 }

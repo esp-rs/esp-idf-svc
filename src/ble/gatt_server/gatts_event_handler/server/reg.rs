@@ -1,4 +1,4 @@
-use crate::ble::gatt_server::GattServer;
+use crate::gatt_server::GattServer;
 #[allow(clippy::wildcard_imports)]
 use esp_idf_sys::*;
 use log::debug;

@@ -1,8 +1,7 @@
 use crate::{
-    ble::gatt_server::descriptor::Descriptor,
-    ble::utilities::{AttributeControl, AttributePermissions, BleUuid, CharacteristicProperties},
+    gatt_server::descriptor::Descriptor,
     leaky_box_raw,
-    nvs::EspDefaultNvs,
+    utilities::{AttributeControl, AttributePermissions, BleUuid, CharacteristicProperties},
 };
 
 use esp_idf_sys::{
@@ -13,7 +12,7 @@ use esp_idf_sys::{
 use log::{debug, warn};
 use std::{
     fmt::Formatter,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
 };
 
 type WriteCallback = dyn Fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param) + Send + Sync;
@@ -45,8 +44,6 @@ pub struct Characteristic {
     max_value_length: Option<u16>,
     /// A copy of the `control` property, in the `esp_attr_control_t` type, passed directly to the Bluetooth stack.
     internal_control: esp_attr_control_t,
-    /// Nvs storage used by Client Characteristic Configuration Descriptor (CCCD)
-    nvs_storage: Option<Arc<Mutex<EspDefaultNvs>>>,
 }
 
 impl Characteristic {
@@ -66,7 +63,6 @@ impl Characteristic {
             control: AttributeControl::AutomaticResponse(vec![0]),
             internal_control: AttributeControl::AutomaticResponse(vec![0]).into(),
             max_value_length: None,
-            nvs_storage: None,
         }
     }
 
@@ -99,12 +95,6 @@ impl Characteristic {
     /// Sets the maximum length for the content of this characteristic. The default value is 8 bytes.
     pub fn max_value_length(&mut self, length: u16) -> &mut Self {
         self.max_value_length = Some(length);
-        self
-    }
-
-    /// Sets the nvs storage of the [`Characteristic`].
-    pub fn set_nvs_storage(&mut self, nvs_storage: Option<Arc<Mutex<EspDefaultNvs>>>) -> &mut Self {
-        self.nvs_storage = nvs_storage;
         self
     }
 
@@ -201,7 +191,7 @@ impl Characteristic {
         if let Some(max_value_length) = self.max_value_length {
             if value.len() > max_value_length as usize {
                 panic!(
-                    "Value is too long for characteristic {}. The explicitly set maximum length is {max_value_length} bytes.",self
+                    "Value is too long for characteristic {self}. The explicitly set maximum length is {max_value_length} bytes."
                 );
             }
         } else if self.attribute_handle.is_some() && value.len() > self.internal_value.len() {
@@ -261,7 +251,7 @@ impl Characteristic {
 
         // Register a CCCD if needed.
         if self.properties.notify || self.properties.indicate {
-            self.descriptor(&Descriptor::cccd(self.nvs_storage.clone()).build());
+            self.descriptor(&Descriptor::cccd().build());
         }
 
         #[allow(clippy::cast_possible_truncation)]
@@ -297,11 +287,13 @@ impl Characteristic {
     /// This is simply done by registering the characteristic and then registering its descriptors.
     pub(crate) fn register_descriptors(&mut self) {
         debug!("Registering {}'s descriptors.", &self);
-        let service_handle = self
-            .service_handle
-            .expect("Cannot register a descriptor to a characteristic without a service handle.");
         self.descriptors.iter_mut().for_each(|descriptor| {
-            descriptor.write().unwrap().register_self(service_handle);
+            descriptor
+                .write()
+                .unwrap()
+                .register_self(self.service_handle.expect(
+                    "Cannot register a descriptor to a characteristic without a service handle.",
+                ));
         });
     }
 
