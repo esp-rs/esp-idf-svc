@@ -26,6 +26,7 @@ impl Descriptor {
 
     /// Creates a CCCD.
     ///
+    /// If the nvs_storage is set for the Characteristic
     /// The contents of the CCCD are stored in NVS and persisted across reboots.
     ///
     /// # Panics
