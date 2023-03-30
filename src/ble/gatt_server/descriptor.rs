@@ -1,10 +1,14 @@
-use std::sync::{Arc, RwLock};
-
-use crate::{
-    leaky_box_raw,
-    utilities::{AttributeControl, AttributePermissions, BleUuid},
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
 };
 
+use crate::{
+    ble::utilities::{AttributeControl, AttributePermissions, BleUuid},
+    leaky_box_raw,
+};
+
+use alloc::fmt;
 use esp_idf_sys::{
     esp_attr_control_t, esp_attr_value_t, esp_ble_gatts_add_char_descr,
     esp_ble_gatts_cb_param_t_gatts_read_evt_param, esp_ble_gatts_cb_param_t_gatts_write_evt_param,
@@ -12,8 +16,11 @@ use esp_idf_sys::{
 };
 use log::{debug, info, warn};
 
+type DescriptorWriteCallback =
+    dyn Fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param) + Send + Sync;
+
 /// Represents a GATT descriptor.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Descriptor {
     name: Option<String>,
     pub(crate) uuid: BleUuid,
@@ -22,7 +29,8 @@ pub struct Descriptor {
     permissions: AttributePermissions,
     pub(crate) control: AttributeControl,
     internal_control: esp_attr_control_t,
-    pub(crate) write_callback: Option<fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param)>,
+    pub(crate) write_callback: Option<Arc<DescriptorWriteCallback>>,
+    cccd_value: HashMap<String, Vec<u8>>,
 }
 
 impl Descriptor {
@@ -38,6 +46,7 @@ impl Descriptor {
             control: AttributeControl::AutomaticResponse(vec![0]),
             internal_control: AttributeControl::AutomaticResponse(vec![0]).into(),
             write_callback: None,
+            cccd_value: HashMap::new(),
         }
     }
 
@@ -80,7 +89,10 @@ impl Descriptor {
     /// Sets the write callback for the [`Descriptor`].
     pub fn on_write(
         &mut self,
-        callback: fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param),
+        callback: impl Fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param)
+            + Send
+            + Sync
+            + 'static,
     ) -> &mut Self {
         if !self.permissions.write_access {
             warn!(
@@ -91,7 +103,7 @@ impl Descriptor {
             return self;
         }
 
-        self.write_callback = Some(callback);
+        self.write_callback = Some(Arc::new(callback));
 
         self
     }
@@ -118,6 +130,16 @@ impl Descriptor {
             );
         }
         self
+    }
+
+    /// Gets the cccd value of the [`Descriptor`].
+    pub fn get_cccd_value(&self, key: &str) -> Option<Vec<u8>> {
+        self.cccd_value.get(key).cloned()
+    }
+
+    /// Sets the cccd value of the [`Descriptor`].
+    pub fn set_cccd_value(&mut self, key: String, value: Vec<u8>) {
+        dbg!(self.cccd_value.insert(key, value));
     }
 
     /// Returns a reference to the built [`Descriptor`] behind an `Arc` and an `RwLock`.
@@ -161,5 +183,23 @@ impl std::fmt::Display for Descriptor {
                 .unwrap_or_else(|| "Unnamed descriptor".to_string()),
             self.uuid
         )
+    }
+}
+
+impl std::fmt::Debug for Descriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        // Debug representation of a characteristic.
+        f.debug_struct("Descriptor")
+            .field("name", &self.name)
+            .field("uuid", &self.uuid)
+            .field("value", &self.value)
+            .field("attribute_handle", &self.attribute_handle)
+            .field("permissions", &self.permissions)
+            .field("control", &self.control)
+            .field("internal_control", &self.internal_control)
+            .field("internal_control", &self.internal_control)
+            .field("write_callback is_some={}", &self.write_callback.is_some())
+            .field("cccd_value", &self.cccd_value)
+            .finish()
     }
 }

@@ -1,4 +1,4 @@
-use crate::gatt_server::GattServer;
+use crate::ble::gatt_server::GattServer;
 use log::debug;
 
 impl GattServer {
