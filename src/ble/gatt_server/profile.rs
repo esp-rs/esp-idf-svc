@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::ble::gatt_server::service::Service;
+use crate::gatt_server::service::Service;
 use esp_idf_sys::*;
 use log::debug;
 
@@ -83,9 +83,11 @@ impl Profile {
 
     pub(crate) fn register_services(&mut self) {
         debug!("Registering {}'s services.", &self);
-        let interface = self.interface.unwrap();
         self.services.iter_mut().for_each(|service| {
-            service.write().unwrap().register_self(interface);
+            service
+                .write()
+                .unwrap()
+                .register_self(self.interface.unwrap());
         });
     }
 }

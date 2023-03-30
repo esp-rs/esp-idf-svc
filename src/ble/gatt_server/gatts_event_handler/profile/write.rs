@@ -1,5 +1,5 @@
-use crate::ble::gatt_server::Profile;
-use crate::ble::utilities::AttributeControl;
+use crate::gatt_server::Profile;
+use crate::utilities::AttributeControl;
 use esp_idf_sys::*;
 use log::debug;
 
@@ -94,7 +94,7 @@ impl Profile {
                                     );
 
                                     if let Some(write_callback) =
-                                        descriptor.read().unwrap().write_callback.clone()
+                                        descriptor.read().unwrap().write_callback
                                     {
                                         let value = unsafe {
                                             std::slice::from_raw_parts(

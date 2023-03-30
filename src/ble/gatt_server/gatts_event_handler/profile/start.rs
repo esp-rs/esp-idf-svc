@@ -1,4 +1,4 @@
-use crate::ble::gatt_server::Profile;
+use crate::gatt_server::Profile;
 use esp_idf_sys::*;
 use log::{debug, warn};
 
