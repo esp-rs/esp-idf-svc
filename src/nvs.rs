@@ -57,6 +57,18 @@ impl NvsDefault {
 
         Ok(Self(()))
     }
+
+    fn erase() -> Result<(), EspError> {
+        let mut taken = DEFAULT_TAKEN.lock();
+
+        if *taken {
+            esp!(ESP_ERR_INVALID_STATE)?;
+        }
+
+        esp!(unsafe { nvs_flash_erase() })?;
+
+        Ok(())
+    }
 }
 
 impl Drop for NvsDefault {
@@ -110,6 +122,19 @@ impl NvsCustom {
 
         Ok(Self(c_partition))
     }
+
+    fn erase(partition: &str) -> Result<(), EspError> {
+        let mut registrations = NONDEFAULT_LOCKED.lock();
+        let c_partition = CString::new(partition).unwrap();
+
+        if registrations.contains(c_partition.as_ref()) {
+            return Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap());
+        }
+
+        esp!(unsafe { nvs_flash_erase_partition(c_partition.as_ptr()) })?;
+
+        Ok(())
+    }
 }
 
 impl Drop for NvsCustom {
@@ -141,9 +166,13 @@ impl EspNvsPartition<NvsDefault> {
 
     ///
     /// Like [`EspNvsPartition::take`] but don't erase the OTA partition to recover from version / corruption errors.
-    /// 
+    ///
     pub fn take_simple() -> Result<Self, EspError> {
         Ok(Self(Arc::new(NvsDefault::new(true)?)))
+    }
+
+    pub fn erase() -> Result<(), EspError> {
+        NvsDefault::erase()
     }
 }
 
@@ -154,9 +183,13 @@ impl EspNvsPartition<NvsCustom> {
 
     ///
     /// Like [`EspNvsPartition::take`] but don't erase the OTA partition to recover from version / corruption errors.
-    /// 
+    ///
     pub fn take_simple(partition: &str) -> Result<Self, EspError> {
         Ok(Self(Arc::new(NvsCustom::new(partition, true)?)))
+    }
+
+    pub fn erase(partition: &str) -> Result<(), EspError> {
+        NvsCustom::erase(partition)
     }
 }
 
