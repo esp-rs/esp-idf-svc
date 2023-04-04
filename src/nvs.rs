@@ -1,12 +1,12 @@
 //! Non-Volatile Storage (NVS)
-use core::ptr;
+use core::{marker::PhantomData, mem::MaybeUninit, ptr};
 
 extern crate alloc;
 use alloc::sync::Arc;
 
 use ::log::*;
 
-use embedded_svc::storage::{RawStorage, StorageBase};
+use embedded_svc::storage::{RawStorage, StorageBase, StorageEntry, StorageIterate};
 
 use esp_idf_sys::*;
 
@@ -663,6 +663,25 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
         Ok(())
     }
+
+    pub fn entries<'a>(&'a self) -> Result<EspNvsIterEntries<'a, T>, EspError> {
+        let mut iter = MaybeUninit::uninit();
+
+        match esp!(unsafe {
+            nvs_entry_find_in_handle(self.1, nvs_type_t_NVS_TYPE_ANY, iter.as_mut_ptr())
+        }) {
+            Err(e) if e.code() == ESP_ERR_NVS_NOT_FOUND => return Ok(EspNvsIterEntries::empty()),
+            Err(e) => return Err(e),
+            _ => (),
+        }
+
+        let iter = unsafe { iter.assume_init() };
+
+        Ok(EspNvsIterEntries {
+            nvs: PhantomData,
+            iter,
+        })
+    }
 }
 
 impl<T: NvsPartitionId> Drop for EspNvs<T> {
@@ -708,5 +727,89 @@ impl<T: NvsPartitionId> RawStorage for EspNvs<T> {
 
     fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
         EspNvs::set_raw(self, name, buf)
+    }
+}
+
+impl<T: NvsPartitionId> StorageIterate for EspNvs<T> {
+    type Error = EspError;
+    type Entries<'a> = EspNvsIterEntries<'a, T>
+        where Self: 'a;
+    type Entry = NvsEntry;
+
+    fn entries<'a>(&'a self) -> Result<Self::Entries<'a>, Self::Error> {
+        EspNvs::entries(self)
+    }
+}
+
+pub struct EspNvsIterEntries<'a, T: NvsPartitionId> {
+    nvs: PhantomData<&'a EspNvs<T>>,
+    iter: nvs_iterator_t,
+}
+
+impl<'a, T: NvsPartitionId> EspNvsIterEntries<'a, T> {
+    fn empty() -> Self {
+        EspNvsIterEntries {
+            nvs: PhantomData,
+            iter: ptr::null_mut(),
+        }
+    }
+}
+
+impl<'a, T: NvsPartitionId> Drop for EspNvsIterEntries<'a, T> {
+    fn drop(&mut self) {
+        unsafe {
+            nvs_release_iterator(self.iter);
+        }
+    }
+}
+
+impl<'a, T: NvsPartitionId> Iterator for EspNvsIterEntries<'a, T> {
+    type Item = Result<NvsEntry, EspError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.iter.is_null() {
+            return None;
+        }
+
+        let mut info = MaybeUninit::<nvs_entry_info_t>::uninit();
+        // NOTE: because args are non-null, no error can occur
+        unsafe { nvs_entry_info(self.iter, info.as_mut_ptr()) };
+        let info = unsafe { info.assume_init() };
+
+        match esp!(unsafe { nvs_entry_next(&mut self.iter) }) {
+            Err(err) if err.code() == ESP_ERR_NVS_NOT_FOUND => {
+                self.iter = ptr::null_mut();
+            }
+            // No other errors are used in the esp-idf for nvs_entry_next when its args are non-null
+            Err(_err) => unreachable!(),
+            Ok(_) => (),
+        }
+
+        Some(Ok(NvsEntry { info }))
+    }
+}
+
+pub struct NvsEntry {
+    info: nvs_entry_info_t,
+}
+
+impl NvsEntry {
+    pub fn name(&self) -> Option<&str> {
+        self.name_cstr().to_str().ok()
+    }
+
+    pub fn name_cstr(&self) -> &CStr {
+        // SAFETY: nvs_entry_info_t guarantees that the key is null-terminated
+        unsafe { CStr::from_ptr(self.info.key.as_ptr()) }
+    }
+}
+
+impl StorageEntry for NvsEntry {
+    fn name(&self) -> Option<&str> {
+        NvsEntry::name(self).into()
+    }
+
+    fn name_cstr(&self) -> &CStr {
+        NvsEntry::name_cstr(self)
     }
 }
