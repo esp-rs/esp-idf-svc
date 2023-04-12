@@ -2,18 +2,16 @@
 
 #![allow(clippy::cast_possible_truncation)]
 
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex, RwLock},
-};
+use alloc::{boxed::Box, sync::Arc};
+use std::{collections::HashSet, sync::RwLock};
 
 use esp_idf_sys::*;
-use lazy_static::lazy_static;
 use log::{info, warn};
 
 use crate::{
     ble::utilities::{Appearance, Connection},
     leaky_box_raw,
+    private::mutex::{Mutex, RawMutex},
 };
 
 pub use characteristic::Characteristic;
@@ -34,9 +32,32 @@ mod custom_attributes;
 mod gap_event_handler;
 mod gatts_event_handler;
 
-lazy_static! {
-    /// The GATT server singleton.
-    pub static ref GLOBAL_GATT_SERVER: Mutex<GattServer> = Mutex::new(GattServer {
+type Singleton<T> = Mutex<Option<Box<T>>>;
+
+/// The GATT server singleton.
+pub static GLOBAL_GATT_SERVER: Singleton<GattServer> = Mutex::wrap(RawMutex::new(), None);
+
+/// Represents a GATT server.
+///
+/// This is a singleton, and can be accessed via the [`GLOBAL_GATT_SERVER`] static.
+pub struct GattServer {
+    profiles: Vec<Arc<RwLock<Profile>>>,
+    started: bool,
+    advertisement_parameters: esp_ble_adv_params_t,
+    advertisement_data: esp_ble_adv_data_t,
+    scan_response_data: esp_ble_adv_data_t,
+    device_name: String,
+    advertisement_configured: bool,
+    active_connections: HashSet<Connection>,
+}
+
+unsafe impl Send for GattServer {}
+
+/// The GATT server singleton initialization.
+///
+/// Must be called before the GATT server usage.
+pub fn init() {
+    *GLOBAL_GATT_SERVER.lock() = Some(Box::new(GattServer {
         profiles: Vec::new(),
         started: false,
         advertisement_parameters: esp_ble_adv_params_t {
@@ -81,24 +102,8 @@ lazy_static! {
         advertisement_configured: false,
         device_name: "ESP32".to_string(),
         active_connections: HashSet::new(),
-    });
+    }));
 }
-
-/// Represents a GATT server.
-///
-/// This is a singleton, and can be accessed via the [`GLOBAL_GATT_SERVER`] static.
-pub struct GattServer {
-    profiles: Vec<Arc<RwLock<Profile>>>,
-    started: bool,
-    advertisement_parameters: esp_ble_adv_params_t,
-    advertisement_data: esp_ble_adv_data_t,
-    scan_response_data: esp_ble_adv_data_t,
-    device_name: String,
-    advertisement_configured: bool,
-    active_connections: HashSet<Connection>,
-}
-
-unsafe impl Send for GattServer {}
 
 impl GattServer {
     /// Starts a [`GattServer`].
@@ -353,10 +358,10 @@ impl GattServer {
         gatts_if: esp_gatt_if_t,
         param: *mut esp_ble_gatts_cb_param_t,
     ) {
-        GLOBAL_GATT_SERVER
-            .lock()
-            .expect("Cannot lock global GATT server.")
-            .gatts_event_handler(event, gatts_if, param);
+        match &mut *GLOBAL_GATT_SERVER.lock() {
+            Some(gatt_server) => gatt_server.gatts_event_handler(event, gatts_if, param),
+            None => panic!("GATT server not initialized"),
+        }
     }
 
     /// Calls the global server's GAP event callback.
@@ -366,9 +371,9 @@ impl GattServer {
         event: esp_gap_ble_cb_event_t,
         param: *mut esp_ble_gap_cb_param_t,
     ) {
-        GLOBAL_GATT_SERVER
-            .lock()
-            .expect("Cannot lock global GATT server.")
-            .gap_event_handler(event, param);
+        match &mut *GLOBAL_GATT_SERVER.lock() {
+            Some(gatt_server) => gatt_server.gap_event_handler(event, param),
+            None => panic!("GATT server not initialized"),
+        }
     }
 }
