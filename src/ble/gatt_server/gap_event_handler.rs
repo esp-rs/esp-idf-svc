@@ -1,3 +1,5 @@
+use ::log::{debug, info, warn};
+
 use esp_idf_sys::{
     esp_ble_gap_cb_param_t, esp_ble_gap_start_advertising, esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
     esp_gap_ble_cb_event_t, esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT,
@@ -7,9 +9,7 @@ use esp_idf_sys::{
     esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT, esp_nofail,
 };
 
-use log::{debug, info, warn};
-
-use super::GattServer;
+use crate::ble::gatt_server::GattServer;
 
 impl GattServer {
     pub(crate) extern "C" fn gap_event_handler(

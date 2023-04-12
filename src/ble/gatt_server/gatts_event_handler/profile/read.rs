@@ -1,7 +1,9 @@
+use ::log::debug;
+
+use esp_idf_sys::*;
+
 use crate::ble::gatt_server::Profile;
 use crate::ble::utilities::AttributeControl;
-use esp_idf_sys::*;
-use log::debug;
 
 impl Profile {
     pub(crate) fn on_read(

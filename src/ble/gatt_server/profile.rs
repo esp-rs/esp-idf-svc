@@ -1,8 +1,10 @@
 use std::sync::{Arc, RwLock};
 
-use crate::ble::gatt_server::service::Service;
+use ::log::debug;
+
 use esp_idf_sys::*;
-use log::debug;
+
+use crate::ble::gatt_server::service::Service;
 
 /// Represents a GATT profile.
 ///

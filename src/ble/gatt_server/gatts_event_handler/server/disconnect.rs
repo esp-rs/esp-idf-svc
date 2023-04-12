@@ -1,5 +1,6 @@
+use ::log::info;
+
 use crate::ble::gatt_server::GattServer;
-use log::info;
 
 impl GattServer {
     pub(crate) fn on_disconnect(

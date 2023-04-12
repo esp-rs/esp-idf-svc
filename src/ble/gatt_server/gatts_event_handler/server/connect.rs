@@ -1,6 +1,7 @@
+use ::log::info;
+
 use crate::ble::gatt_server::GattServer;
 use crate::ble::utilities::Connection;
-use log::info;
 
 impl GattServer {
     pub(crate) fn on_connect(

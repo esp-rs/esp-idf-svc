@@ -1,5 +1,6 @@
+use ::log::debug;
+
 use crate::ble::gatt_server::GattServer;
-use log::debug;
 
 impl GattServer {
     #[allow(clippy::unused_self)]

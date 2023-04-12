@@ -1,5 +1,6 @@
-use esp_idf_sys::*;
 use std::sync::Arc;
+
+use esp_idf_sys::*;
 
 #[derive(Clone)]
 pub(crate) enum AttributeControl {

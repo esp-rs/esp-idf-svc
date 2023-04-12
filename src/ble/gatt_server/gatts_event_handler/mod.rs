@@ -1,11 +1,11 @@
-use crate::ble::gatt_server::{GattServer, Profile};
-
-#[allow(clippy::wildcard_imports)]
-use esp_idf_sys::*;
-use log::{debug, warn};
-
 mod profile;
 mod server;
+
+use ::log::{debug, warn};
+
+use esp_idf_sys::*;
+
+use crate::ble::gatt_server::{GattServer, Profile};
 
 impl GattServer {
     /// The main GATT server event loop.

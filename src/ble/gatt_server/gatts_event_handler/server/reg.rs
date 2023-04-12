@@ -1,7 +1,8 @@
-use crate::ble::gatt_server::GattServer;
-#[allow(clippy::wildcard_imports)]
+use ::log::debug;
+
 use esp_idf_sys::*;
-use log::debug;
+
+use crate::ble::gatt_server::GattServer;
 
 impl GattServer {
     pub(crate) fn on_reg(

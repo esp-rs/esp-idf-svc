@@ -1,18 +1,19 @@
-use crate::{
-    ble::gatt_server::descriptor::Descriptor,
-    ble::utilities::{AttributeControl, AttributePermissions, BleUuid, CharacteristicProperties},
-    nvs::EspDefaultNvs,
-};
+use core::fmt::Formatter;
+
+use std::sync::{Arc, Mutex, RwLock};
+
+use ::log::{debug, warn};
 
 use esp_idf_sys::{
     esp_attr_control_t, esp_attr_value_t, esp_ble_gatts_add_char,
     esp_ble_gatts_cb_param_t_gatts_read_evt_param, esp_ble_gatts_cb_param_t_gatts_write_evt_param,
     esp_ble_gatts_set_attr_value, esp_nofail,
 };
-use log::{debug, warn};
-use std::{
-    fmt::Formatter,
-    sync::{Arc, Mutex, RwLock},
+
+use crate::{
+    ble::gatt_server::descriptor::Descriptor,
+    ble::utilities::{AttributeControl, AttributePermissions, BleUuid, CharacteristicProperties},
+    nvs::EspDefaultNvs,
 };
 
 type WriteCallback = dyn Fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param) + Send + Sync;
