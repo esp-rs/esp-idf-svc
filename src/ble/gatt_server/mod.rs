@@ -1,23 +1,5 @@
 //! The GATT server.
-
 #![allow(clippy::cast_possible_truncation)]
-
-use alloc::{boxed::Box, sync::Arc};
-use std::{collections::HashSet, sync::RwLock};
-
-use esp_idf_sys::*;
-use log::{info, warn};
-
-use crate::{
-    ble::utilities::{Appearance, Connection},
-    private::mutex::{Mutex, RawMutex},
-};
-
-pub use characteristic::Characteristic;
-pub use descriptor::Descriptor;
-pub use profile::Profile;
-pub use service::Service;
-
 // Structs.
 mod characteristic;
 mod descriptor;
@@ -30,6 +12,23 @@ mod custom_attributes;
 // Event handler.
 mod gap_event_handler;
 mod gatts_event_handler;
+
+use alloc::{boxed::Box, sync::Arc};
+use std::{collections::HashSet, sync::RwLock};
+
+use ::log::{info, warn};
+
+use esp_idf_sys::*;
+
+use crate::{
+    ble::utilities::{Appearance, Connection},
+    private::mutex::{Mutex, RawMutex},
+};
+
+pub use characteristic::Characteristic;
+pub use descriptor::Descriptor;
+pub use profile::Profile;
+pub use service::Service;
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 

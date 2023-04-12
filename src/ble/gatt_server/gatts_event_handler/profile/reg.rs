@@ -1,6 +1,8 @@
-use crate::ble::gatt_server::Profile;
+use ::log::{info, warn};
+
 use esp_idf_sys::*;
-use log::{info, warn};
+
+use crate::ble::gatt_server::Profile;
 
 impl Profile {
     pub(crate) fn on_reg(&mut self, param: esp_ble_gatts_cb_param_t_gatts_reg_evt_param) {

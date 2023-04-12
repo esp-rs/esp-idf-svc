@@ -1,12 +1,13 @@
+use core::fmt::Formatter;
+use std::sync::{Arc, RwLock};
+
+use ::log::debug;
+
+use esp_idf_sys::*;
+
 use crate::{
     ble::gatt_server::characteristic::Characteristic, ble::gatt_server::descriptor::Descriptor,
     ble::utilities::BleUuid,
-};
-use esp_idf_sys::*;
-use log::debug;
-use std::{
-    fmt::Formatter,
-    sync::{Arc, RwLock},
 };
 
 /// Represents a GATT service.
@@ -123,8 +124,6 @@ impl Service {
         if self.characteristics.is_empty() {
             return;
         }
-
-        // Loghi docet.
 
         let service_handle = self.handle.unwrap();
         let characteristics = self.characteristics.clone();

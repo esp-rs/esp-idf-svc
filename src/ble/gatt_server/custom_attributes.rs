@@ -1,12 +1,12 @@
 use std::sync::{Arc, Mutex};
 
+use ::log::debug;
+
 use crate::{
     ble::gatt_server::Descriptor,
     ble::utilities::{AttributePermissions, BleUuid},
     nvs::EspDefaultNvs,
 };
-
-use log::debug;
 
 impl Descriptor {
     /// Creates a new descriptor with the `0x2901` UUID, and the description string as its value.

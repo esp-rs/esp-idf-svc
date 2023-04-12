@@ -1,7 +1,9 @@
+use ::log::{info, warn};
+
+use esp_idf_sys::*;
+
 use crate::ble::gatt_server::Profile;
 use crate::ble::utilities::BleUuid;
-use esp_idf_sys::*;
-use log::{info, warn};
 
 impl Profile {
     pub(crate) fn on_create(&mut self, param: esp_ble_gatts_cb_param_t_gatts_create_evt_param) {

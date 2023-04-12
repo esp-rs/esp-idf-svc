@@ -1,17 +1,19 @@
+use alloc::fmt;
+
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
-use crate::ble::utilities::{AttributeControl, AttributePermissions, BleUuid};
+use ::log::{debug, info, warn};
 
-use alloc::fmt;
 use esp_idf_sys::{
     esp_attr_control_t, esp_attr_value_t, esp_ble_gatts_add_char_descr,
     esp_ble_gatts_cb_param_t_gatts_read_evt_param, esp_ble_gatts_cb_param_t_gatts_write_evt_param,
     esp_ble_gatts_set_attr_value, esp_nofail,
 };
-use log::{debug, info, warn};
+
+use crate::ble::utilities::{AttributeControl, AttributePermissions, BleUuid};
 
 type DescriptorWriteCallback =
     dyn Fn(Vec<u8>, esp_ble_gatts_cb_param_t_gatts_write_evt_param) + Send + Sync;

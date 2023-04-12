@@ -1,7 +1,9 @@
+use ::log::{debug, warn};
+
+use esp_idf_sys::*;
+
 use crate::ble::gatt_server::GattServer;
 use crate::ble::utilities::BleUuid;
-use esp_idf_sys::*;
-use log::{debug, warn};
 
 impl GattServer {
     #[allow(clippy::too_many_lines)]

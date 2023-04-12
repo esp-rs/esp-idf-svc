@@ -1,8 +1,12 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
-use esp_idf_svc::ble::{
-    gatt_server::{Characteristic, Profile, Service, GLOBAL_GATT_SERVER},
-    utilities::{AttributePermissions, BleUuid, CharacteristicProperties},
+use esp_idf_svc::{
+    ble::{
+        self,
+        gatt_server::{Characteristic, Profile, Service, GLOBAL_GATT_SERVER},
+        utilities::{AttributePermissions, BleUuid, CharacteristicProperties},
+    },
+    nvs::{EspDefaultNvs, EspDefaultNvsPartition},
 };
 
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_free_internal_heap_size};
@@ -99,14 +103,15 @@ fn main() {
         .service(&service)
         .build();
 
-    GLOBAL_GATT_SERVER
-        .lock()
-        .unwrap()
-        .profile(profile)
-        .device_name("ESP32-GATT-Server")
-        .appearance(ble::utilities::Appearance::WristWornPulseOximeter)
-        .advertise_service(&service)
-        .start();
+    match &mut *GLOBAL_GATT_SERVER.lock() {
+        Some(gatt_server) => gatt_server
+            .profile(profile)
+            .device_name("ESP32-GATT-Server")
+            .appearance(ble::utilities::Appearance::WristWornPulseOximeter)
+            .advertise_service(&service)
+            .start(),
+        None => panic!("GATT server not initialized"),
+    };
 
     std::thread::spawn(move || {
         let mut counter = 0;

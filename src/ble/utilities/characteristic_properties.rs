@@ -1,5 +1,6 @@
+use ::log::warn;
+
 use esp_idf_sys::*;
-use log::warn;
 
 /// Represents the properties of a [`Characteristic`].
 ///
