@@ -10,7 +10,6 @@ use log::{info, warn};
 
 use crate::{
     ble::utilities::{Appearance, Connection},
-    leaky_box_raw,
     private::mutex::{Mutex, RawMutex},
 };
 
@@ -177,8 +176,8 @@ impl GattServer {
     ///
     /// Panics if the service lock is poisoned.
     pub fn advertise_service(&mut self, service: &Arc<RwLock<Service>>) -> &mut Self {
-        let uuid = service.read().unwrap().uuid.as_uuid128_array();
-        self.scan_response_data.p_service_uuid = leaky_box_raw!(uuid).cast::<u8>();
+        let mut uuid = service.read().unwrap().uuid.as_uuid128_array();
+        self.scan_response_data.p_service_uuid = uuid.as_mut_ptr();
         self.scan_response_data.service_uuid_len = uuid.len() as u16;
 
         self
@@ -219,7 +218,7 @@ impl GattServer {
         info!("Initialising BLE stack.");
 
         #[cfg(esp32)]
-        let default_controller_configuration = esp_bt_controller_config_t {
+        let mut default_controller_configuration = esp_bt_controller_config_t {
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as _,
             controller_task_prio: ESP_TASK_BT_CONTROLLER_PRIO as _,
             hci_uart_no: BT_HCI_UART_NO_DEFAULT as _,
@@ -246,7 +245,7 @@ impl GattServer {
         };
 
         #[cfg(esp32c3)]
-        let default_controller_configuration = esp_bt_controller_config_t {
+        let mut default_controller_configuration = esp_bt_controller_config_t {
             magic: ESP_BT_CTRL_CONFIG_MAGIC_VAL,
             version: ESP_BT_CTRL_CONFIG_VERSION,
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as u16,
@@ -289,7 +288,7 @@ impl GattServer {
         };
 
         #[cfg(esp32s3)]
-        let default_controller_configuration = esp_bt_controller_config_t {
+        let mut default_controller_configuration = esp_bt_controller_config_t {
             magic: ESP_BT_CTRL_CONFIG_MAGIC_VAL,
             version: ESP_BT_CTRL_CONFIG_VERSION,
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as u16,
@@ -335,9 +334,9 @@ impl GattServer {
             esp_nofail!(esp_bt_controller_mem_release(
                 esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT
             ));
-            esp_nofail!(esp_bt_controller_init(leaky_box_raw!(
-                default_controller_configuration
-            )));
+            esp_nofail!(esp_bt_controller_init(
+                &mut default_controller_configuration
+            ));
             esp_nofail!(esp_bt_controller_enable(esp_bt_mode_t_ESP_BT_MODE_BLE));
             esp_nofail!(esp_bluedroid_init());
             esp_nofail!(esp_bluedroid_enable());

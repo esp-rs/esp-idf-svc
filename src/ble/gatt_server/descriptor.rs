@@ -3,10 +3,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{
-    ble::utilities::{AttributeControl, AttributePermissions, BleUuid},
-    leaky_box_raw,
-};
+use crate::ble::utilities::{AttributeControl, AttributePermissions, BleUuid};
 
 use alloc::fmt;
 use esp_idf_sys::{
@@ -160,13 +157,13 @@ impl Descriptor {
         unsafe {
             esp_nofail!(esp_ble_gatts_add_char_descr(
                 service_handle,
-                leaky_box_raw!(self.uuid.into()),
+                &mut self.uuid.into(),
                 self.permissions.into(),
-                leaky_box_raw!(esp_attr_value_t {
+                &mut esp_attr_value_t {
                     attr_max_len: self.value.len() as u16,
                     attr_len: self.value.len() as u16,
                     attr_value: self.value.as_mut_slice().as_mut_ptr(),
-                }),
+                },
                 &mut self.internal_control,
             ));
         }

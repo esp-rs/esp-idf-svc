@@ -1,8 +1,5 @@
 //! This module contains useful structs and macros for the crate.
 
-// Leaky box: internally useful for ffi C interfacing.
-pub(crate) mod leaky_box;
-
 // Utilities: private.
 mod attribute_control;
 pub(crate) use attribute_control::AttributeControl;

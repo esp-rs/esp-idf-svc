@@ -10,7 +10,6 @@ use esp_idf_sys::{
 use log::{debug, info, warn};
 
 use super::GattServer;
-use crate::leaky_box_raw;
 
 impl GattServer {
     pub(crate) extern "C" fn gap_event_handler(
@@ -25,9 +24,9 @@ impl GattServer {
                 info!("Starting BLE GAP advertisement.");
 
                 unsafe {
-                    esp_nofail!(esp_ble_gap_start_advertising(leaky_box_raw!(
-                        self.advertisement_parameters
-                    )));
+                    esp_nofail!(esp_ble_gap_start_advertising(
+                        &mut self.advertisement_parameters
+                    ));
                 }
             }
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT => {
@@ -35,9 +34,9 @@ impl GattServer {
                 info!("Starting BLE GAP response advertisement.");
 
                 unsafe {
-                    esp_nofail!(esp_ble_gap_start_advertising(leaky_box_raw!(
-                        self.advertisement_parameters
-                    )));
+                    esp_nofail!(esp_ble_gap_start_advertising(
+                        &mut self.advertisement_parameters
+                    ));
                 }
             }
             esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_START_COMPLETE_EVT => {
