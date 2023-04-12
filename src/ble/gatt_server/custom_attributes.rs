@@ -108,7 +108,7 @@ impl Descriptor {
                             .clone()
                             .lock()
                             .unwrap()
-                            .set_cccd_value(key, value.clone());
+                            .set_cccd_value(key, value);
                     }
                 }
             })
