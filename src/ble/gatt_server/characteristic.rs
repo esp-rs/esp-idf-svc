@@ -1,7 +1,6 @@
 use crate::{
     ble::gatt_server::descriptor::Descriptor,
     ble::utilities::{AttributeControl, AttributePermissions, BleUuid, CharacteristicProperties},
-    leaky_box_raw,
     nvs::EspDefaultNvs,
 };
 
@@ -268,16 +267,16 @@ impl Characteristic {
         unsafe {
             esp_nofail!(esp_ble_gatts_add_char(
                 service_handle,
-                leaky_box_raw!(self.uuid.into()),
+                &mut self.uuid.into(),
                 self.permissions.into(),
                 self.properties.into(),
-                leaky_box_raw!(esp_attr_value_t {
+                &mut esp_attr_value_t {
                     attr_max_len: self
                         .max_value_length
                         .unwrap_or(self.internal_value.len() as u16),
                     attr_len: self.internal_value.len() as u16,
                     attr_value: self.internal_value.as_mut_slice().as_mut_ptr(),
-                }),
+                },
                 &mut self.internal_control,
             ));
         }

@@ -1,6 +1,6 @@
 use crate::{
     ble::gatt_server::characteristic::Characteristic, ble::gatt_server::descriptor::Descriptor,
-    ble::utilities::BleUuid, leaky_box_raw,
+    ble::utilities::BleUuid,
 };
 use esp_idf_sys::*;
 use log::debug;
@@ -101,15 +101,14 @@ impl Service {
     pub(crate) fn register_self(&mut self, interface: u8) {
         debug!("Registering {} on interface {}.", &self, interface);
 
-        let id: esp_gatt_srvc_id_t = esp_gatt_srvc_id_t {
+        let mut id: esp_gatt_srvc_id_t = esp_gatt_srvc_id_t {
             id: self.uuid.into(),
             is_primary: self.primary,
         };
 
         unsafe {
             esp_nofail!(esp_ble_gatts_create_service(
-                interface,
-                leaky_box_raw!(id),
+                interface, &mut id,
                 256, // TODO: count the number of characteristics and descriptors.
             ));
         }
