@@ -801,19 +801,19 @@ impl<'d> WifiDriver<'d> {
 
     /// Get information of AP which the ESP32 station is associated with.
     /// Usefull to get the current signal strength of the AP, in a simple way.
-    pub fn get_ap_info(&mut self) -> Result<AccessPointInfo, EspError> {
+    pub fn get_ap_info(&mut self) -> Result<AccessPointInfo, EspError> {        
         let mut ap_info_raw: wifi_ap_record_t = wifi_ap_record_t::default();
-        // If Sta not connected throws EspError(12303)
-        esp!(unsafe { esp_wifi_sta_get_ap_info(&mut ap_info_raw) })?;
+        // If Sta not connected throws EspError(12303) 
+        esp!(unsafe { esp_wifi_sta_get_ap_info(&mut ap_info_raw)})?;
         let ap_info: AccessPointInfo = Newtype(&ap_info_raw).into();
-
+    
         info!("AP Info: {:?}", ap_info);
         Ok(ap_info)
     }
 
     /// Set RSSI threshold below which APP will get an WifiEvent::StaBssRssiLow.
     /// @param rssi_threshold: threshold value in dbm between -100 to 0
-    ///
+    /// 
     /// # Example
     ///
     /// This example shows how to use it in a `async` context.
@@ -825,19 +825,26 @@ impl<'d> WifiDriver<'d> {
     /// )
     /// .unwrap();
     /// wifi_driver.start().unwrap();
-    ///
-    /// let scan_finish_signal = Arc::new(channel_bridge::notification::Notification::new());
+    /// wifi_driver.connect().unwrap();
+    /// 
+    /// let rssi_low = -40;
+    /// wifi_driver.driver_mut().set_sta_rssi_low(rssi_low).unwrap();
+    /// 
+    /// // Subscribe to RSSI events.
+    /// let rssi_low_signal = Arc::new(channel_bridge::notification::Notification::new());
     /// let _sub = {
-    ///     let scan_finish_signal = scan_finish_signal.clone();
+    ///     let rssi_low_signal = rssi_low_signal.clone();
     ///     sysloop.subscribe::<WifiEvent>(move |event| {
     ///         if *event == WifiEvent::StaBssRssiLow {
-    ///             scan_finish_signal.notify();
+    ///             rssi_low_signal.notify();
     ///         }
     ///     }).unwrap()
     /// };
     ///
-    /// scan_finish_signal.wait().await;
-    /// // do stuff with the information
+    /// rssi_low_signal.wait().await;
+    /// // do stuff with the information 
+    /// 
+    /// // set_rssi_threshold() has to be called again after every StaBssRssiLow event received.
     pub fn set_rssi_threshold(&mut self, rssi_threshold: i8) -> Result<(), EspError> {
         esp!(unsafe { esp_wifi_set_rssi_threshold(rssi_threshold.into()) })
     }
