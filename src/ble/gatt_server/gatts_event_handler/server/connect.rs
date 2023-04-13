@@ -1,4 +1,4 @@
-use ::log::info;
+use ::log::{error, info};
 
 use crate::ble::gatt_server::GattServer;
 use crate::ble::utilities::Connection;
@@ -9,7 +9,9 @@ impl GattServer {
         param: esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_connect_evt_param,
     ) {
         info!("GATT client {} connected.", Connection::from(param));
-        self.active_connections.insert(param.into());
+        if self.active_connections.insert(param.into()).is_err() {
+            error!("Failed to insert new connection.");
+        }
     }
 
     pub fn is_client_connected(&self) -> bool {
