@@ -68,8 +68,14 @@ impl std::fmt::Display for Connection {
     }
 }
 
-impl std::hash::Hash for Connection {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+// TODO: change to the core::hash:Hash
+// when new heapless version will be released
+// https://github.com/japaric/heapless/blob/644653bf3b831c6bb4963be2de24804acf5e5001/CHANGELOG.md?plain=1#L21-L22
+impl hash32::Hash for Connection {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: hash32::Hasher,
+    {
         self.remote_bda.hash(state);
     }
 }

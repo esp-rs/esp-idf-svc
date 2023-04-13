@@ -14,7 +14,8 @@ mod gap_event_handler;
 mod gatts_event_handler;
 
 use alloc::{boxed::Box, sync::Arc};
-use std::{collections::HashSet, sync::RwLock};
+use heapless::FnvIndexSet;
+use std::sync::RwLock;
 
 use ::log::{info, warn};
 
@@ -46,7 +47,8 @@ pub struct GattServer {
     scan_response_data: esp_ble_adv_data_t,
     device_name: String,
     advertisement_configured: bool,
-    active_connections: HashSet<Connection>,
+    // BT/BLE MAX ACL CONNECTIONS is (1~7).
+    active_connections: FnvIndexSet<Connection, 8>,
 }
 
 unsafe impl Send for GattServer {}
@@ -99,7 +101,7 @@ pub fn init() {
         },
         advertisement_configured: false,
         device_name: "ESP32".to_string(),
-        active_connections: HashSet::new(),
+        active_connections: FnvIndexSet::new(),
     }));
 }
 
