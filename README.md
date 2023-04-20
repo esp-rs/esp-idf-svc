@@ -42,7 +42,6 @@ To use this crate, you will need:
 2. Install the `cargo-generate` and `ldproxy` tools via cargo
     ```bash
     cargo install cargo-generate ldproxy
-
     ```
 3. (Linux & macOS) Install libuv
     ```bash
