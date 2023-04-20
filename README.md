@@ -20,7 +20,7 @@ To get started quickly, you have two options:
 You can use the [Wokwi online simulator](https://wokwi.com/projects/332188235906155092) to experiment with this crate.
 
 ## Option 2: Use cargo-generate
-Please make sure you have installed all [prerequisites](https://github.com/esp-rs/esp-idf-template#prerequisites) first!
+Please make sure you have installed all [prerequisites](https://github.com/esp-rs/esp-idf-svc#prerequisites) first!
 ### Generate
 ```bash
 cargo generate --git https://github.com/esp-rs/esp-idf-template
