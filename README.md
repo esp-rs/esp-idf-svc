@@ -1,7 +1,7 @@
 # Type-Safe Rust Wrappers for various ESP-IDF services
 
 [![CI](https://github.com/esp-rs/esp-idf-svc/actions/workflows/ci.yml/badge.svg)](https://github.com/esp-rs/esp-idf-svc/actions/workflows/ci.yml)
-![crates.io](https://img.shields.io/crates/v/esp-idf-svc.svg)
+[![crates.io](https://img.shields.io/crates/v/esp-idf-svc.svg)]((https://crates.io/crates/esp-idf-svc))
 [![Documentation](https://img.shields.io/badge/docs-esp--rs-brightgreen)](https://esp-rs.github.io/esp-idf-svc/esp_idf_svc/index.html)
 [![Matrix](https://img.shields.io/matrix/esp-rs:matrix.org?label=join%20matrix&color=BEC5C9&logo=matrix)](https://matrix.to/#/#esp-rs:matrix.org)
 [![Wokwi](https://img.shields.io/endpoint?label=wokwi&url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fsimulate-in-wokwi.json)]((https://wokwi.com/projects/332188235906155092))
