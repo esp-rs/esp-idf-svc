@@ -800,19 +800,19 @@ impl<'d> WifiDriver<'d> {
     }
 
     /// Get information of AP which the ESP32 station is associated with.
-    /// Usefull to get the current signal strength of the AP, in a simple way.
+    /// Useful to get the current signal strength of the AP.
     pub fn get_ap_info(&mut self) -> Result<AccessPointInfo, EspError> {        
         let mut ap_info_raw: wifi_ap_record_t = wifi_ap_record_t::default();
         // If Sta not connected throws EspError(12303) 
         esp!(unsafe { esp_wifi_sta_get_ap_info(&mut ap_info_raw)})?;
         let ap_info: AccessPointInfo = Newtype(&ap_info_raw).into();
     
-        info!("AP Info: {:?}", ap_info);
+        debug!("AP Info: {:?}", ap_info);
         Ok(ap_info)
     }
 
     /// Set RSSI threshold below which APP will get an WifiEvent::StaBssRssiLow.
-    /// @param rssi_threshold: threshold value in dbm between -100 to 0
+    /// rssi_threshold: threshold value in dbm between -100 to 0
     /// 
     /// # Example
     ///
@@ -845,6 +845,7 @@ impl<'d> WifiDriver<'d> {
     /// // do stuff with the information 
     /// 
     /// // set_rssi_threshold() has to be called again after every StaBssRssiLow event received.
+    /// ```
     pub fn set_rssi_threshold(&mut self, rssi_threshold: i8) -> Result<(), EspError> {
         esp!(unsafe { esp_wifi_set_rssi_threshold(rssi_threshold.into()) })
     }
