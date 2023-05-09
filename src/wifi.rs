@@ -31,6 +31,13 @@ use crate::private::cstr::*;
 use crate::private::mutex;
 use crate::private::waitable::*;
 
+#[cfg(all(
+    feature = "alloc",
+    esp_idf_comp_wpa_supplicant_enabled,
+    any(esp_idf_esp_wifi_dpp_support, esp_idf_wpa_dpp_support)
+))]
+use crate::wifi_dpp::{EspWifiDpp, QrCode};
+
 pub mod config {
     use core::time::Duration;
 
@@ -1291,6 +1298,22 @@ impl<'d> EspWifi<'d> {
         })?;
 
         Ok(())
+    }
+
+    /// Generate a QR code that can be used with a Wi-Fi Easy Connect compatible
+    /// configurator (e.g. a smart phone) to provision the MCU.
+    #[cfg(all(
+        feature = "alloc",
+        esp_idf_comp_wpa_supplicant_enabled,
+        any(esp_idf_esp_wifi_dpp_support, esp_idf_wpa_dpp_support)
+    ))]
+    pub fn dpp_generate_qrcode(
+        &mut self,
+        channels: &[u8],
+        key: Option<&[u8; 32]>,
+        associated_data: Option<&[u8]>,
+    ) -> Result<EspWifiDpp<'_, 'd, QrCode>, EspError> {
+        EspWifiDpp::generate_qrcode(self, channels, key, associated_data)
     }
 }
 
