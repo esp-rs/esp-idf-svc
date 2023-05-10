@@ -13,8 +13,6 @@ use ::log::*;
 
 use enumset::*;
 
-#[cfg(feature = "experimental")]
-use embedded_svc::utils::asyncify::{event_bus::*, timer::*};
 use embedded_svc::wifi::*;
 
 use esp_idf_hal::modem::WifiModemPeripheral;
@@ -25,6 +23,7 @@ use esp_idf_sys::*;
 use crate::eventloop::EspEventLoop;
 use crate::eventloop::{
     EspSubscription, EspSystemEventLoop, EspTypedEventDeserializer, EspTypedEventSource, System,
+    Wait,
 };
 use crate::handle::RawHandle;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
@@ -33,9 +32,8 @@ use crate::nvs::EspDefaultNvsPartition;
 use crate::private::common::*;
 use crate::private::cstr::*;
 use crate::private::mutex;
-use crate::private::waitable::*;
 #[cfg(feature = "experimental")]
-use crate::timer::{EspTaskTimerService, EspTimer};
+use crate::timer::EspTaskTimerService;
 
 pub mod config {
     use core::time::Duration;
@@ -1119,7 +1117,7 @@ impl<'d> Drop for WifiDriver<'d> {
     fn drop(&mut self) {
         self.clear_all().unwrap();
 
-        debug!("Dropped");
+        debug!("WifiDriver Dropped");
     }
 }
 
@@ -1271,6 +1269,10 @@ impl<'d> EspWifi<'d> {
         self.driver().is_started()
     }
 
+    pub fn is_connected(&self) -> Result<bool, EspError> {
+        self.driver().is_connected()
+    }
+
     pub fn is_up(&self) -> Result<bool, EspError> {
         if !self.driver().is_connected()? {
             Ok(false)
@@ -1396,6 +1398,8 @@ impl<'d> EspWifi<'d> {
 impl<'d> Drop for EspWifi<'d> {
     fn drop(&mut self) {
         self.detach_netif().unwrap();
+
+        info!("EspWifi dropped");
     }
 }
 
@@ -1445,7 +1449,7 @@ impl<'d> Wifi for EspWifi<'d> {
     }
 
     fn is_connected(&self) -> Result<bool, Self::Error> {
-        EspWifi::is_up(self)
+        EspWifi::is_connected(self)
     }
 
     fn get_configuration(&self) -> Result<Configuration, Self::Error> {
@@ -1480,6 +1484,12 @@ impl<'d> Wifi for EspWifi<'d> {
 
     fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
         EspWifi::scan(self)
+    }
+}
+
+impl<'d> NetifStatus for EspWifi<'d> {
+    fn is_up(&self) -> Result<bool, EspError> {
+        EspWifi::is_up(self)
     }
 }
 
@@ -1579,140 +1589,40 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
     }
 }
 
-pub struct WifiWait {
-    _subscription: EspSubscription<System>,
-    waitable: Arc<Waitable<()>>,
-}
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
-impl WifiWait {
-    pub fn new(sysloop: &EspEventLoop<System>) -> Result<Self, EspError> {
-        let waitable: Arc<Waitable<()>> = Arc::new(Waitable::new(()));
-
-        let s_waitable = waitable.clone();
-        let subscription =
-            sysloop.subscribe(move |event: &WifiEvent| Self::on_wifi_event(&s_waitable, event))?;
-
-        Ok(Self {
-            waitable,
-            _subscription: subscription,
-        })
-    }
-
-    pub fn wait(&self, matcher: impl Fn() -> bool) {
-        debug!("About to wait");
-
-        self.waitable.wait_while(|_| !matcher());
-
-        debug!("Waiting done - success");
-    }
-
-    pub fn wait_with_timeout(&self, dur: Duration, matcher: impl Fn() -> bool) -> bool {
-        debug!("About to wait for duration {:?}", dur);
-
-        let (timeout, _) = self
-            .waitable
-            .wait_timeout_while_and_get(dur, |_| !matcher(), |_| ());
-
-        if !timeout {
-            debug!("Waiting done - success");
-            true
-        } else {
-            debug!("Timeout while waiting");
-            false
-        }
-    }
-
-    fn on_wifi_event(waitable: &Waitable<()>, event: &WifiEvent) {
-        debug!("Got wifi event: {:?}", event);
-
-        if matches!(
-            event,
-            WifiEvent::ApStarted
-                | WifiEvent::ApStopped
-                | WifiEvent::StaStarted
-                | WifiEvent::StaStopped
-                | WifiEvent::StaConnected
-                | WifiEvent::StaDisconnected
-                | WifiEvent::ScanDone
-        ) {
-            waitable.cvar.notify_all();
-        }
-    }
-}
-
-#[cfg(feature = "experimental")]
-pub struct AsyncWifiWait {
-    subscription:
-        AsyncSubscription<crate::private::mutex::RawCondvar, WifiEvent, EspSubscription<System>>,
-    timer: AsyncTimer<EspTimer>,
-}
-
-#[cfg(feature = "experimental")]
-impl AsyncWifiWait {
-    pub fn new(
-        sysloop: &EspEventLoop<System>,
-        timer_service: &EspTaskTimerService,
-    ) -> Result<Self, EspError> {
-        Ok(Self {
-            subscription: AsyncEventBus::new((), sysloop.clone()).subscribe()?,
-            timer: AsyncTimerService::new(timer_service.clone()).timer()?,
-        })
-    }
-
-    pub async fn wait(&mut self, matcher: impl Fn() -> bool) {
-        debug!("About to wait");
-
-        Self::wait_sub(&mut self.subscription, matcher).await;
-
-        debug!("Waiting done - success");
-    }
-
-    pub async fn wait_with_timeout(&mut self, dur: Duration, matcher: impl Fn() -> bool) -> bool {
-        debug!("About to wait for duration {:?}", dur);
-
-        let subscription_wait = Self::wait_sub(&mut self.subscription, matcher);
-        let timer_wait = self.timer.after(dur).unwrap(); // TODO
-
-        match embassy_futures::select::select(subscription_wait, timer_wait).await {
-            embassy_futures::select::Either::First(_) => {
-                debug!("Waiting done - success");
-                true
-            }
-            embassy_futures::select::Either::Second(_) => {
-                debug!("Timeout while waiting");
-                false
-            }
-        }
-    }
-
-    async fn wait_sub(
-        subscription: &mut AsyncSubscription<
-            crate::private::mutex::RawCondvar,
-            WifiEvent,
-            EspSubscription<System>,
-        >,
-        matcher: impl Fn() -> bool,
-    ) {
-        while !matcher() {
-            subscription.recv().await;
-        }
-    }
+fn matches_wifi_event(event: &WifiEvent) -> bool {
+    matches!(
+        event,
+        WifiEvent::ApStarted
+            | WifiEvent::ApStopped
+            | WifiEvent::StaStarted
+            | WifiEvent::StaStopped
+            | WifiEvent::StaConnected
+            | WifiEvent::StaDisconnected
+            | WifiEvent::ScanDone
+    )
 }
 
 pub struct BlockingWifi<T> {
     wifi: T,
-    wait: WifiWait,
+    event_loop: crate::eventloop::EspSystemEventLoop,
 }
 
 impl<T> BlockingWifi<T>
 where
     T: Wifi<Error = EspError> + NonBlocking,
 {
-    pub fn wrap(wifi: T, sysloop: &EspSystemEventLoop) -> Result<Self, EspError> {
-        Ok(Self {
-            wifi,
-            wait: WifiWait::new(sysloop)?,
-        })
+    pub fn wrap(wifi: T, event_loop: EspSystemEventLoop) -> Result<Self, EspError> {
+        Ok(Self { wifi, event_loop })
+    }
+
+    pub fn wifi(&self) -> &T {
+        &self.wifi
+    }
+
+    pub fn wifi_mut(&mut self) -> &mut T {
+        &mut self.wifi
     }
 
     pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, EspError> {
@@ -1737,41 +1647,25 @@ where
 
     pub fn start(&mut self) -> Result<(), EspError> {
         self.wifi.start()?;
-
-        self.wait.wait(|| self.wifi.is_started().unwrap_or(true));
-
-        Ok(())
+        self.wifi_wait_while(|| self.wifi.is_started().map(|s| !s), None)
     }
 
     pub fn stop(&mut self) -> Result<(), EspError> {
         self.wifi.stop()?;
-
-        self.wait.wait(|| !self.wifi.is_started().unwrap_or(false));
-
-        Ok(())
+        self.wifi_wait_while(|| self.wifi.is_started(), None)
     }
 
     pub fn connect(&mut self) -> Result<(), EspError> {
         self.wifi.connect()?;
-
-        let success = self.wait.wait_with_timeout(Duration::from_secs(15), || {
-            self.wifi.is_connected().unwrap_or(true)
-        });
-
-        if !success {
-            esp!(ESP_ERR_TIMEOUT)?;
-        }
-
-        Ok(())
+        self.wifi_wait_while(
+            || self.wifi.is_connected().map(|s| !s),
+            Some(CONNECT_TIMEOUT),
+        )
     }
 
     pub fn disconnect(&mut self) -> Result<(), EspError> {
         self.wifi.disconnect()?;
-
-        self.wait
-            .wait(|| !self.wifi.is_connected().unwrap_or(false));
-
-        Ok(())
+        self.wifi_wait_while(|| self.wifi.is_connected(), None)
     }
 
     pub fn scan_n<const N: usize>(
@@ -1784,13 +1678,46 @@ where
     pub fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
         self.wifi.scan()
     }
+
+    pub fn wifi_wait_while<F: Fn() -> Result<bool, EspError>>(
+        &self,
+        matcher: F,
+        timeout: Option<Duration>,
+    ) -> Result<(), EspError> {
+        let wait = Wait::<WifiEvent, _>::new(&self.event_loop, matches_wifi_event)?;
+
+        wait.wait_while(matcher, timeout)
+    }
+}
+
+impl<T> BlockingWifi<T>
+where
+    T: NetifStatus,
+{
+    pub fn is_up(&self) -> Result<bool, EspError> {
+        self.wifi.is_up()
+    }
+
+    pub fn wait_netif_up(&self) -> Result<(), EspError> {
+        self.ip_wait_while(|| self.wifi.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
+    }
+
+    pub fn ip_wait_while<F: Fn() -> Result<bool, EspError>>(
+        &self,
+        matcher: F,
+        timeout: Option<core::time::Duration>,
+    ) -> Result<(), EspError> {
+        let wait = crate::eventloop::Wait::<IpEvent, _>::new(&self.event_loop, |_| true)?;
+
+        wait.wait_while(matcher, timeout)
+    }
 }
 
 impl<T> Wifi for BlockingWifi<T>
 where
     T: Wifi<Error = EspError> + NonBlocking,
 {
-    type Error = T::Error;
+    type Error = EspError;
 
     fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
         BlockingWifi::get_capabilities(self)
@@ -1840,10 +1767,20 @@ where
     }
 }
 
+impl<T> NetifStatus for BlockingWifi<T>
+where
+    T: NetifStatus,
+{
+    fn is_up(&self) -> Result<bool, EspError> {
+        BlockingWifi::is_up(self)
+    }
+}
+
 #[cfg(feature = "experimental")]
 pub struct AsyncWifi<T> {
     wifi: T,
-    wait: AsyncWifiWait,
+    event_loop: crate::eventloop::EspSystemEventLoop,
+    timer_service: crate::timer::EspTaskTimerService,
 }
 
 #[cfg(feature = "experimental")]
@@ -1853,13 +1790,22 @@ where
 {
     pub fn wrap(
         wifi: T,
-        sysloop: &EspSystemEventLoop,
-        timer_service: &EspTaskTimerService,
+        event_loop: EspSystemEventLoop,
+        timer_service: EspTaskTimerService,
     ) -> Result<Self, EspError> {
         Ok(Self {
             wifi,
-            wait: AsyncWifiWait::new(sysloop, timer_service)?,
+            event_loop,
+            timer_service,
         })
+    }
+
+    pub fn wifi(&self) -> &T {
+        &self.wifi
+    }
+
+    pub fn wifi_mut(&mut self) -> &mut T {
+        &mut self.wifi
     }
 
     pub fn get_capabilities(&self) -> Result<EnumSet<Capability>, EspError> {
@@ -1884,53 +1830,27 @@ where
 
     pub async fn start(&mut self) -> Result<(), EspError> {
         self.wifi.start()?;
-
-        let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_started().unwrap_or(true))
-            .await;
-
-        Ok(())
+        self.wifi_wait(|| self.wifi.is_started().map(|s| !s), None)
+            .await
     }
 
     pub async fn stop(&mut self) -> Result<(), EspError> {
         self.wifi.stop()?;
-
-        let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_started().unwrap_or(false))
-            .await;
-
-        Ok(())
+        self.wifi_wait(|| self.wifi.is_started(), None).await
     }
 
     pub async fn connect(&mut self) -> Result<(), EspError> {
         self.wifi.connect()?;
-
-        let wifi = &self.wifi;
-        let success = self
-            .wait
-            .wait_with_timeout(Duration::from_secs(15), move || {
-                wifi.is_connected().unwrap_or(true)
-            })
-            .await;
-
-        if !success {
-            esp!(ESP_ERR_TIMEOUT)?;
-        }
-
-        Ok(())
+        self.wifi_wait(
+            || self.wifi.is_connected().map(|s| !s),
+            Some(CONNECT_TIMEOUT),
+        )
+        .await
     }
 
     pub async fn disconnect(&mut self) -> Result<(), EspError> {
         self.wifi.disconnect()?;
-
-        let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_connected().unwrap_or(false))
-            .await;
-
-        Ok(())
+        self.wifi_wait(|| self.wifi.is_connected(), None).await
     }
 
     pub async fn scan_n<const N: usize>(
@@ -1938,10 +1858,8 @@ where
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
         self.wifi.start_scan(&Default::default(), false)?;
 
-        let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_scan_done().unwrap_or(true))
-            .await;
+        self.wifi_wait(|| self.wifi.is_scan_done().map(|s| !s), None)
+            .await?;
 
         self.wifi.get_scan_result_n()
     }
@@ -1950,17 +1868,54 @@ where
     pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
         self.wifi.start_scan(&Default::default(), false)?;
 
-        let wifi = &self.wifi;
-        self.wait
-            .wait(move || wifi.is_scan_done().unwrap_or(true))
-            .await;
+        self.wifi_wait(|| self.wifi.is_scan_done().map(|s| !s), None)
+            .await?;
 
         self.wifi.get_scan_result()
+    }
+
+    pub async fn wifi_wait<F: Fn() -> Result<bool, EspError>>(
+        &self,
+        matcher: F,
+        timeout: Option<Duration>,
+    ) -> Result<(), EspError> {
+        let mut wait = crate::eventloop::AsyncWait::<WifiEvent, _>::new(
+            &self.event_loop,
+            &self.timer_service,
+        )?;
+
+        wait.wait_while(matcher, timeout).await
+    }
+}
+
+#[cfg(feature = "experimental")]
+impl<T> AsyncWifi<T>
+where
+    T: NetifStatus,
+{
+    pub fn is_up(&self) -> Result<bool, EspError> {
+        self.wifi.is_up()
+    }
+
+    pub async fn wait_netif_up(&self) -> Result<(), EspError> {
+        self.ip_wait_while(|| self.wifi.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
+            .await
+    }
+
+    pub async fn ip_wait_while<F: Fn() -> Result<bool, EspError>>(
+        &self,
+        matcher: F,
+        timeout: Option<core::time::Duration>,
+    ) -> Result<(), EspError> {
+        let mut wait =
+            crate::eventloop::AsyncWait::<IpEvent, _>::new(&self.event_loop, &self.timer_service)?;
+
+        wait.wait_while(matcher, timeout).await
     }
 }
 
 #[cfg(all(feature = "nightly", feature = "experimental"))]
-impl<T> asynch::Wifi for AsyncWifi<T>
+impl<T> embedded_svc::wifi::asynch::Wifi for AsyncWifi<T>
 where
     T: Wifi<Error = EspError> + NonBlocking,
 {
@@ -2024,5 +1979,26 @@ where
     #[cfg(feature = "alloc")]
     fn scan(&mut self) -> Self::ScanFuture<'_> {
         AsyncWifi::scan(self)
+    }
+}
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+impl<'d> crate::netif::asynch::NetifStatus for EspWifi<'d> {
+    type IsUpFuture<'a> = impl Future<Output = Result<bool, EspError>> + 'a where Self: 'a;
+
+    fn is_up(&self) -> Self::IsUpFuture<'_> {
+        async move { EspWifi::is_up(self) }
+    }
+}
+
+#[cfg(all(feature = "nightly", feature = "experimental"))]
+impl<T> crate::netif::asynch::NetifStatus for AsyncWifi<T>
+where
+    T: NetifStatus,
+{
+    type IsUpFuture<'a> = impl Future<Output = Result<bool, EspError>> + 'a where Self: 'a;
+
+    fn is_up(&self) -> Self::IsUpFuture<'_> {
+        async move { AsyncWifi::is_up(self) }
     }
 }

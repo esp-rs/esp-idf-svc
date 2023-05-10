@@ -4,7 +4,7 @@
 //! Note: Requires `experimental` cargo feature to be enabled
 
 use embedded_svc::{
-    http::{client::Client as HttpClient, Method, Status},
+    http::{client::Client as HttpClient, Method},
     io::Write,
     utils::io,
 };

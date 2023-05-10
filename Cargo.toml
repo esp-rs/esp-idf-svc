@@ -53,5 +53,9 @@ name = "http_request"
 required-features = ["experimental"]
 
 [[example]]
+name = "wifi"
+required-features = ["experimental"]
+
+[[example]]
 name = "wifi_async"
 required-features = ["experimental"]
