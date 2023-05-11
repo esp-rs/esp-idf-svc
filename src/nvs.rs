@@ -767,25 +767,34 @@ impl<'a, T: NvsPartitionId> Iterator for EspNvsIterEntries<'a, T> {
     type Item = Result<NvsEntry, EspError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.iter.is_null() {
-            return None;
-        }
-
-        let mut info = MaybeUninit::<nvs_entry_info_t>::uninit();
-        // NOTE: because args are non-null, no error can occur
-        unsafe { nvs_entry_info(self.iter, info.as_mut_ptr()) };
-        let info = unsafe { info.assume_init() };
-
-        match esp!(unsafe { nvs_entry_next(&mut self.iter) }) {
-            Err(err) if err.code() == ESP_ERR_NVS_NOT_FOUND => {
-                self.iter = ptr::null_mut();
+        loop {
+            if self.iter.is_null() {
+                return None;
             }
-            // No other errors are used in the esp-idf for nvs_entry_next when its args are non-null
-            Err(_err) => unreachable!(),
-            Ok(_) => (),
-        }
 
-        Some(Ok(NvsEntry { info }))
+            let mut info = MaybeUninit::<nvs_entry_info_t>::uninit();
+            // NOTE: because args are non-null, no error can occur
+            unsafe { nvs_entry_info(self.iter, info.as_mut_ptr()) };
+            let info = unsafe { info.assume_init() };
+
+            match esp!(unsafe { nvs_entry_next(&mut self.iter) }) {
+                Err(err) if err.code() == ESP_ERR_NVS_NOT_FOUND => {
+                    self.iter = ptr::null_mut();
+                }
+                // No other errors are used in the esp-idf for nvs_entry_next when its args are non-null
+                Err(_err) => unreachable!(),
+                Ok(_) => (),
+            }
+
+            // skip non-utf8 keys
+            // SAFETY: nvs_entry_info_t is garunteed to have a null-terminated key
+            if unsafe { CStr::from_ptr(info.key.as_ptr()) }
+                .to_str()
+                .is_ok()
+            {
+                return Some(Ok(NvsEntry { info }));
+            }
+        }
     }
 }
 
@@ -794,22 +803,18 @@ pub struct NvsEntry {
 }
 
 impl NvsEntry {
-    pub fn name(&self) -> Option<&str> {
-        self.name_cstr().to_str().ok()
-    }
-
-    pub fn name_cstr(&self) -> &CStr {
+    pub fn name(&self) -> &str {
         // SAFETY: nvs_entry_info_t guarantees that the key is null-terminated
+        // NOTE: should not panic because we check for utf8 in TryFrom
         unsafe { CStr::from_ptr(self.info.key.as_ptr()) }
+            .to_str()
+            .ok()
+            .unwrap()
     }
 }
 
 impl StorageEntry for NvsEntry {
-    fn name(&self) -> Option<&str> {
-        NvsEntry::name(self).into()
-    }
-
-    fn name_cstr(&self) -> &CStr {
-        NvsEntry::name_cstr(self)
+    fn name(&self) -> &str {
+        NvsEntry::name(self)
     }
 }
