@@ -374,8 +374,13 @@ where
     }
 }
 
-/// Low(-ish) level WiFi driver. Wraps the Wifi calls from `esp-idf-sys` in a
-/// structured way.
+/// This struct provides a safe wrapper over the ESP IDF Wifi C driver. The driver
+/// works on Layer 2 (Data Link) in the OSI model, in that it provides facilities
+/// for sending and receiving ethernet packets over the WiFi radio.
+///
+/// For most use cases, utilizing `EspWifi` - which provides a networking (IP)
+/// layer as well - should be preferred. Using `WifiDriver` directly is beneficial
+/// only when one would like to utilize a custom, non-STD network stack like `smoltcp`.
 pub struct WifiDriver<'d> {
     status: Arc<mutex::Mutex<(WifiEvent, WifiEvent)>>,
     _subscription: EspSubscription<System>,
@@ -1211,7 +1216,15 @@ impl<'d> Wifi for WifiDriver<'d> {
     }
 }
 
-/// Wraps a [`WifiDriver`] and handles the associated [`EspNetif`] network interface(s).
+/// `EspWifi` wraps a `WifiDriver` Data Link layer instance, and binds the OSI
+/// Layer 3 (network) facilities of ESP IDF to it. In other words, it connects
+/// the ESP IDF AP and STA Netif interfaces to the Wifi driver. This allows users
+/// to utilize the Rust STD APIs for working with TCP and UDP sockets.
+///
+/// This struct should be the default option for a Wifi driver in all use cases
+/// but the niche one where bypassing the ESP IDF Netif and lwIP stacks is
+/// desirable. E.g., using `smoltcp` or other custom IP stacks on top of the
+/// ESP IDF Wifi radio.
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub struct EspWifi<'d> {
     ap_netif: EspNetif,
@@ -1666,6 +1679,8 @@ fn matches_wifi_event(event: &WifiEvent) -> bool {
 
 /// Wraps a [`WifiDriver`] or [`EspWifi`], and offers strictly synchronous (blocking)
 /// function calls for their functionality.
+// TODO: add an example about wrapping an existing instance of wifidriver/espwifi,
+// as well as using that instance once the BlockingWifi drops it.
 pub struct BlockingWifi<T> {
     wifi: T,
     event_loop: crate::eventloop::EspSystemEventLoop,
@@ -1714,19 +1729,22 @@ where
         self.wifi.is_connected()
     }
 
-    /// As per [`WifiDriver::start()`]
+    /// As per [`WifiDriver::start()`], but as a blocking call that returns
+    /// once the wifi driver has started.
     pub fn start(&mut self) -> Result<(), EspError> {
         self.wifi.start()?;
         self.wifi_wait_while(|| self.wifi.is_started().map(|s| !s), None)
     }
 
-    /// As per [`WifiDriver::stop()`]
+    /// As per [`WifiDriver::stop()`], but as a blocking call that returns
+    /// once the wifi driver has stopped.
     pub fn stop(&mut self) -> Result<(), EspError> {
         self.wifi.stop()?;
         self.wifi_wait_while(|| self.wifi.is_started(), None)
     }
 
-    /// As per [`WifiDriver::connect()`]
+    /// As per [`WifiDriver::connect()`], but as a blocking call that returns
+    /// once the wifi driver is connected.
     pub fn connect(&mut self) -> Result<(), EspError> {
         self.wifi.connect()?;
         self.wifi_wait_while(
@@ -1735,7 +1753,8 @@ where
         )
     }
 
-    /// As per [`WifiDriver::disconnect()`]
+    /// As per [`WifiDriver::disconnect()`], but as a blocking call that returns
+    /// once the wifi driver has disconnected.
     pub fn disconnect(&mut self) -> Result<(), EspError> {
         self.wifi.disconnect()?;
         self.wifi_wait_while(|| self.wifi.is_connected(), None)
@@ -1754,8 +1773,18 @@ where
         self.wifi.scan()
     }
 
-    /// Waits for [`WifiEvent`]s. The wait ends when a wifi event happens, and
-    /// the given matcher callback function returns `false` for that event.
+    /// Performs a blocking wait until certain condition provided by the user
+    /// in the form of a `matcher` callback becomes true. Most often than not
+    /// that condition would be related to the state of the Wifi driver. In
+    /// other words, whether the driver is started, stopped, (dis)connected and
+    /// so on.
+    ///
+    /// Note that the waiting is not done internally using busy-looping and/or
+    /// timeouts. Rather, the condition (`matcher`) is evaluated initially, and
+    /// if it returns `false`, it is re-evaluated each time the ESP IDF C Wifi
+    /// driver posts a Wifi event on the system event loop. The reasoning behind
+    /// this is that changes to the state of the Wifi driver are always
+    /// accompanied by posting Wifi events.
     pub fn wifi_wait_while<F: Fn() -> Result<bool, EspError>>(
         &self,
         matcher: F,
@@ -1782,9 +1811,8 @@ where
         self.ip_wait_while(|| self.wifi.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
     }
 
-    /// Waits for [`IpEvent`]s on the network stack. The wait ends when a
-    /// IP event happens, and the given matcher callback function returns
-    /// `false` for that event.
+    /// As [`BlockingWifi::wifi_wait_while()`], but for `EspWifi` events
+    /// related to the IP layer, instead of `WifiDriver` events on the data link layer.
     pub fn ip_wait_while<F: Fn() -> Result<bool, EspError>>(
         &self,
         matcher: F,
@@ -1921,20 +1949,23 @@ where
         self.wifi.is_connected()
     }
 
-    /// As per [`WifiDriver::start()`]
+    /// As per [`WifiDriver::start()`], but as an async call that awaits until
+    /// the wifi driver has started.
     pub async fn start(&mut self) -> Result<(), EspError> {
         self.wifi.start()?;
         self.wifi_wait(|| self.wifi.is_started().map(|s| !s), None)
             .await
     }
 
-    /// As per [`WifiDriver::stop()`]
+    /// As per [`WifiDriver::stop()`], but as an async call that awaits until
+    /// the wifi driver has stopped.
     pub async fn stop(&mut self) -> Result<(), EspError> {
         self.wifi.stop()?;
         self.wifi_wait(|| self.wifi.is_started(), None).await
     }
 
-    /// As per [`WifiDriver::connect()`]
+    /// As per [`WifiDriver::connect()`], but as an async call that awaits until
+    /// the wifi driver has connected.
     pub async fn connect(&mut self) -> Result<(), EspError> {
         self.wifi.connect()?;
         self.wifi_wait(
@@ -1944,13 +1975,15 @@ where
         .await
     }
 
-    /// As per [`WifiDriver::disconnect()`]
+    /// As per [`WifiDriver::disconnect()`], but as an async call that awaits until
+    /// the wifi driver has disconnected.
     pub async fn disconnect(&mut self) -> Result<(), EspError> {
         self.wifi.disconnect()?;
         self.wifi_wait(|| self.wifi.is_connected(), None).await
     }
 
-    /// As per [`WifiDriver::scan_n()`]
+    /// As per [`WifiDriver::start_scan()`] plus [`WifiDriver::get_scan_result_n()`],
+    /// as an async call that awaits until the scan is complete.
     pub async fn scan_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
@@ -1962,7 +1995,8 @@ where
         self.wifi.get_scan_result_n()
     }
 
-    /// As per [`WifiDriver::scan()`]
+    /// As per [`WifiDriver::start_scan()`] plus [`WifiDriver::get_scan_result()`],
+    /// as an async call that awaits until the scan is complete.
     #[cfg(feature = "alloc")]
     pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
         self.wifi.start_scan(&Default::default(), false)?;
@@ -1973,8 +2007,17 @@ where
         self.wifi.get_scan_result()
     }
 
-    /// Waits for [`WifiEvent`]s. The wait ends when a wifi event happens, and
-    /// the given matcher callback function returns `false` for that event.
+    /// Awaits for a certain condition provided by the user in the form of a
+    /// `matcher` callback to become true. Most often than not that condition
+    /// would be related to the state of the Wifi driver. In other words,
+    /// whether the driver is started, stopped, (dis)connected and so on.
+    ///
+    /// Note that the waiting is not done internally using busy-looping and/or
+    /// timeouts. Rather, the condition (`matcher`) is evaluated initially, and
+    /// if it returns `false`, it is re-evaluated each time the ESP IDF C Wifi
+    /// driver posts a Wifi event on the system event loop. The reasoning behind
+    /// this is that changes to the state of the Wifi driver are always
+    /// accompanied by posting Wifi events.
     pub async fn wifi_wait<F: Fn() -> Result<bool, EspError>>(
         &self,
         matcher: F,
@@ -2006,9 +2049,8 @@ where
             .await
     }
 
-    /// Waits for [`IpEvent`]s on the network stack. The wait ends when a
-    /// IP event happens, and the given matcher callback function returns
-    /// `false` for that event.
+    /// As [`AsyncWifi::wifi_wait()`], but for `EspWifi` events related to the
+    /// IP layer, instead of `WifiDriver` events on the data link layer.
     pub async fn ip_wait_while<F: Fn() -> Result<bool, EspError>>(
         &self,
         matcher: F,
