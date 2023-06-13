@@ -32,27 +32,27 @@ pub trait NvsPartitionId {
 pub struct NvsDefault(());
 
 impl NvsDefault {
-    fn new() -> Result<Self, EspError> {
+    fn new(dont_erase: bool) -> Result<Self, EspError> {
         let mut taken = DEFAULT_TAKEN.lock();
 
         if *taken {
             return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
         }
 
-        let default_nvs = Self::init()?;
+        let default_nvs = Self::init(dont_erase)?;
 
         *taken = true;
         Ok(default_nvs)
     }
 
-    fn init() -> Result<Self, EspError> {
+    fn init(dont_erase: bool) -> Result<Self, EspError> {
         if let Some(err) = EspError::from(unsafe { nvs_flash_init() }) {
             match err.code() {
-                ESP_ERR_NVS_NO_FREE_PAGES | ESP_ERR_NVS_NEW_VERSION_FOUND => {
+                ESP_ERR_NVS_NO_FREE_PAGES | ESP_ERR_NVS_NEW_VERSION_FOUND if !dont_erase => {
                     esp!(unsafe { nvs_flash_erase() })?;
                     esp!(unsafe { nvs_flash_init() })?;
                 }
-                _ => (),
+                _ => return Err(err),
             }
         }
 
@@ -78,15 +78,16 @@ impl NvsPartitionId for NvsDefault {
 pub struct NvsCustom(CString);
 
 impl NvsCustom {
-    fn new(partition: &str) -> Result<Self, EspError> {
+    fn new(partition: &str, dont_erase: bool) -> Result<Self, EspError> {
         let mut registrations = NONDEFAULT_LOCKED.lock();
 
-        Self::init(partition, &mut registrations)
+        Self::init(partition, &mut registrations, dont_erase)
     }
 
     fn init(
         partition: &str,
         registrations: &mut alloc::collections::BTreeSet<CString>,
+        dont_erase: bool,
     ) -> Result<Self, EspError> {
         let c_partition = CString::new(partition).unwrap();
 
@@ -97,11 +98,11 @@ impl NvsCustom {
         unsafe {
             if let Some(err) = EspError::from(nvs_flash_init_partition(c_partition.as_ptr())) {
                 match err.code() {
-                    ESP_ERR_NVS_NO_FREE_PAGES | ESP_ERR_NVS_NEW_VERSION_FOUND => {
+                    ESP_ERR_NVS_NO_FREE_PAGES | ESP_ERR_NVS_NEW_VERSION_FOUND if !dont_erase => {
                         esp!(nvs_flash_erase_partition(c_partition.as_ptr()))?;
                         esp!(nvs_flash_init_partition(c_partition.as_ptr()))?;
                     }
-                    _ => (),
+                    _ => return Err(err),
                 }
             }
         }
@@ -136,13 +137,27 @@ pub struct EspNvsPartition<T: NvsPartitionId>(Arc<T>);
 
 impl EspNvsPartition<NvsDefault> {
     pub fn take() -> Result<Self, EspError> {
-        Ok(Self(Arc::new(NvsDefault::new()?)))
+        Ok(Self(Arc::new(NvsDefault::new(false)?)))
+    }
+
+    ///
+    /// Like [`EspNvsPartition::take`] but don't erase the OTA partition to recover from version / corruption errors.
+    /// 
+    pub fn take_simple() -> Result<Self, EspError> {
+        Ok(Self(Arc::new(NvsDefault::new(true)?)))
     }
 }
 
 impl EspNvsPartition<NvsCustom> {
     pub fn take(partition: &str) -> Result<Self, EspError> {
-        Ok(Self(Arc::new(NvsCustom::new(partition)?)))
+        Ok(Self(Arc::new(NvsCustom::new(partition, false)?)))
+    }
+
+    ///
+    /// Like [`EspNvsPartition::take`] but don't erase the OTA partition to recover from version / corruption errors.
+    /// 
+    pub fn take_simple(partition: &str) -> Result<Self, EspError> {
+        Ok(Self(Arc::new(NvsCustom::new(partition, true)?)))
     }
 }
 
