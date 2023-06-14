@@ -1615,7 +1615,6 @@ pub struct ApProbeRequestReceivedData {
 pub enum WifiEvent {
     Ready,
 
-    ScanStarted,
     ScanDone(ScanDoneData),
 
     StaStarted,
