@@ -689,6 +689,11 @@ impl<'a> EspHttpConnection<'a> {
         self.headers.is_none()
     }
 
+    #[inline(always)]
+    pub fn content_len(&self) -> usize {
+        self.request.0.content_len
+    }
+
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
         self.assert_request();
 
