@@ -1001,6 +1001,20 @@ pub mod ws {
             }
         }
 
+        pub fn recv_frame_type(&mut self) -> Result<(FrameType, usize), EspError> {
+            match self {
+                Self::New(_, _) => Err(EspError::from_infallible::<ESP_FAIL>()),
+                Self::Receiving(_, raw_req) => {
+                    let mut raw_frame: httpd_ws_frame_t = Default::default();
+
+                    esp!(unsafe { httpd_ws_recv_frame(*raw_req, &mut raw_frame as *mut _, 0) })?;
+
+                    Ok(Self::create_frame_type(&raw_frame))
+                }
+                Self::Closed(_) => Ok((FrameType::SocketClose, 0)),
+            }
+        }
+
         fn create_raw_frame(frame_type: FrameType, frame_data: &[u8]) -> httpd_ws_frame_t {
             httpd_ws_frame_t {
                 type_: match frame_type {
