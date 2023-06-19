@@ -1,3 +1,4 @@
+//! Non-Volatile Storage (NVS)
 use core::ptr;
 
 extern crate alloc;
@@ -35,7 +36,7 @@ impl NvsDefault {
         let mut taken = DEFAULT_TAKEN.lock();
 
         if *taken {
-            esp!(ESP_ERR_INVALID_STATE)?;
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
         }
 
         let default_nvs = Self::init(dont_erase)?;
@@ -64,7 +65,7 @@ impl Drop for NvsDefault {
         //esp!(nvs_flash_deinit()).unwrap(); TODO: To be checked why it fails
         *DEFAULT_TAKEN.lock() = false;
 
-        info!("Dropped");
+        info!("NvsDefault dropped");
     }
 }
 
@@ -91,7 +92,7 @@ impl NvsCustom {
         let c_partition = CString::new(partition).unwrap();
 
         if registrations.contains(c_partition.as_ref()) {
-            return Err(EspError::from(ESP_ERR_INVALID_STATE).unwrap());
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
         }
 
         unsafe {
@@ -121,7 +122,7 @@ impl Drop for NvsCustom {
             registrations.remove(self.0.as_ref());
         }
 
-        info!("Dropped");
+        info!("NvsCustom dropped");
     }
 }
 
@@ -319,7 +320,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
                 if buf.len() < len as _ {
                     // Buffer not large enough
-                    return Err(EspError::from(ESP_ERR_NVS_INVALID_LENGTH).unwrap());
+                    return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
                 }
 
                 u64value >>= 8;
@@ -341,7 +342,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
+    pub fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
         let c_key = CString::new(name).unwrap();
         let mut u64value: u_int64_t = 0;
 
@@ -366,6 +367,317 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
         Ok(true)
     }
+
+    pub fn blob_len(&self, name: &str) -> Result<Option<usize>, EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        #[allow(unused_assignments)]
+        let mut len = 0;
+
+        match unsafe { nvs_get_blob(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(len))
+            }
+        }
+    }
+
+    pub fn get_blob<'a>(
+        &self,
+        name: &str,
+        buf: &'a mut [u8],
+    ) -> Result<Option<&'a [u8]>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut len = buf.len();
+
+        match unsafe {
+            nvs_get_blob(
+                self.1,
+                c_key.as_ptr(),
+                buf.as_mut_ptr() as *mut _,
+                &mut len as *mut _,
+            )
+        } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(&buf[..len]))
+            }
+        }
+    }
+
+    pub fn set_blob(&mut self, name: &str, buf: &[u8]) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        // start by just clearing this key
+        unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
+
+        esp!(unsafe { nvs_set_blob(self.1, c_key.as_ptr(), buf.as_ptr().cast(), buf.len()) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn str_len(&self, name: &str) -> Result<Option<usize>, EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        #[allow(unused_assignments)]
+        let mut len = 0;
+
+        match unsafe { nvs_get_str(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(len))
+            }
+        }
+    }
+
+    pub fn get_str<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a str>, EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        let mut len = buf.len();
+        match unsafe {
+            nvs_get_str(
+                self.1,
+                c_key.as_ptr(),
+                buf.as_mut_ptr() as *mut _,
+                &mut len as *mut _,
+            )
+        } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(unsafe {
+                    core::str::from_utf8_unchecked(&(buf[..len]))
+                }))
+            }
+        }
+    }
+
+    pub fn set_str(&mut self, name: &str, val: &str) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+        let c_val = CString::new(val).unwrap();
+
+        // start by just clearing this key
+        unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
+
+        esp!(unsafe { nvs_set_str(self.1, c_key.as_ptr(), c_val.as_ptr(),) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_u8(&self, name: &str) -> Result<Option<u8>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [u8; 1] = [0; 1];
+
+        match unsafe { nvs_get_u8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_u8(&self, name: &str, val: u8) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_u8(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_i8(&self, name: &str) -> Result<Option<i8>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [i8; 1] = [0; 1];
+
+        match unsafe { nvs_get_i8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_i8(&self, name: &str, val: i8) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_i8(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_u16(&self, name: &str) -> Result<Option<u16>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [u16; 1] = [0; 1];
+
+        match unsafe { nvs_get_u16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_u16(&self, name: &str, val: u16) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_u16(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_i16(&self, name: &str) -> Result<Option<i16>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [i16; 1] = [0; 1];
+
+        match unsafe { nvs_get_i16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_i16(&self, name: &str, val: i16) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_i16(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_u32(&self, name: &str) -> Result<Option<u32>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [u32; 1] = [0; 1];
+
+        match unsafe { nvs_get_u32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_u32(&self, name: &str, val: u32) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_u32(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_i32(&self, name: &str) -> Result<Option<i32>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [i32; 1] = [0; 1];
+
+        match unsafe { nvs_get_i32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_i32(&self, name: &str, val: i32) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_i32(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_u64(&self, name: &str) -> Result<Option<u64>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [u64; 1] = [0; 1];
+
+        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_u64(&self, name: &str, val: u64) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_u64(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    pub fn get_i64(&self, name: &str) -> Result<Option<i64>, EspError> {
+        let c_key = CString::new(name).unwrap();
+        let mut result: [i64; 1] = [0; 1];
+
+        match unsafe { nvs_get_i64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => Ok(None),
+            err => {
+                // bail on error
+                esp!(err)?;
+
+                Ok(Some(result[0]))
+            }
+        }
+    }
+
+    pub fn set_i64(&self, name: &str, val: i64) -> Result<(), EspError> {
+        let c_key = CString::new(name).unwrap();
+
+        esp!(unsafe { nvs_set_i64(self.1, c_key.as_ptr(), val) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
 }
 
 impl<T: NvsPartitionId> Drop for EspNvs<T> {
@@ -373,6 +685,8 @@ impl<T: NvsPartitionId> Drop for EspNvs<T> {
         unsafe {
             nvs_close(self.1);
         }
+
+        info!("EspNvs dropped");
     }
 }
 

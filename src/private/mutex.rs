@@ -4,6 +4,9 @@ use core::time::Duration;
 
 use esp_idf_sys::*;
 
+// Might not always be available in the generated `esp-idf-sys` bindings
+const ERR_ETIMEDOUT: esp_err_t = 116;
+
 // NOTE: ESP-IDF-specific
 const PTHREAD_MUTEX_INITIALIZER: u32 = 0xFFFFFFFF;
 
@@ -45,7 +48,6 @@ unsafe impl Sync for RawMutex {}
 unsafe impl Send for RawMutex {}
 
 impl embedded_svc::utils::mutex::RawMutex for RawMutex {
-    #[cfg(feature = "nightly")] // Remove "nightly" condition once 1.64 is out
     #[allow(clippy::declare_interior_mutable_const)]
     const INIT: Self = RawMutex::new();
 
@@ -91,9 +93,9 @@ impl RawCondvar {
         };
 
         let r = pthread_cond_timedwait(self.0.get(), mutex.0.get(), &abstime as *const _);
-        debug_assert!(r == ETIMEDOUT as i32 || r == 0);
+        debug_assert!(r == ERR_ETIMEDOUT || r == 0);
 
-        r == ETIMEDOUT as i32
+        r == ERR_ETIMEDOUT
     }
 
     pub fn notify_one(&self) {

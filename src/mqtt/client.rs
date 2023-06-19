@@ -1,7 +1,8 @@
+//! MQTT protocol client
 use core::convert::TryInto;
 use core::ffi::c_void;
 use core::fmt::{self, Debug};
-use core::{mem, slice, time};
+use core::{slice, time};
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -15,7 +16,6 @@ use esp_idf_sys::*;
 use crate::handle::RawHandle;
 use crate::private::mutex::RawCondvar;
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
 pub use asyncify::*;
 
 use crate::private::cstr::*;
@@ -450,7 +450,7 @@ impl<S> EspMqttClient<S> {
 
         let raw_client = unsafe { esp_mqtt_client_init(&c_conf as *const _) };
         if raw_client.is_null() {
-            esp!(ESP_FAIL)?;
+            return Err(EspError::from_infallible::<ESP_FAIL>());
         }
 
         let client = Self {
@@ -556,17 +556,16 @@ impl<S> EspMqttClient<S> {
     }
 
     fn check(result: i32) -> Result<client::MessageId, EspError> {
-        if result < 0 {
-            esp!(result)?;
+        match EspError::from(result) {
+            Some(err) if result < 0 => Err(err),
+            _ => Ok(result as _),
         }
-
-        Ok(result as _)
     }
 }
 
 impl<P> Drop for EspMqttClient<P> {
     fn drop(&mut self) {
-        let connection_state = mem::replace(&mut self.conn_state_guard, None);
+        let connection_state = self.conn_state_guard.take();
         if let Some(connection_state) = connection_state {
             connection_state.close();
         }
@@ -630,7 +629,7 @@ impl<'a> EspMqttMessage<'a> {
         event: &'a esp_mqtt_event_t,
     ) -> Result<client::Event<EspMqttMessage<'a>>, EspError> {
         match event.event_id {
-            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from(ESP_FAIL).unwrap()), // TODO
+            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => Err(EspError::from_infallible::<ESP_FAIL>()), // TODO
             esp_mqtt_event_id_t_MQTT_EVENT_BEFORE_CONNECT => Ok(client::Event::BeforeConnect),
             esp_mqtt_event_id_t_MQTT_EVENT_CONNECTED => {
                 Ok(client::Event::Connected(event.session_present != 0))
@@ -748,7 +747,6 @@ impl<'a> client::Message for EspMqttMessage<'a> {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
 mod asyncify {
     use core::fmt::Debug;
 

@@ -1,3 +1,4 @@
+//! HTTP server
 use core::cell::UnsafeCell;
 use core::fmt::{Debug, Display};
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -82,7 +83,7 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
     fn from(conf: &Configuration) -> Self {
         Self(httpd_config_t {
             task_priority: 5,
-            stack_size: conf.stack_size as _,
+            stack_size: conf.stack_size,
             core_id: i32::MAX,
             server_port: conf.http_port,
             ctrl_port: 32768,
@@ -322,20 +323,21 @@ impl EspHttpServer {
 
     fn stop(&mut self) -> Result<(), EspIOError> {
         if !self.sd.is_null() {
-            while !self.registrations.is_empty() {
-                let (uri, registration) = self.registrations.pop().unwrap();
-
+            while let Some((uri, registration)) = self.registrations.pop() {
                 self.unregister(uri, registration)?;
             }
+
             // Maybe its better to always call httpd_stop because httpd_ssl_stop directly wraps httpd_stop anyways
             // https://github.com/espressif/esp-idf/blob/e6fda46a02c41777f1d116a023fbec6a1efaffb9/components/esp_https_server/src/https_server.c#L268
             #[cfg(not(esp_idf_esp_https_server_enable))]
             esp!(unsafe { esp_idf_sys::httpd_stop(self.sd) })?;
+
             // httpd_ssl_stop doesn't return EspErr for some reason. It returns void.
             #[cfg(all(esp_idf_esp_https_server_enable, esp_idf_version_major = "4"))]
             unsafe {
                 esp_idf_sys::httpd_ssl_stop(self.sd)
             };
+
             // esp-idf version 5 does return EspErr
             #[cfg(all(esp_idf_esp_https_server_enable, not(esp_idf_version_major = "4")))]
             esp!(unsafe { esp_idf_sys::httpd_ssl_stop(self.sd) })?;
@@ -511,7 +513,7 @@ impl<'a> Read for EspHttpRequest<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         if !buf.is_empty() {
             let fd = unsafe { httpd_req_to_sockfd(self.0) };
-            let len = unsafe { esp_idf_sys::read(fd, buf.as_ptr() as *mut _, buf.len() as _) };
+            let len = unsafe { esp_idf_sys::read(fd, buf.as_ptr() as *mut _, buf.len()) };
 
             Ok(len as _)
         } else {
@@ -524,7 +526,7 @@ impl<'a> Write for EspHttpRequest<'a> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         if !buf.is_empty() {
             let fd = unsafe { httpd_req_to_sockfd(self.0) };
-            let len = unsafe { esp_idf_sys::write(fd, buf.as_ptr() as *const _, buf.len() as _) };
+            let len = unsafe { esp_idf_sys::write(fd, buf.as_ptr() as *const _, buf.len()) };
 
             Ok(len as _)
         } else {
@@ -754,7 +756,7 @@ impl<'a> EspHttpConnection<'a> {
     where
         E: Display,
     {
-        if self.response_headers.is_some() {
+        if self.headers.is_some() {
             info!(
                 "About to handle internal error [{}], response not sent yet",
                 &error
@@ -913,7 +915,6 @@ pub mod ws {
     use super::OPEN_SESSIONS;
     use super::{CloseHandler, NativeHandler};
 
-    #[cfg(all(feature = "nightly", feature = "experimental"))]
     pub use asyncify::*;
 
     pub enum EspHttpWsConnection {
@@ -953,7 +954,7 @@ pub mod ws {
 
                     Ok(EspHttpWsDetachedSender::new(*sd, fd, closed.clone()))
                 }
-                Self::Closed(_) => Err(EspError::from(ESP_FAIL).unwrap()),
+                Self::Closed(_) => Err(EspError::from_infallible::<ESP_FAIL>()),
             }
         }
 
@@ -968,17 +969,13 @@ pub mod ws {
 
                     Ok(())
                 }
-                _ => {
-                    esp!(ESP_FAIL)?;
-
-                    Ok(())
-                }
+                _ => Err(EspError::from_infallible::<ESP_FAIL>()),
             }
         }
 
         pub fn recv(&mut self, frame_data_buf: &mut [u8]) -> Result<(FrameType, usize), EspError> {
             match self {
-                Self::New(_, _) => Err(EspError::from(ESP_FAIL).unwrap()),
+                Self::New(_, _) => Err(EspError::from_infallible::<ESP_FAIL>()),
                 Self::Receiving(_, raw_req) => {
                     let mut raw_frame: httpd_ws_frame_t = Default::default();
 
@@ -989,7 +986,7 @@ pub mod ws {
                     if frame_data_buf.len() >= len {
                         raw_frame.payload = frame_data_buf.as_mut_ptr() as *mut _;
                         esp!(unsafe {
-                            httpd_ws_recv_frame(*raw_req, &mut raw_frame as *mut _, len as _)
+                            httpd_ws_recv_frame(*raw_req, &mut raw_frame as *mut _, len)
                         })?;
                     }
 
@@ -1013,22 +1010,21 @@ pub mod ws {
                 final_: frame_type.is_final(),
                 fragmented: frame_type.is_fragmented(),
                 payload: frame_data.as_ptr() as *const _ as *mut _,
-                len: frame_data.len() as _,
+                len: frame_data.len(),
             }
         }
 
         #[allow(non_upper_case_globals)]
         fn create_frame_type(raw_frame: &httpd_ws_frame_t) -> (FrameType, usize) {
             match raw_frame.type_ {
-                httpd_ws_type_t_HTTPD_WS_TYPE_TEXT => (
-                    FrameType::Text(raw_frame.fragmented),
-                    raw_frame.len as usize + 1,
-                ),
+                httpd_ws_type_t_HTTPD_WS_TYPE_TEXT => {
+                    (FrameType::Text(raw_frame.fragmented), raw_frame.len + 1)
+                }
                 httpd_ws_type_t_HTTPD_WS_TYPE_BINARY => {
-                    (FrameType::Binary(raw_frame.fragmented), raw_frame.len as _)
+                    (FrameType::Binary(raw_frame.fragmented), raw_frame.len)
                 }
                 httpd_ws_type_t_HTTPD_WS_TYPE_CONTINUE => {
-                    (FrameType::Continue(raw_frame.final_), raw_frame.len as _)
+                    (FrameType::Continue(raw_frame.final_), raw_frame.len)
                 }
                 httpd_ws_type_t_HTTPD_WS_TYPE_PING => (FrameType::Ping, 0),
                 httpd_ws_type_t_HTTPD_WS_TYPE_PONG => (FrameType::Pong, 0),
@@ -1145,7 +1141,7 @@ pub mod ws {
 
                 esp!((*guard).unwrap())?;
             } else {
-                esp!(ESP_FAIL)?;
+                return Err(EspError::from_infallible::<ESP_FAIL>());
             }
 
             Ok(())
@@ -1311,7 +1307,6 @@ pub mod ws {
         }
     }
 
-    #[cfg(all(feature = "nightly", feature = "experimental"))]
     pub mod asyncify {
         use embedded_svc::utils::asyncify::ws::server::{
             AsyncAcceptor, AsyncReceiver, AsyncSender, Processor,

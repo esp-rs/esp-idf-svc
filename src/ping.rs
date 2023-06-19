@@ -1,3 +1,4 @@
+//! Send ICMP echo requests (Ping)
 use core::{ffi, mem, ptr, time::Duration};
 
 use ::log::*;
@@ -93,7 +94,7 @@ impl EspPing {
         })?;
 
         if handle.is_null() {
-            return Err(EspError::from(ESP_ERR_INVALID_ARG as _).unwrap());
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>());
         }
 
         info!("Ping session established, got handle {:?}", handle);
@@ -108,7 +109,7 @@ impl EspPing {
 
         info!("Waiting for the ping session to complete");
 
-        tracker.waitable.wait_while(|running| *running);
+        tracker.waitable.wait_while(|running| Ok(*running))?;
 
         esp!(unsafe { esp_ping_stop(handle) })?;
         info!("Ping session stopped");

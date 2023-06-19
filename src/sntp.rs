@@ -1,11 +1,74 @@
+//! SNTP Time Synchronization
+
 use core::cmp::min;
+use core::time::Duration;
 
 use ::log::*;
 
-use esp_idf_sys::*;
-
 use crate::private::cstr::CString;
 use crate::private::mutex;
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(not(any(esp_idf_version_major = "4", esp_idf_version_minor = "0")))]
+mod esp_sntp {
+    use super::OperatingMode;
+    pub use esp_idf_sys::*;
+
+    impl From<esp_sntp_operatingmode_t> for OperatingMode {
+        #[allow(non_upper_case_globals)]
+        fn from(from: esp_sntp_operatingmode_t) -> Self {
+            match from {
+                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL => OperatingMode::Poll,
+                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_LISTENONLY => OperatingMode::ListenOnly,
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl From<OperatingMode> for esp_sntp_operatingmode_t {
+        #[allow(non_upper_case_globals)]
+        fn from(from: OperatingMode) -> Self {
+            match from {
+                OperatingMode::Poll => esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL,
+                OperatingMode::ListenOnly => esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_LISTENONLY,
+            }
+        }
+    }
+
+    pub use esp_sntp_init as sntp_init;
+    pub use esp_sntp_setoperatingmode as sntp_setoperatingmode;
+    pub use esp_sntp_setservername as sntp_setservername;
+    pub use esp_sntp_stop as sntp_stop;
+}
+
+#[cfg(any(esp_idf_version_major = "4", esp_idf_version_minor = "0"))]
+mod esp_sntp {
+    use super::OperatingMode;
+    pub use esp_idf_sys::*;
+
+    impl From<u8_t> for OperatingMode {
+        fn from(from: u8_t) -> Self {
+            match from as u32 {
+                SNTP_OPMODE_POLL => OperatingMode::Poll,
+                SNTP_OPMODE_LISTENONLY => OperatingMode::ListenOnly,
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl From<OperatingMode> for u8_t {
+        fn from(from: OperatingMode) -> Self {
+            match from {
+                OperatingMode::Poll => SNTP_OPMODE_POLL as u8_t,
+                OperatingMode::ListenOnly => SNTP_OPMODE_LISTENONLY as u8_t,
+            }
+        }
+    }
+}
+
+use esp_sntp::*;
 
 const SNTP_SERVER_NUM: usize = SNTP_MAX_SERVERS as usize;
 
@@ -22,25 +85,6 @@ const DEFAULT_SERVERS: [&str; 4] = [
 pub enum OperatingMode {
     Poll,
     ListenOnly,
-}
-
-impl From<u8_t> for OperatingMode {
-    fn from(from: u8_t) -> Self {
-        match from as u32 {
-            SNTP_OPMODE_POLL => OperatingMode::Poll,
-            SNTP_OPMODE_LISTENONLY => OperatingMode::ListenOnly,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl From<OperatingMode> for u8_t {
-    fn from(from: OperatingMode) -> Self {
-        match from {
-            OperatingMode::Poll => SNTP_OPMODE_POLL as u8_t,
-            OperatingMode::ListenOnly => SNTP_OPMODE_LISTENONLY as u8_t,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -113,6 +157,11 @@ impl<'a> Default for SntpConf<'a> {
     }
 }
 
+#[cfg(feature = "alloc")]
+type SyncCallback = alloc::boxed::Box<dyn FnMut(Duration) + Send + 'static>;
+#[cfg(feature = "alloc")]
+static SYNC_CB: mutex::Mutex<Option<SyncCallback>> =
+    mutex::Mutex::wrap(mutex::RawMutex::new(), None);
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
 
 pub struct EspSntp {
@@ -129,9 +178,27 @@ impl EspSntp {
         let mut taken = TAKEN.lock();
 
         if *taken {
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
+        }
+
+        let sntp = Self::init(conf)?;
+
+        *taken = true;
+        Ok(sntp)
+    }
+
+    #[cfg(feature = "alloc")]
+    pub fn new_with_callback<F>(conf: &SntpConf, callback: F) -> Result<Self, EspError>
+    where
+        F: FnMut(Duration) + Send + 'static,
+    {
+        let mut taken = TAKEN.lock();
+
+        if *taken {
             esp!(ESP_ERR_INVALID_STATE)?;
         }
 
+        *SYNC_CB.lock() = Some(alloc::boxed::Box::new(callback));
         let sntp = Self::init(conf)?;
 
         *taken = true;
@@ -141,7 +208,7 @@ impl EspSntp {
     fn init(conf: &SntpConf) -> Result<Self, EspError> {
         info!("Initializing");
 
-        unsafe { sntp_setoperatingmode(u8_t::from(conf.operating_mode)) };
+        unsafe { sntp_setoperatingmode(conf.operating_mode.into()) };
         unsafe { sntp_set_sync_mode(sntp_sync_mode_t::from(conf.sync_mode)) };
 
         let mut c_servers: [CString; SNTP_SERVER_NUM] = Default::default();
@@ -153,6 +220,7 @@ impl EspSntp {
 
         unsafe {
             sntp_set_time_sync_notification_cb(Some(Self::sync_cb));
+
             sntp_init();
         };
 
@@ -163,16 +231,29 @@ impl EspSntp {
         })
     }
 
+    #[cfg(feature = "alloc")]
+    fn unsubscribe(&mut self) {
+        *SYNC_CB.lock() = None;
+    }
+
     pub fn get_sync_status(&self) -> SyncStatus {
         SyncStatus::from(unsafe { sntp_get_sync_status() })
     }
 
-    unsafe extern "C" fn sync_cb(tv: *mut esp_idf_sys::timeval) {
+    unsafe extern "C" fn sync_cb(tv: *mut timeval) {
         debug!(
             " Sync cb called: sec: {}, usec: {}",
             (*tv).tv_sec,
             (*tv).tv_usec,
         );
+
+        #[cfg(feature = "alloc")]
+        if let Some(cb) = &mut *SYNC_CB.lock() {
+            let duration = Duration::from_secs((*tv).tv_sec as u64)
+                + Duration::from_micros((*tv).tv_usec as u64);
+
+            cb(duration);
+        }
     }
 }
 
@@ -182,6 +263,10 @@ impl Drop for EspSntp {
             let mut taken = TAKEN.lock();
 
             unsafe { sntp_stop() };
+
+            #[cfg(feature = "alloc")]
+            self.unsubscribe();
+
             *taken = false;
         }
 

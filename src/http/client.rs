@@ -1,3 +1,10 @@
+//! HTTP client
+//!
+//! This provides a set of APIs for making HTTP(S) requests.
+//!
+//! You can find a usage example at
+//! [`examples/http_request.rs`](https://github.com/esp-rs/esp-idf-svc/blob/master/examples/http_request.rs).
+
 use core::cell::UnsafeCell;
 
 extern crate alloc;
@@ -139,7 +146,7 @@ impl EspHttpConnection {
 
         let raw_client = unsafe { esp_http_client_init(&native_config) };
         if raw_client.is_null() {
-            Err(EspError::from(ESP_FAIL).unwrap())
+            Err(EspError::from_infallible::<ESP_FAIL>())
         } else {
             Ok(Self {
                 raw_client,
@@ -276,42 +283,47 @@ impl EspHttpConnection {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
         self.assert_response();
 
-        let result = unsafe {
+        let result = Self::check(unsafe {
             esp_http_client_read(self.raw_client, buf.as_mut_ptr() as _, buf.len() as _)
-        };
-
-        let result = match EspError::from(result) {
-            Some(err) if result < 0 => Err(err),
-            _ => Ok(result as _),
-        };
+        });
 
         // workaround since esp_http_client_read does not yet return EAGAIN error in ESP-IDF v4.
         // in ESP-IDF v5 esp_http_client_read will return EAGAIN and this should not be needed.
-        match result {
-            Ok(0) if unsafe { !esp_http_client_is_complete_data_received(self.raw_client) } => {
-                // no error but read 0 bytes and body is not yet complete, probably caused by EAGAIN
-                Err(EspError::from_infallible::<ESP_ERR_HTTP_EAGAIN>())
+        #[cfg(esp_idf_version_major = "4")]
+        {
+            match result {
+                Ok(0) if unsafe { !esp_http_client_is_complete_data_received(self.raw_client) } => {
+                    // no error but read 0 bytes and body is not yet complete, probably caused by EAGAIN
+                    Err(EspError::from_infallible::<ESP_ERR_HTTP_EAGAIN>())
+                }
+                other => other,
             }
-            other => other,
+        }
+        #[cfg(not(esp_idf_version_major = "4"))]
+        {
+            result
         }
     }
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspError> {
         self.assert_request();
 
-        let result =
-            unsafe { esp_http_client_write(self.raw_client, buf.as_ptr() as _, buf.len() as _) };
-        if result < 0 {
-            esp!(result)?;
-        }
-
-        Ok(result as _)
+        Self::check(unsafe {
+            esp_http_client_write(self.raw_client, buf.as_ptr() as _, buf.len() as _)
+        })
     }
 
     pub fn flush(&mut self) -> Result<(), EspError> {
         self.assert_request();
 
         Ok(())
+    }
+
+    fn check(result: i32) -> Result<usize, EspError> {
+        match EspError::from(result) {
+            Some(err) if result < 0 => Err(err),
+            _ => Ok(result as _),
+        }
     }
 
     extern "C" fn on_events(event: *mut esp_http_client_event_t) -> esp_err_t {
@@ -360,9 +372,7 @@ impl EspHttpConnection {
 
             self.deregister_handler();
 
-            if result < 0 {
-                esp!(result)?;
-            }
+            Self::check(result as _)?;
 
             trace!("Fetched headers: {:?}", self.headers);
 
@@ -517,6 +527,6 @@ impl Connection for EspHttpConnection {
     }
 
     fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {
-        Err(EspError::from(ESP_FAIL).unwrap().into())
+        Err(EspError::from_infallible::<ESP_FAIL>().into())
     }
 }

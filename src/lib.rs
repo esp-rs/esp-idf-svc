@@ -1,11 +1,23 @@
+//! This crate contains wrappers which are mostly implementations of the
+//! abstractions defined in the [embedded-svc](../embedded_svc/index.html)
+//! project. It has features such as wifi, networking, httpd, logging.
+//!
+//! ## Features
+//!
+//! This crates specifies a few cargo features, including:
+//!
+//! - `std`: Enable the use of std. Enabled by default.
+//! - `experimental`: Enable the use of experimental features.
+//! - `embassy-time-driver`
+//! - `embassy-time-isr-queue`
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(cfg_version)]
-#![cfg_attr(
-    all(feature = "nightly", not(version("1.65"))),
-    feature(generic_associated_types)
-)]
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
-#![cfg_attr(not(version("1.66")), feature(const_btree_new))]
+#![cfg_attr(
+    all(feature = "nightly", version("1.70")),
+    feature(impl_trait_in_assoc_type)
+)]
+#![allow(clippy::unused_unit)] // enumset
 
 #[cfg(any(feature = "alloc"))]
 #[allow(unused_imports)]
@@ -14,6 +26,7 @@ extern crate alloc;
 
 pub mod errors;
 #[cfg(all(
+    not(esp32h2),
     feature = "alloc",
     esp_idf_comp_esp_wifi_enabled,
     esp_idf_comp_esp_event_enabled,
@@ -37,7 +50,7 @@ pub mod eth;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_event_enabled))]
 pub mod eventloop;
 pub mod handle;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
+#[cfg(feature = "alloc")]
 pub mod http;
 #[cfg(all(feature = "std", esp_idf_comp_esp_http_server_enabled))]
 pub mod httpd;
@@ -55,15 +68,11 @@ pub mod mqtt;
 pub mod napt;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_netif_enabled))]
 pub mod netif;
-#[cfg(all(feature = "experimental", feature = "alloc"))]
+#[cfg(feature = "alloc")]
 pub mod notify;
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 pub mod nvs;
-#[cfg(all(
-    feature = "experimental",
-    esp_idf_comp_app_update_enabled,
-    esp_idf_comp_spi_flash_enabled
-))]
+#[cfg(all(esp_idf_comp_app_update_enabled, esp_idf_comp_spi_flash_enabled))]
 pub mod ota;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub mod ping;
@@ -74,6 +83,7 @@ pub mod systime;
 pub mod timer;
 pub mod tls;
 #[cfg(all(
+    not(esp32h2),
     feature = "alloc",
     esp_idf_comp_esp_wifi_enabled,
     esp_idf_comp_esp_event_enabled,

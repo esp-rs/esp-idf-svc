@@ -1,3 +1,14 @@
+//! High resolution hardware timer based task scheduling
+//!
+//! Although FreeRTOS provides software timers, these timers have a few
+//! limitations:
+//!
+//! - Maximum resolution is equal to RTOS tick period
+//! - Timer callbacks are dispatched from a low-priority task
+//!
+//! EspTimer is a set of APIs that provides one-shot and periodic timers,
+//! microsecond time resolution, and 52-bit range.
+
 use core::result::Result;
 use core::time::Duration;
 use core::{ffi, ptr};
@@ -10,7 +21,8 @@ use embedded_svc::timer::{self, ErrorType, OnceTimer, PeriodicTimer, Timer, Time
 
 use esp_idf_sys::*;
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
+use ::log::info;
+
 pub use asyncify::*;
 
 #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
@@ -108,6 +120,8 @@ impl Drop for EspTimer {
         while unsafe { esp_timer_delete(self.handle) } != ESP_OK {
             // Timer is still running, busy-loop
         }
+
+        info!("Timer dropped");
     }
 }
 
@@ -279,7 +293,6 @@ mod isr {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "experimental"))]
 mod asyncify {
     use embedded_svc::utils::asyncify::timer::AsyncTimerService;
     use embedded_svc::utils::asyncify::Asyncify;

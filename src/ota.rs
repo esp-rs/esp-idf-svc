@@ -1,3 +1,9 @@
+//! Over The Air Updates (OTA)
+//!
+//! The OTA update mechanism allows a device to update itself based on data
+//! received while the normal firmware is running (for example, over Wi-Fi or
+//! Bluetooth.)
+
 use core::cmp::min;
 use core::fmt::Write;
 use core::mem;
@@ -85,18 +91,20 @@ impl ota::FirmwareInfoLoader for EspFirmwareInfoLoader {
 
     fn get_info(&self) -> Result<ota::FirmwareInfo, Self::Error> {
         if self.is_loaded() {
-            let app_desc_slice = &self.0[0..mem::size_of::<esp_image_header_t>()
-                + mem::size_of::<esp_image_segment_header_t>()];
+            let app_desc_slice = &self.0[mem::size_of::<esp_image_header_t>()
+                + mem::size_of::<esp_image_segment_header_t>()
+                ..mem::size_of::<esp_image_header_t>()
+                    + mem::size_of::<esp_image_segment_header_t>()
+                    + mem::size_of::<esp_app_desc_t>()];
 
             let app_desc = unsafe {
                 (app_desc_slice.as_ptr() as *const esp_app_desc_t)
                     .as_ref()
                     .unwrap()
             };
-
             Ok(Newtype(app_desc).into())
         } else {
-            Err(EspError::from(ESP_ERR_INVALID_SIZE as _).unwrap().into())
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>().into())
         }
     }
 }
@@ -149,7 +157,7 @@ impl EspOtaUpdate {
         if !self.update_partition.is_null() {
             Ok(())
         } else {
-            Err(EspError::from(ESP_FAIL).unwrap())
+            Err(EspError::from_infallible::<ESP_FAIL>())
         }
     }
 }
@@ -162,7 +170,7 @@ impl EspOta {
         let mut taken = TAKEN.lock();
 
         if *taken {
-            esp!(ESP_ERR_INVALID_STATE)?;
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
         }
 
         *taken = true;
@@ -194,6 +202,16 @@ impl EspOta {
         })
     }
 
+    pub fn get_last_invalid_slot(&self) -> Result<Option<Slot>, EspError> {
+        self.check_read()?;
+
+        if let Some(partition) = unsafe { esp_ota_get_last_invalid_partition().as_ref() } {
+            Ok(Some(self.get_slot(partition)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn is_factory_reset_supported(&self) -> Result<bool, EspError> {
         self.check_read()?;
 
@@ -214,6 +232,9 @@ impl EspOta {
     pub fn initiate_update(&mut self) -> Result<&mut EspOtaUpdate, EspError> {
         self.check_read()?;
 
+        // This might return a null pointer in case no valid partition can be found.
+        // We don't have to handle this error in here, as this will implicitly trigger an error
+        // as soon as the null pointer is provided to `esp_ota_begin`.
         let partition = unsafe { esp_ota_get_next_update_partition(ptr::null()) };
 
         let mut handle: esp_ota_handle_t = Default::default();
@@ -224,6 +245,17 @@ impl EspOta {
         self.0.update_handle = handle;
 
         Ok(&mut self.0)
+    }
+
+    /// Get a handle to the [EspOtaUpdate].
+    /// This is `None`, if [Self.initiate_update] hasn't been called yet or the update has
+    /// finished.
+    pub fn get_update(&mut self) -> Option<&mut EspOtaUpdate> {
+        if self.0.update_partition.is_null() {
+            None
+        } else {
+            Some(&mut self.0)
+        }
     }
 
     pub fn mark_running_slot_valid(&mut self) -> Result<(), EspError> {
@@ -254,7 +286,7 @@ impl EspOta {
         };
 
         if partition_iterator.is_null() {
-            esp!(ESP_ERR_NOT_SUPPORTED)?;
+            return Err(EspError::from_infallible::<ESP_ERR_NOT_SUPPORTED>());
         }
 
         let partition = unsafe { esp_partition_get(partition_iterator) };
@@ -322,7 +354,7 @@ impl EspOta {
         if self.0.update_partition.is_null() {
             Ok(())
         } else {
-            Err(EspError::from(ESP_FAIL).unwrap())
+            Err(EspError::from_infallible::<ESP_FAIL>())
         }
     }
 }

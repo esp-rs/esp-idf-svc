@@ -1,3 +1,7 @@
+//! HTTP server
+//!
+//! The HTTP Server component provides an ability for running a lightweight web
+//! server on ESP32.
 #![allow(deprecated)]
 
 use core::{ffi::*, marker::PhantomData, ptr};
@@ -292,9 +296,7 @@ impl Server {
 
     fn stop(&mut self) -> Result<()> {
         if !self.sd.is_null() {
-            while !self.registrations.is_empty() {
-                let (uri, registration) = self.registrations.pop().unwrap();
-
+            while let Some((uri, registration)) = self.registrations.pop() {
                 self.unregister(uri, registration)?;
             }
 
