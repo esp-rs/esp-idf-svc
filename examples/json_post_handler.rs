@@ -41,7 +41,7 @@ struct FormData<'a> {
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    let mut server = create_server();
+    let mut server = create_server()?;
 
     server.fn_handler("/", Method::Get, |req| {
         req.into_ok_response()?.write(INDEX_HTML.as_bytes())?;
@@ -74,22 +74,22 @@ fn main() -> anyhow::Result<()> {
         Ok(())
     })?;
 
+    // Keep server running forever
     core::mem::forget(server);
 
-    // Main task no longer needed
+    // Main task no longer needed, free up some memory
     Ok(())
 }
 
-fn create_server() -> EspHttpServer {
+fn create_server() -> anyhow::Result<EspHttpServer> {
     let peripherals = Peripherals::take().unwrap();
-    let sys_loop = EspSystemEventLoop::take().unwrap();
-    let nvs = EspDefaultNvsPartition::take().unwrap();
+    let sys_loop = EspSystemEventLoop::take()?;
+    let nvs = EspDefaultNvsPartition::take()?;
 
     let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs)).unwrap(),
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
         sys_loop,
-    )
-    .unwrap();
+    )?;
 
     let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
         ssid: SSID.into(),
@@ -99,9 +99,9 @@ fn create_server() -> EspHttpServer {
         channel: CHANNEL,
         ..Default::default()
     });
-    wifi.set_configuration(&wifi_configuration).unwrap();
-    wifi.start().unwrap();
-    wifi.wait_netif_up().unwrap();
+    wifi.set_configuration(&wifi_configuration)?;
+    wifi.start()?;
+    wifi.wait_netif_up()?;
 
     info!("Created wifi with SSID `{}` and PASS `{}`", SSID, PASSWORD);
 
@@ -110,7 +110,8 @@ fn create_server() -> EspHttpServer {
         ..Default::default()
     };
 
+    // Keep wifi running forever
     core::mem::forget(wifi);
 
-    EspHttpServer::new(&server_configuration).unwrap()
+    Ok(EspHttpServer::new(&server_configuration)?)
 }
