@@ -51,14 +51,16 @@ impl GuessingGame {
     }
 
     fn guess(&mut self, guess: u32) -> (Ordering, u32) {
-        if !self.done {
+        if self.done {
+            (Ordering::Equal, self.guesses)
+        } else {
             self.guesses += 1;
+            let cmp = guess.cmp(&self.secret);
+            if cmp == Ordering::Equal {
+                self.done = true;
+            }
+            (cmp, self.guesses)
         }
-        let cmp = guess.cmp(&self.secret);
-        if cmp == Ordering::Equal {
-            self.done = true;
-        }
-        (cmp, self.guesses)
     }
 
     fn parse_guess(input: &str) -> Option<u32> {
