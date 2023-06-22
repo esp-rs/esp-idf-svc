@@ -66,7 +66,7 @@ impl GuessingGame {
     fn parse_guess(input: &str) -> Option<u32> {
         // Trim control codes (including null bytes) and/or whitespace
         let Ok(number) = u32::from_str_radix(input.trim_matches(|c: char| {
-            c.is_ascii_control() | c.is_whitespace()
+            c.is_ascii_control() || c.is_whitespace()
         }), 10) else {
             warn!("Not a number: `{}` (length {})", input, input.len());
             return None;
