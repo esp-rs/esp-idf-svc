@@ -1,5 +1,6 @@
 //! Non-Volatile Storage (NVS)
 use core::ptr;
+use core::num::NonZeroI32;
 
 extern crate alloc;
 use alloc::sync::Arc;
@@ -452,7 +453,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
     pub fn set_str(&mut self, name: &str, val: &str) -> Result<(), EspError> {
         let c_key = CString::new(name).unwrap();
-        let c_val = CString::new(val).unwrap();
+        let c_val = match CString::new(val) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         // start by just clearing this key
         unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
