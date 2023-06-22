@@ -58,3 +58,6 @@ name = "wifi_async"
 
 [[example]]
 name = "json_post_handler"
+
+[[example]]
+name = "ws_guessing_game"

@@ -1,4 +1,6 @@
 //! HTTP Server with JSON POST handler
+//!
+//! Go to 192.168.71.1 to test
 
 use anyhow;
 use embedded_svc::{
@@ -18,8 +20,8 @@ use log::*;
 use serde::Deserialize;
 use serde_json;
 
-const SSID: &'static str = env!("WIFI_SSID");
-const PASSWORD: &'static str = env!("WIFI_PASS");
+const SSID: &str = env!("WIFI_SSID");
+const PASSWORD: &str = env!("WIFI_PASS");
 static INDEX_HTML: &str = include_str!("json_post_handler.html");
 
 // Max payload length
@@ -103,7 +105,10 @@ fn create_server() -> anyhow::Result<EspHttpServer> {
     wifi.start()?;
     wifi.wait_netif_up()?;
 
-    info!("Created wifi with SSID `{}` and PASS `{}`", SSID, PASSWORD);
+    info!(
+        "Created Wi-Fi with WIFI_SSID `{}` and WIFI_PASS `{}`",
+        SSID, PASSWORD
+    );
 
     let server_configuration = esp_idf_svc::http::server::Configuration {
         stack_size: STACK_SIZE,
