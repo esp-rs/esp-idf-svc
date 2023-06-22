@@ -76,7 +76,11 @@ fn main() -> anyhow::Result<()> {
         Ok(())
     })?;
 
-    // Keep server running forever
+    // Keep server running beyond when main() returns (forever)
+    // Do not call this if you ever want to stop or access it later.
+    // Otherwise you can either add an infinite loop so the main task
+    // never returns, or you can move it to another thread.
+    // https://doc.rust-lang.org/stable/core/mem/fn.forget.html
     core::mem::forget(server);
 
     // Main task no longer needed, free up some memory
@@ -115,7 +119,11 @@ fn create_server() -> anyhow::Result<EspHttpServer> {
         ..Default::default()
     };
 
-    // Keep wifi running forever
+    // Keep wifi running beyond when this function returns (forever)
+    // Do not call this if you ever want to stop or access it later.
+    // Otherwise it should be returned from this function and kept somewhere
+    // so it does not go out of scope.
+    // https://doc.rust-lang.org/stable/core/mem/fn.forget.html
     core::mem::forget(wifi);
 
     Ok(EspHttpServer::new(&server_configuration)?)
