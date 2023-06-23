@@ -89,7 +89,10 @@ impl NvsCustom {
         partition: &str,
         registrations: &mut alloc::collections::BTreeSet<CString>,
     ) -> Result<Self, EspError> {
-        let c_partition = CString::new(partition).unwrap();
+        let c_partition = match CString::new(partition) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         if registrations.contains(c_partition.as_ref()) {
             return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
@@ -175,7 +178,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         namespace: &str,
         read_write: bool,
     ) -> Result<Self, EspError> {
-        let c_namespace = CString::new(namespace).unwrap();
+        let c_namespace = match CString::new(namespace) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         let mut handle: nvs_handle_t = 0;
 
@@ -214,7 +220,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         // nvs_erase_key is not scoped by datatype
         let result = unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
@@ -230,7 +239,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         let mut value: u_int64_t = 0;
 
@@ -264,7 +276,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         let mut u64value: u_int64_t = 0;
 
@@ -329,7 +344,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut u64value: u_int64_t = 0;
 
         // start by just clearing this key
@@ -355,7 +373,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn blob_len(&self, name: &str) -> Result<Option<usize>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         #[allow(unused_assignments)]
         let mut len = 0;
@@ -376,7 +397,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         name: &str,
         buf: &'a mut [u8],
     ) -> Result<Option<&'a [u8]>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut len = buf.len();
 
         match unsafe {
@@ -398,7 +422,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_blob(&mut self, name: &str, buf: &[u8]) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         // start by just clearing this key
         unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
@@ -411,7 +438,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn str_len(&self, name: &str) -> Result<Option<usize>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         #[allow(unused_assignments)]
         let mut len = 0;
@@ -428,7 +458,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_str<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a str>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         let mut len = buf.len();
         match unsafe {
@@ -452,7 +485,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_str(&mut self, name: &str, val: &str) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let c_val = match CString::new(val) {
             Ok(v) => v,
             Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
@@ -469,7 +505,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_u8(&self, name: &str) -> Result<Option<u8>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [u8; 1] = [0; 1];
 
         match unsafe { nvs_get_u8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -484,7 +523,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_u8(&self, name: &str, val: u8) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_u8(self.1, c_key.as_ptr(), val) })?;
 
@@ -494,7 +536,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_i8(&self, name: &str) -> Result<Option<i8>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [i8; 1] = [0; 1];
 
         match unsafe { nvs_get_i8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -509,7 +554,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_i8(&self, name: &str, val: i8) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_i8(self.1, c_key.as_ptr(), val) })?;
 
@@ -519,7 +567,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_u16(&self, name: &str) -> Result<Option<u16>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [u16; 1] = [0; 1];
 
         match unsafe { nvs_get_u16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -534,7 +585,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_u16(&self, name: &str, val: u16) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_u16(self.1, c_key.as_ptr(), val) })?;
 
@@ -544,7 +598,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_i16(&self, name: &str) -> Result<Option<i16>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [i16; 1] = [0; 1];
 
         match unsafe { nvs_get_i16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -559,7 +616,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_i16(&self, name: &str, val: i16) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_i16(self.1, c_key.as_ptr(), val) })?;
 
@@ -569,7 +629,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_u32(&self, name: &str) -> Result<Option<u32>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [u32; 1] = [0; 1];
 
         match unsafe { nvs_get_u32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -584,7 +647,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_u32(&self, name: &str, val: u32) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_u32(self.1, c_key.as_ptr(), val) })?;
 
@@ -594,7 +660,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_i32(&self, name: &str) -> Result<Option<i32>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [i32; 1] = [0; 1];
 
         match unsafe { nvs_get_i32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -609,7 +678,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_i32(&self, name: &str, val: i32) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_i32(self.1, c_key.as_ptr(), val) })?;
 
@@ -619,7 +691,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_u64(&self, name: &str) -> Result<Option<u64>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [u64; 1] = [0; 1];
 
         match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -634,7 +709,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_u64(&self, name: &str, val: u64) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_u64(self.1, c_key.as_ptr(), val) })?;
 
@@ -644,7 +722,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn get_i64(&self, name: &str) -> Result<Option<i64>, EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
         let mut result: [i64; 1] = [0; 1];
 
         match unsafe { nvs_get_i64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
@@ -659,7 +740,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn set_i64(&self, name: &str, val: i64) -> Result<(), EspError> {
-        let c_key = CString::new(name).unwrap();
+        let c_key = match CString::new(name) {
+            Ok(v) => v,
+            Err(_) => return Err(EspError::from_non_zero(NonZeroI32::new(ESP_FAIL).unwrap())),
+        };
 
         esp!(unsafe { nvs_set_i64(self.1, c_key.as_ptr(), val) })?;
 
