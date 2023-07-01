@@ -1,18 +1,17 @@
 //! Updates tags from the NVS (default partition).
-//! 
+//!
 //! Note that this module exposes two separate set of APIs:
 //!  * the get_XXX/set_XXX API (where XXX is u8, str, etc.) - this is only for interop with C code that uses the C ESP IDF NVS API as well.
 //!  * the `get_raw`/`set_raw` APIs that take a `&[u8]`. This is the "native" Rust API that implements the `RawStorage` trait from `embedded-svc` and it should be preferred actually, as you can layer on top of it any serde you want.
-//! 
+//!
 //! More info reagarding NVS:
 //!   https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/storage/nvs_flash.html
 
 use esp_idf_sys::{self as _}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 
-use esp_idf_svc::nvs::*;
 use esp_idf_svc::log::EspLogger;
+use esp_idf_svc::nvs::*;
 use log::info;
-
 
 fn main() -> anyhow::Result<()> {
     EspLogger::initialize_default();
