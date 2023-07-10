@@ -332,8 +332,8 @@ impl core::fmt::Display for Characteristic {
             f,
             "{} ({})",
             self.name
-                .clone()
-                .unwrap_or_else(|| "Unnamed characteristic".to_string()),
+                .as_deref()
+                .unwrap_or_else(|| "Unnamed characteristic"),
             self.uuid
         )
     }

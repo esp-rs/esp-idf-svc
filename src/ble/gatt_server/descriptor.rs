@@ -284,9 +284,7 @@ impl core::fmt::Display for Descriptor {
         write!(
             f,
             "{} ({})",
-            self.name
-                .clone()
-                .unwrap_or_else(|| "Unnamed descriptor".to_string()),
+            self.name.as_deref().unwrap_or_else(|| "Unnamed descriptor"),
             self.uuid
         )
     }

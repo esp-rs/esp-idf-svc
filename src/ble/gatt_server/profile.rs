@@ -526,9 +526,7 @@ impl core::fmt::Display for Profile {
         write!(
             f,
             "{} (0x{:04x})",
-            self.name
-                .clone()
-                .unwrap_or_else(|| "Unnamed profile".to_string()),
+            self.name.as_deref().unwrap_or_else(|| "Unnamed profile"),
             self.identifier,
         )
     }

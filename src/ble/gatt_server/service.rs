@@ -142,9 +142,7 @@ impl core::fmt::Display for Service {
         write!(
             f,
             "{} ({})",
-            self.name
-                .clone()
-                .unwrap_or_else(|| "Unnamed service".to_string()),
+            self.name.as_deref().unwrap_or_else(|| "Unnamed service"),
             self.uuid,
         )
     }
