@@ -1,11 +1,10 @@
-mod profile;
 mod server;
 
-use ::log::{debug, warn};
+use ::log::debug;
 
 use esp_idf_sys::*;
 
-use crate::ble::gatt_server::{GattServer, Profile};
+use crate::ble::gatt_server::GattServer;
 
 impl GattServer {
     /// The main GATT server event loop.
@@ -76,63 +75,5 @@ impl GattServer {
                     .gatts_event_handler(event, gatts_if, param);
             }
         });
-    }
-}
-
-impl Profile {
-    /// Profile-specific GATT server event loop.
-    fn gatts_event_handler(
-        &mut self,
-        event: esp_gatts_cb_event_t,
-        gatts_if: esp_gatt_if_t,
-        param: *mut esp_ble_gatts_cb_param_t,
-    ) {
-        #[allow(non_upper_case_globals)]
-        match event {
-            esp_gatts_cb_event_t_ESP_GATTS_REG_EVT => {
-                let param = unsafe { (*param).reg };
-
-                self.on_reg(param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_CREATE_EVT => {
-                let param = unsafe { (*param).create };
-
-                self.on_create(param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_START_EVT => {
-                let param = unsafe { (*param).start };
-
-                self.on_start(param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_EVT => {
-                let param = unsafe { (*param).add_char };
-
-                self.on_char_add(param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_DESCR_EVT => {
-                let param = unsafe { (*param).add_char_descr };
-
-                self.on_char_add_descr(param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_WRITE_EVT => {
-                let param = unsafe { (*param).write };
-
-                self.on_write(gatts_if, param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_READ_EVT => {
-                let param = unsafe { (*param).read };
-
-                self.on_read(gatts_if, param);
-            }
-            esp_gatts_cb_event_t_ESP_GATTS_CONF_EVT => {
-                let _param = unsafe { (*param).conf };
-
-                // TODO: on_conf.
-                debug!("Received confirmation event.");
-            }
-            _ => {
-                warn!("Unhandled GATT server event: {:?}", event);
-            }
-        }
     }
 }
