@@ -332,7 +332,7 @@ impl Profile {
                         if let Some(write_callback) = &characteristic.read().unwrap().write_callback
                         {
                             let value = unsafe {
-                                std::slice::from_raw_parts(param.value, param.len as usize)
+                                core::slice::from_raw_parts(param.value, param.len as usize)
                             }
                             .to_vec();
 
@@ -402,7 +402,7 @@ impl Profile {
                                         descriptor.read().unwrap().write_callback.clone()
                                     {
                                         let value = unsafe {
-                                            std::slice::from_raw_parts(
+                                            core::slice::from_raw_parts(
                                                 param.value,
                                                 param.len as usize,
                                             )
@@ -521,8 +521,8 @@ impl Profile {
     }
 }
 
-impl std::fmt::Display for Profile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Profile {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{} (0x{:04x})",

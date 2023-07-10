@@ -1,4 +1,3 @@
-use core::fmt::Formatter;
 use std::sync::{Arc, RwLock};
 
 use ::log::debug;
@@ -138,8 +137,8 @@ impl Service {
     }
 }
 
-impl std::fmt::Display for Service {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Service {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{} ({})",

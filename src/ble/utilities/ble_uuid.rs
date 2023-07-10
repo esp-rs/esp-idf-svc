@@ -49,7 +49,7 @@ impl BleUuid {
         let uuid = uuid.replace('-', "");
 
         for (i, byte) in uuid.as_bytes().chunks(2).enumerate() {
-            uuid_bytes[i] = u8::from_str_radix(std::str::from_utf8(byte).unwrap(), 16).unwrap();
+            uuid_bytes[i] = u8::from_str_radix(core::str::from_utf8(byte).unwrap(), 16).unwrap();
         }
 
         uuid_bytes.reverse();
@@ -146,8 +146,8 @@ impl From<esp_gatt_id_t> for BleUuid {
     }
 }
 
-impl std::fmt::Display for BleUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for BleUuid {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Uuid16(uuid) => write!(f, "0x{uuid:04x}"),
             Self::Uuid32(uuid) => write!(f, "0x{uuid:08x}"),
@@ -171,8 +171,8 @@ impl std::fmt::Display for BleUuid {
     }
 }
 
-impl std::fmt::Debug for BleUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for BleUuid {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{self}")
     }
 }

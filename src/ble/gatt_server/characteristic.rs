@@ -1,5 +1,3 @@
-use core::fmt::Formatter;
-
 use std::sync::{Arc, Mutex, RwLock};
 
 use ::log::{debug, warn};
@@ -328,8 +326,8 @@ impl Characteristic {
     }
 }
 
-impl std::fmt::Display for Characteristic {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Characteristic {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{} ({})",
@@ -341,8 +339,8 @@ impl std::fmt::Display for Characteristic {
     }
 }
 
-impl std::fmt::Debug for Characteristic {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Characteristic {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Debug representation of a characteristic.
         f.debug_struct("Characteristic")
             .field("name", &self.name)

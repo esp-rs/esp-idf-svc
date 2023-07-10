@@ -34,8 +34,8 @@ impl From<esp_ble_gatts_cb_param_t_gatts_disconnect_evt_param> for Connection {
 }
 
 #[cfg(esp_idf_version_major = "4")]
-impl std::fmt::Display for Connection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Connection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} ({}, slave: {})",
@@ -52,8 +52,8 @@ impl std::fmt::Display for Connection {
 }
 
 #[cfg(esp_idf_version_major = "5")]
-impl std::fmt::Display for Connection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Connection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X} ({})",

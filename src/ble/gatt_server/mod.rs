@@ -54,11 +54,11 @@ pub fn init() {
             max_interval: 0x0010,
             appearance: Appearance::GenericUnknown.into(),
             manufacturer_len: 0,
-            p_manufacturer_data: std::ptr::null_mut(),
+            p_manufacturer_data: core::ptr::null_mut(),
             service_data_len: 0,
-            p_service_data: std::ptr::null_mut(),
+            p_service_data: core::ptr::null_mut(),
             service_uuid_len: 0,
-            p_service_uuid: std::ptr::null_mut(),
+            p_service_uuid: core::ptr::null_mut(),
             flag: (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT) as u8,
         },
         scan_response_data: esp_ble_adv_data_t {
@@ -69,11 +69,11 @@ pub fn init() {
             max_interval: 0x0010,
             appearance: Appearance::GenericUnknown.into(),
             manufacturer_len: 0,
-            p_manufacturer_data: std::ptr::null_mut(),
+            p_manufacturer_data: core::ptr::null_mut(),
             service_data_len: 0,
-            p_service_data: std::ptr::null_mut(),
+            p_service_data: core::ptr::null_mut(),
             service_uuid_len: 0,
-            p_service_uuid: std::ptr::null_mut(),
+            p_service_uuid: core::ptr::null_mut(),
             flag: (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT) as u8,
         },
         advertisement_configured: false,
@@ -255,7 +255,7 @@ impl GattServer {
             ce_len_type: CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as u8,
             coex_use_hooks: false,
             hci_tl_type: CONFIG_BT_CTRL_HCI_TL_EFF as u8,
-            hci_tl_funcs: std::ptr::null_mut(),
+            hci_tl_funcs: core::ptr::null_mut(),
             txant_dft: CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as u8,
             rxant_dft: CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as u8,
             txpwr_dft: CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as u8,
@@ -298,7 +298,7 @@ impl GattServer {
             ce_len_type: CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as u8,
             coex_use_hooks: false,
             hci_tl_type: CONFIG_BT_CTRL_HCI_TL_EFF as u8,
-            hci_tl_funcs: std::ptr::null_mut(),
+            hci_tl_funcs: core::ptr::null_mut(),
             txant_dft: CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as u8,
             rxant_dft: CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as u8,
             txpwr_dft: CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as u8,
@@ -690,7 +690,7 @@ impl GattServer {
                 value,
             ));
 
-            std::slice::from_raw_parts(*value, len as usize)
+            core::slice::from_raw_parts(*value, len as usize)
         };
 
         debug!(

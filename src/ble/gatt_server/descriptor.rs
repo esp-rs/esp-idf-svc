@@ -1,5 +1,3 @@
-use alloc::fmt;
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, RwLock},
@@ -281,8 +279,8 @@ impl Descriptor {
     }
 }
 
-impl std::fmt::Display for Descriptor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Descriptor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{} ({})",
@@ -294,8 +292,8 @@ impl std::fmt::Display for Descriptor {
     }
 }
 
-impl std::fmt::Debug for Descriptor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Descriptor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Debug representation of a characteristic.
         f.debug_struct("Descriptor")
             .field("name", &self.name)
