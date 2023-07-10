@@ -6,9 +6,6 @@ mod descriptor;
 mod profile;
 mod service;
 
-// Custom stuff.
-mod custom_attributes;
-
 // Event handler.
 use alloc::{boxed::Box, sync::Arc};
 use heapless::FnvIndexSet;
