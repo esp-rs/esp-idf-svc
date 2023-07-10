@@ -24,6 +24,7 @@
 #[macro_use]
 extern crate alloc;
 
+#[cfg(not(esp32s2))]
 #[cfg(all(esp_idf_bt_enabled, esp_idf_bt_bluedroid_enabled))]
 pub mod ble;
 pub mod errors;

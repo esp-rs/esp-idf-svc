@@ -10,19 +10,16 @@ mod service;
 mod custom_attributes;
 
 // Event handler.
-mod gap_event_handler;
-mod gatts_event_handler;
-
 use alloc::{boxed::Box, sync::Arc};
 use heapless::FnvIndexSet;
 use std::sync::RwLock;
 
-use ::log::{info, warn};
+use ::log::{debug, error, info, warn};
 
 use esp_idf_sys::*;
 
 use crate::{
-    ble::utilities::{Appearance, Connection},
+    ble::utilities::{Appearance, BleUuid, Connection},
     private::mutex::{Mutex, RawMutex},
 };
 
@@ -35,23 +32,6 @@ type Singleton<T> = Mutex<Option<Box<T>>>;
 
 /// The GATT server singleton.
 pub static GLOBAL_GATT_SERVER: Singleton<GattServer> = Mutex::wrap(RawMutex::new(), None);
-
-/// Represents a GATT server.
-///
-/// This is a singleton, and can be accessed via the [`GLOBAL_GATT_SERVER`] static.
-pub struct GattServer {
-    profiles: Vec<Arc<RwLock<Profile>>>,
-    started: bool,
-    advertisement_parameters: esp_ble_adv_params_t,
-    advertisement_data: esp_ble_adv_data_t,
-    scan_response_data: esp_ble_adv_data_t,
-    device_name: String,
-    advertisement_configured: bool,
-    // BT/BLE MAX ACL CONNECTIONS is (1~7).
-    active_connections: FnvIndexSet<Connection, 8>,
-}
-
-unsafe impl Send for GattServer {}
 
 /// The GATT server singleton initialization.
 ///
@@ -103,6 +83,21 @@ pub fn init() {
         device_name: "ESP32".to_string(),
         active_connections: FnvIndexSet::new(),
     }));
+}
+
+/// Represents a GATT server.
+///
+/// This is a singleton, and can be accessed via the [`GLOBAL_GATT_SERVER`] static.
+pub struct GattServer {
+    profiles: Vec<Arc<RwLock<Profile>>>,
+    started: bool,
+    advertisement_parameters: esp_ble_adv_params_t,
+    advertisement_data: esp_ble_adv_data_t,
+    scan_response_data: esp_ble_adv_data_t,
+    device_name: String,
+    advertisement_configured: bool,
+    // BT/BLE MAX ACL CONNECTIONS is (1~7).
+    active_connections: FnvIndexSet<Connection, 8>,
 }
 
 impl GattServer {
@@ -376,4 +371,337 @@ impl GattServer {
             None => panic!("GATT server not initialized"),
         }
     }
+
+    pub(crate) extern "C" fn gap_event_handler(
+        &mut self,
+        event: esp_gap_ble_cb_event_t,
+        param: *mut esp_ble_gap_cb_param_t,
+    ) {
+        #[allow(non_upper_case_globals)]
+        match event {
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT => {
+                debug!("BLE GAP advertisement data set complete.");
+                info!("Starting BLE GAP advertisement.");
+
+                unsafe {
+                    esp_nofail!(esp_ble_gap_start_advertising(
+                        &mut self.advertisement_parameters
+                    ));
+                }
+            }
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT => {
+                debug!("BLE GAP scan response data set complete.");
+                info!("Starting BLE GAP response advertisement.");
+
+                unsafe {
+                    esp_nofail!(esp_ble_gap_start_advertising(
+                        &mut self.advertisement_parameters
+                    ));
+                }
+            }
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_START_COMPLETE_EVT => {
+                let param = unsafe { (*param).adv_data_cmpl };
+                if param.status == esp_bt_status_t_ESP_BT_STATUS_SUCCESS {
+                    debug!("BLE GAP advertisement started.");
+                } else {
+                    warn!("BLE GAP advertisement start failed.");
+                }
+            }
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT => {
+                let param = unsafe { (*param).adv_data_cmpl };
+                if param.status == esp_bt_status_t_ESP_BT_STATUS_SUCCESS {
+                    debug!("BLE GAP advertisement stopped.");
+                } else {
+                    warn!("BLE GAP advertisement stop failed.");
+                }
+            }
+            esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT => {
+                let param = unsafe { (*param).update_conn_params };
+                info!("Connection parameters updated: {:?}", param);
+            }
+            _ => {
+                warn!("Unhandled GAP event: {:?}", event);
+            }
+        }
+    }
+
+    /// The main GATT server event loop.
+    ///
+    /// Dispatches the received events across the appropriate profile-related handlers.
+    pub(crate) fn gatts_event_handler(
+        &mut self,
+        event: esp_gatts_cb_event_t,
+        gatts_if: esp_gatt_if_t,
+        param: *mut esp_ble_gatts_cb_param_t,
+    ) {
+        #[allow(non_upper_case_globals)]
+        match event {
+            esp_gatts_cb_event_t_ESP_GATTS_CONNECT_EVT => {
+                let param = unsafe { (*param).connect };
+                self.on_connect(param);
+
+                // Do not pass this event to the profile handlers.
+                return;
+            }
+            esp_gatts_cb_event_t_ESP_GATTS_DISCONNECT_EVT => {
+                let param = unsafe { (*param).disconnect };
+                self.on_disconnect(param);
+
+                // Do not pass this event to the profile handlers.
+                return;
+            }
+            esp_gatts_cb_event_t_ESP_GATTS_MTU_EVT => {
+                let param = unsafe { (*param).mtu };
+                self.on_mtu_change(param);
+
+                // Do not pass this event to the profile handlers.
+                return;
+            }
+            esp_gatts_cb_event_t_ESP_GATTS_REG_EVT => {
+                let param = unsafe { (*param).reg };
+                self.on_reg(gatts_if, param);
+
+                // Pass this event to the profile handlers.
+            }
+            esp_gatts_cb_event_t_ESP_GATTS_RESPONSE_EVT => {
+                let param = unsafe { (*param).rsp };
+                self.on_response(param);
+
+                // Do not pass this event to the profile handlers.
+                return;
+            }
+            esp_gatts_cb_event_t_ESP_GATTS_SET_ATTR_VAL_EVT => {
+                let param = unsafe { (*param).set_attr_val };
+                self.on_set_attr_val(gatts_if, param);
+
+                // Do not pass this event to the profile handlers.
+                return;
+            }
+            _ => {}
+        }
+
+        self.profiles.iter().for_each(|profile| {
+            if profile.read().unwrap().interface == Some(gatts_if) {
+                debug!(
+                    "Handling event {} on profile {}.",
+                    event,
+                    profile.read().unwrap()
+                );
+                profile
+                    .write()
+                    .unwrap()
+                    .gatts_event_handler(event, gatts_if, param);
+            }
+        });
+    }
+
+    pub(crate) fn on_connect(
+        &mut self,
+        param: esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_connect_evt_param,
+    ) {
+        info!("GATT client {} connected.", Connection::from(param));
+        if self.active_connections.insert(param.into()).is_err() {
+            error!("Failed to insert new connection.");
+        }
+    }
+
+    pub fn is_client_connected(&self) -> bool {
+        !self.active_connections.is_empty()
+    }
+
+    pub(crate) fn on_disconnect(
+        &mut self,
+        param: esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_disconnect_evt_param,
+    ) {
+        info!(
+            "GATT client {:02X?} disconnected.",
+            param.remote_bda.to_vec()
+        );
+
+        self.active_connections.remove(&param.into());
+
+        unsafe {
+            esp_idf_sys::esp_ble_gap_start_advertising(&mut self.advertisement_parameters);
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    pub(crate) fn on_mtu_change(
+        &self,
+        param: esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_mtu_evt_param,
+    ) {
+        debug!("MTU changed to {}.", param.mtu);
+    }
+
+    pub(crate) fn on_reg(
+        &mut self,
+        gatts_if: esp_gatt_if_t,
+        param: esp_ble_gatts_cb_param_t_gatts_reg_evt_param,
+    ) {
+        if param.status == esp_gatt_status_t_ESP_GATT_OK {
+            debug!("New profile registered.");
+
+            let profile = self
+                .profiles
+                .iter()
+                .find(|profile| (*profile).read().unwrap().identifier == param.app_id)
+                .expect("No profile found with received application identifier.");
+
+            profile.write().unwrap().interface = Some(gatts_if);
+
+            if !self.advertisement_configured {
+                unsafe {
+                    esp_nofail!(esp_ble_gap_set_device_name(
+                        self.device_name.as_ptr().cast::<i8>()
+                    ));
+
+                    self.advertisement_configured = true;
+
+                    // Advertisement data.
+                    esp_nofail!(esp_ble_gap_config_adv_data(&mut self.advertisement_data));
+
+                    // Scan response data.
+                    esp_nofail!(esp_ble_gap_config_adv_data(&mut self.scan_response_data));
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    pub(crate) fn on_response(
+        &self,
+        param: esp_idf_sys::esp_ble_gatts_cb_param_t_gatts_rsp_evt_param,
+    ) {
+        debug!("Responded to handle 0x{:04x}.", param.handle);
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn on_set_attr_val(
+        &self,
+        gatts_if: esp_gatt_if_t,
+        param: esp_ble_gatts_cb_param_t_gatts_set_attr_val_evt_param,
+    ) {
+        if param.status != esp_gatt_status_t_ESP_GATT_OK {
+            warn!(
+                "Failed to set attribute value, error code: {:04x}.",
+                param.status
+            );
+        }
+
+        let Some(profile) = self.get_profile(gatts_if) else {
+            warn!("Cannot find profile described by interface {} received in set attribute value event.", gatts_if);
+            return;
+        };
+
+        let Some(service) = profile.read().unwrap().get_service(param.srvc_handle) else {
+            warn!("Cannot find service described by service handle {} received in set attribute value event.", param.srvc_handle);
+            return;
+        };
+
+        let Some(characteristic) = service.read().unwrap().get_characteristic_by_handle(param.attr_handle) else {
+            warn!("Cannot find characteristic described by service handle {} and attribute handle {} received in set attribute value event.", param.srvc_handle, param.attr_handle);
+            return;
+        };
+
+        debug!(
+            "Received set attribute value event for characteristic {}.",
+            characteristic.read().unwrap()
+        );
+
+        for connection in &self.active_connections {
+            // Get the current status of the CCCD via a fake read operation.
+            let simulated_read_param = esp_ble_gatts_cb_param_t_gatts_read_evt_param {
+                bda: connection.remote_bda,
+                conn_id: connection.id,
+                handle: characteristic
+                    .read()
+                    .unwrap()
+                    .descriptors
+                    .iter()
+                    .find(|desc| desc.read().unwrap().uuid == BleUuid::Uuid16(0x2902))
+                    .unwrap()
+                    .read()
+                    .unwrap()
+                    .attribute_handle
+                    .unwrap(),
+                ..Default::default()
+            };
+
+            let status = characteristic
+                .read()
+                .unwrap()
+                .get_cccd_status(simulated_read_param);
+
+            // Check that the status is not None, otherwise bail.
+            let Some((notification, indication)) = status else { return; };
+            let properties = characteristic.read().unwrap().properties;
+
+            let mut internal_value = characteristic.write().unwrap().internal_value.clone();
+
+            if properties.indicate && indication {
+                debug!(
+                    "Indicating {} value change to {:02X?}.",
+                    characteristic.read().unwrap(),
+                    connection.id
+                );
+                let result = unsafe {
+                    esp!(esp_ble_gatts_send_indicate(
+                        gatts_if,
+                        connection.id,
+                        param.attr_handle,
+                        internal_value.len() as u16,
+                        internal_value.as_mut_slice().as_mut_ptr(),
+                        true
+                    ))
+                };
+
+                if result.is_err() {
+                    warn!(
+                        "Failed to indicate value change: {}.",
+                        result.err().unwrap()
+                    );
+                }
+            } else if properties.notify && notification {
+                debug!(
+                    "Notifying {} value change to {}.",
+                    characteristic.read().unwrap(),
+                    connection
+                );
+                let result = unsafe {
+                    esp!(esp_ble_gatts_send_indicate(
+                        gatts_if,
+                        connection.id,
+                        param.attr_handle,
+                        internal_value.len() as u16,
+                        internal_value.as_mut_slice().as_mut_ptr(),
+                        false
+                    ))
+                };
+
+                if result.is_err() {
+                    warn!("Failed to notify value change: {}.", result.err().unwrap());
+                }
+            }
+        }
+
+        let value: *mut *const u8 = &mut [0u8].as_ptr();
+        let mut len = 512;
+        let vector = unsafe {
+            esp_nofail!(esp_ble_gatts_get_attr_value(
+                param.attr_handle,
+                &mut len,
+                value,
+            ));
+
+            std::slice::from_raw_parts(*value, len as usize)
+        };
+
+        debug!(
+            "Characteristic {} value changed to {:02X?}.",
+            characteristic.read().unwrap(),
+            vector
+        );
+    }
 }
+
+unsafe impl Send for GattServer {}
