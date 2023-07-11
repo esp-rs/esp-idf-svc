@@ -1,3 +1,6 @@
+[build]
+target = "xtensa-esp32s3-espidf"
+
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
 

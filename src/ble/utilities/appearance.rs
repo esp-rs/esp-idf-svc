@@ -3,7 +3,7 @@
 /// A list of standard appearance values.
 ///
 /// This list was copied from the Bluetooth SIG website.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Appearance {
     GenericUnknown = 0x0000,
     GenericPhone = 0x0040,
