@@ -30,6 +30,217 @@ type Singleton<T> = Mutex<Option<Box<T>>>;
 /// The GATT server singleton.
 pub static GLOBAL_GATT_SERVER: Singleton<GattServer> = Mutex::wrap(RawMutex::new(), None);
 
+pub enum GapEvent {
+    AdvDataSetComplete,
+    ScanRspDataSetComplete,
+    AdvStartComplete,
+    AdvStopComplete,
+    UpdateConnParams,
+}
+
+pub enum GattServiceEvent<'a> {
+    Register {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Application id which input in register API"]
+        app_id: u16,
+    },
+    Read {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Transfer id"]
+        trans_id: u32,
+        #[doc = "< The bluetooth device address which been read"]
+        bda: esp_bd_addr_t,
+        #[doc = "< The attribute handle"]
+        handle: u16,
+        #[doc = "< Offset of the value, if the value is too long"]
+        offset: u16,
+        #[doc = "< The value is too long or not"]
+        is_long: bool,
+        #[doc = "< The read operation need to do response"]
+        need_rsp: bool,
+    },
+    Write {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Transfer id"]
+        trans_id: u32,
+        #[doc = "< The bluetooth device address which been written"]
+        bda: esp_bd_addr_t,
+        #[doc = "< The attribute handle"]
+        handle: u16,
+        #[doc = "< Offset of the value, if the value is too long"]
+        offset: u16,
+        #[doc = "< The write operation need to do response"]
+        need_rsp: bool,
+        #[doc = "< This write operation is prepare write"]
+        is_prep: bool,
+        #[doc = "< The write attribute value"]
+        value: &'a [u8],
+    },
+    ExecWrite {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Transfer id"]
+        trans_id: u32,
+        #[doc = "< The bluetooth device address which been written"]
+        bda: esp_bd_addr_t,
+        #[doc = "< Execute write flag"]
+        exec_write_flag: u8,
+    },
+    Mtu {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< MTU size"]
+        mtu: u16,
+    },
+    Confirm {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< attribute handle"]
+        handle: u16,
+        #[doc = "< The indication or notification value length, len is valid when send notification or indication failed"]
+        len: u16,
+        #[doc = "< The indication or notification value, value is valid when send notification or indication failed"]
+        value: Option<&'a [u8]>,
+    },
+    Unregister {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+        #[doc = "< Service id, include service uuid and other information"]
+        service_id: esp_gatt_srvc_id_t,
+    },
+    Create {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+        #[doc = "< Service id, include service uuid and other information"]
+        service_id: esp_gatt_srvc_id_t,
+    },
+    AddIncludedServiceComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Included service attribute handle"]
+        attr_handle: u16,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+    },
+    AddCharacteristicComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Characteristic attribute handle"]
+        attr_handle: u16,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+        #[doc = "< Characteristic uuid"]
+        char_uuid: esp_bt_uuid_t,
+    },
+    AddDescriptorComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Descriptor attribute handle"]
+        attr_handle: u16,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+        #[doc = "< Characteristic descriptor uuid"]
+        descr_uuid: esp_bt_uuid_t,
+    },
+    DeleteComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+    },
+    StartComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+    },
+    StopComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service attribute handle"]
+        service_handle: u16,
+    },
+    Connect {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Link role : master role = 0  ; slave role = 1"]
+        link_role: u8,
+        #[doc = "< Remote bluetooth device address"]
+        remote_bda: esp_bd_addr_t,
+        #[doc = "< current Connection parameters"]
+        conn_params: esp_gatt_conn_params_t,
+    },
+    Disconnect {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Link role : master role = 0  ; slave role = 1"]
+        link_role: u8,
+        #[doc = "< Remote bluetooth device address"]
+        remote_bda: esp_bd_addr_t,
+        #[doc = "< Indicate the reason of disconnection"]
+        reason: esp_gatt_conn_reason_t,
+    },
+    Open {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+    },
+    Close {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Connection id"]
+        conn_id: u16,
+    },
+    Listen {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Congested or not"]
+        congested: bool,
+    },
+    Congest {
+        #[doc = "< Connection id"]
+        conn_id: u16,
+        #[doc = "< Congested or not"]
+        congested: bool,
+    },
+    ResponseComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Attribute handle which send response"]
+        handle: u16,
+    },
+    CreateAttributeTableComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+        #[doc = "< Service uuid type"]
+        svc_uuid: esp_bt_uuid_t,
+        #[doc = "< Service id"]
+        svc_inst_id: u8,
+        #[doc = "< The handles"]
+        handles: &'a [u16],
+    },
+    SetAttributeValueComplete {
+        #[doc = "< The service handle"]
+        srvc_handle: u16,
+        #[doc = "< The attribute  handle"]
+        attr_handle: u16,
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+    },
+    SendServiceChangeComplete {
+        #[doc = "< Operation status"]
+        status: esp_gatt_status_t,
+    },
+}
+
 /// The GATT server singleton initialization.
 ///
 /// Must be called before the GATT server usage.
