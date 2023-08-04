@@ -838,6 +838,10 @@ impl<'d, T> EspEth<'d, T> {
         &mut self.driver
     }
 
+    pub fn get_handle(&self) -> esp_eth_handle_t {
+        self.driver.handle
+    }
+    
     pub fn netif(&self) -> &EspNetif {
         &self.netif
     }
