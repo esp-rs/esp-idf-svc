@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
                     info!("{:?} = {:?}", tag_raw_str, from_bytes::<&str>(the_str));
                 }
             }
-            Err(e) => info!("Couldn't get tag {} because{:?}", tag_raw_str, e),
+            Err(e) => info!("Couldn't get tag {} because {:?}", tag_raw_str, e),
         };
     }
 
@@ -120,7 +120,7 @@ fn main() -> anyhow::Result<()> {
                     )
                 }
             }
-            Err(e) => info!("Couldn't get tag {} because{:?}", tag_raw_str, e),
+            Err(e) => info!("Couldn't get tag {} because {:?}", tag_raw_str, e),
         };
     }
 
