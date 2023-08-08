@@ -15,6 +15,7 @@ extern crate alloc;
 
 pub mod a2dp;
 pub mod ble;
+pub mod hfp;
 
 pub trait BtMode {
     fn mode() -> esp_bt_mode_t;
