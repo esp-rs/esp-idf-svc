@@ -45,6 +45,22 @@ pub mod client {
             })
         }
 
+        pub fn connect(&mut self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_connect(remote_bda as *const _ as *mut _) })
+        }
+
+        pub fn disconnect(&mut self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_disconnect(remote_bda as *const _ as *mut _) })
+        }
+
+        pub fn connect_audio(&mut self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_connect_audio(remote_bda as *const _ as *mut _) })
+        }
+
+        pub fn disconnect_audio(&mut self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_disconnect_audio(remote_bda as *const _ as *mut _) })
+        }
+
         unsafe extern "C" fn event_handler(
             event: esp_hf_client_cb_event_t,
             param: *mut esp_hf_client_cb_param_t,
