@@ -36,7 +36,7 @@ impl GattService {
 }
 
 #[derive(Clone)]
-pub enum GattServiceEvent<'a> {
+pub enum GattsEvent<'a> {
     Register {
         /// Operation status
         status: esp_gatt_status_t,
@@ -240,7 +240,7 @@ pub enum GattServiceEvent<'a> {
 }
 
 #[allow(non_upper_case_globals)]
-impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattServiceEvent<'a> {
+impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEvent<'a> {
     fn from(value: (esp_gatts_cb_event_t, &esp_ble_gatts_cb_param_t)) -> Self {
         let (event, param) = value;
 
@@ -351,7 +351,7 @@ where
 {
     pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&GattServiceEvent) + Send + 'static,
+        F: Fn(&GattsEvent) + Send + 'static,
     {
         esp!(unsafe { esp_ble_gatts_register_callback(Some(Self::event_handler)) })?;
 
@@ -459,7 +459,7 @@ where
         param: *mut esp_ble_gatts_cb_param_t,
     ) {
         let param = unsafe { param.as_ref() }.unwrap();
-        let event = GattServiceEvent::from((event, param));
+        let event = GattsEvent::from((event, param));
 
         //debug!("Got GATTS event {{ {:#?} }}", &event);
     }
