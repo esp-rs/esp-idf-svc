@@ -9,18 +9,17 @@ use log::info;
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 use crate::nvs::EspDefaultNvsPartition;
 
+pub mod a2dp;
 pub mod ble;
 
 pub trait BtMode {
     fn mode() -> esp_bt_mode_t;
 }
 
-pub trait BleEnabled {}
-
-pub trait BtClassicEnabled {}
+pub trait BleEnabled: BtMode {}
+pub trait BtClassicEnabled: BtMode {}
 
 pub struct BtClassic;
-
 impl BtClassicEnabled for BtClassic {}
 
 impl BtMode for BtClassic {
@@ -30,7 +29,6 @@ impl BtMode for BtClassic {
 }
 
 pub struct Ble;
-
 impl BleEnabled for Ble {}
 
 impl BtMode for Ble {
@@ -40,7 +38,6 @@ impl BtMode for Ble {
 }
 
 pub struct BtDual;
-
 impl BtClassicEnabled for BtDual {}
 impl BleEnabled for BtDual {}
 

@@ -337,7 +337,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
 pub struct EspGatts<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     _driver: T,
     _p: PhantomData<&'d ()>,
@@ -347,7 +347,7 @@ where
 impl<'d, M, T> EspGatts<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
@@ -468,7 +468,7 @@ where
 impl<'d, M, T> Drop for EspGatts<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     fn drop(&mut self) {
         esp!(unsafe { esp_ble_gatts_register_callback(None) }).unwrap();

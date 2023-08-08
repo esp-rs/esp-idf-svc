@@ -10,7 +10,7 @@ use esp_idf_sys::*;
 use log::{debug, info};
 
 use crate::{
-    bt::{BleEnabled, BtDriver, BtMode, BtUuid},
+    bt::{BleEnabled, BtDriver, BtUuid},
     private::cstr::to_cstring_arg,
 };
 
@@ -452,7 +452,7 @@ impl Debug for GapEvent {
 pub struct EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     _driver: T,
     _p: PhantomData<&'d ()>,
@@ -462,7 +462,7 @@ where
 impl<'d, M, T> EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     pub fn new<F>(driver: T, device_name: &str, events_cb: F) -> Result<Self, EspError>
     where
@@ -609,7 +609,7 @@ where
 impl<'d, M, T> Drop for EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BtMode + BleEnabled,
+    M: BleEnabled,
 {
     fn drop(&mut self) {
         esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
