@@ -1,4 +1,6 @@
+use core::cell::UnsafeCell;
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use esp_idf_hal::modem::BluetoothModemPeripheral;
 use esp_idf_hal::peripheral::Peripheral;
@@ -8,6 +10,8 @@ use log::info;
 
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 use crate::nvs::EspDefaultNvsPartition;
+
+extern crate alloc;
 
 pub mod a2dp;
 pub mod ble;
@@ -79,6 +83,52 @@ impl From<&BtUuid> for esp_bt_uuid_t {
         bt_uuid
     }
 }
+
+pub(crate) struct BtCallback<E> {
+    initialized: AtomicBool,
+    callback: UnsafeCell<Option<alloc::boxed::Box<alloc::boxed::Box<dyn Fn(E)>>>>,
+}
+
+impl<E> BtCallback<E> {
+    pub const fn new() -> Self {
+        Self {
+            initialized: AtomicBool::new(false),
+            callback: UnsafeCell::new(None),
+        }
+    }
+
+    pub fn set<F>(&self, callback: F) -> Result<(), EspError>
+    where
+        F: Fn(E) + Send + 'static,
+    {
+        self.initialized
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
+
+        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(Box::new(Box::new(callback)));
+
+        Ok(())
+    }
+
+    pub fn clear(&self) -> Result<(), EspError> {
+        self.initialized
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
+
+        *unsafe { self.callback.get().as_mut() }.unwrap() = None;
+
+        Ok(())
+    }
+
+    pub unsafe fn call(&self, arg: E) {
+        if let Some(callback) = unsafe { self.callback.get().as_ref() }.unwrap().as_ref() {
+            (callback)(arg);
+        }
+    }
+}
+
+unsafe impl<E> Sync for BtCallback<E> {}
+unsafe impl<E> Send for BtCallback<E> {}
 
 pub struct BtDriver<'d, M>
 where

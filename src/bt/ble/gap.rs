@@ -9,6 +9,7 @@ use esp_idf_sys::*;
 
 use log::{debug, info};
 
+use crate::bt::BtCallback;
 use crate::{
     bt::{BleEnabled, BtDriver, BtUuid},
     private::cstr::to_cstring_arg,
@@ -466,8 +467,10 @@ where
 {
     pub fn new<F>(driver: T, device_name: &str, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&GapEvent) + Send + 'static,
+        F: Fn(GapEvent) + Send + 'static,
     {
+        CALLBACK.set(events_cb)?;
+
         esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })?;
 
         let device_name = to_cstring_arg(device_name)?;
@@ -602,7 +605,9 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GapEvent::from((event, param));
 
-        debug!("Got GAP event {{ {:#?} }}", &event);
+        debug!("Got GAP event {{ {:#?} }}", event);
+
+        CALLBACK.call(event);
     }
 }
 
@@ -613,5 +618,9 @@ where
 {
     fn drop(&mut self) {
         esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
+
+        CALLBACK.clear().unwrap();
     }
 }
+
+static CALLBACK: BtCallback<GapEvent> = BtCallback::new();

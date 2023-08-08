@@ -3,7 +3,7 @@ use core::{borrow::Borrow, marker::PhantomData};
 use esp_idf_sys::*;
 use log::{debug, info};
 
-use crate::bt::{BleEnabled, BtDriver, BtMode, BtUuid};
+use crate::bt::{BleEnabled, BtCallback, BtDriver, BtUuid};
 
 use super::{GattCharacteristic, GattDescriptor};
 
@@ -351,8 +351,10 @@ where
 {
     pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&GattsEvent) + Send + 'static,
+        F: Fn((u8, GattsEvent)) + Send + 'static,
     {
+        CALLBACK.set(events_cb)?;
+
         esp!(unsafe { esp_ble_gatts_register_callback(Some(Self::event_handler)) })?;
 
         Ok(Self {
@@ -461,7 +463,9 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GattsEvent::from((event, param));
 
-        //debug!("Got GATTS event {{ {:#?} }}", &event);
+        //debug!("Got GATTS event {{ {:#?} }}", event);
+
+        CALLBACK.call((gatts_if, event));
     }
 }
 
@@ -472,5 +476,9 @@ where
 {
     fn drop(&mut self) {
         esp!(unsafe { esp_ble_gatts_register_callback(None) }).unwrap();
+
+        CALLBACK.clear().unwrap();
     }
 }
+
+static CALLBACK: BtCallback<(u8, GattsEvent)> = BtCallback::new();

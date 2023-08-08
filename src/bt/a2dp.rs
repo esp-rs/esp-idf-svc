@@ -4,6 +4,8 @@ use esp_idf_sys::*;
 
 use crate::bt::{BtClassicEnabled, BtDriver};
 
+use super::BtCallback;
+
 pub trait A2dpMode {
     fn sink() -> bool;
     fn source() -> bool;
@@ -115,6 +117,8 @@ where
     where
         F: Fn(&A2dpEvent) + Send + 'static,
     {
+        CALLBACK.set(events_cb)?;
+
         esp!(unsafe { esp_a2d_register_callback(Some(Self::event_handler)) })?;
 
         if S::sink() {
@@ -172,5 +176,9 @@ where
         }
 
         esp!(unsafe { esp_a2d_register_callback(None) }).unwrap();
+
+        CALLBACK.clear().unwrap();
     }
 }
+
+static CALLBACK: BtCallback<&A2dpEvent> = BtCallback::new();
