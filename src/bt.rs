@@ -15,6 +15,7 @@ extern crate alloc;
 
 pub mod a2dp;
 pub mod ble;
+pub mod gap;
 pub mod hfp;
 
 pub trait BtMode {
@@ -278,6 +279,8 @@ where
                                  // dup_list_refresh_period: esp_idf_sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
                                  // scan_backoff_upperlimitmax: esp_idf_sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _
         };
+
+        // ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 
         info!("Init bluetooth controller.");
         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
