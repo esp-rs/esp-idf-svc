@@ -1,4 +1,5 @@
 use core::cell::UnsafeCell;
+use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -18,71 +19,101 @@ pub mod ble;
 pub mod gap;
 pub mod hfp;
 
-pub trait BtMode {
-    fn mode() -> esp_bt_mode_t;
-}
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct BdAddr(esp_bd_addr_t);
 
-pub trait BleEnabled: BtMode {}
-pub trait BtClassicEnabled: BtMode {}
-
-pub struct BtClassic;
-impl BtClassicEnabled for BtClassic {}
-
-impl BtMode for BtClassic {
-    fn mode() -> esp_bt_mode_t {
-        esp_bt_mode_t_ESP_BT_MODE_BLE
+impl BdAddr {
+    pub fn raw(&self) -> esp_bd_addr_t {
+        self.0
     }
 }
 
-pub struct Ble;
-impl BleEnabled for Ble {}
-
-impl BtMode for Ble {
-    fn mode() -> esp_bt_mode_t {
-        esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT
+impl From<BdAddr> for esp_bd_addr_t {
+    fn from(value: BdAddr) -> Self {
+        value.0
     }
 }
 
-pub struct BtDual;
-impl BtClassicEnabled for BtDual {}
-impl BleEnabled for BtDual {}
-
-impl BtMode for BtDual {
-    fn mode() -> esp_bt_mode_t {
-        esp_bt_mode_t_ESP_BT_MODE_BTDM
+impl From<esp_bd_addr_t> for BdAddr {
+    fn from(value: esp_bd_addr_t) -> Self {
+        Self(value)
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum BtUuid {
-    Uuid16([u8; 2]),
-    Uuid32([u8; 4]),
-    Uuid128([u8; 16]),
-}
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct BtUuid(esp_bt_uuid_t);
 
 impl BtUuid {
+    pub fn raw(&self) -> esp_bt_uuid_t {
+        self.0
+    }
+
+    pub fn uuid16(uuid: u16) -> Self {
+        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+
+        esp_uuid.len = 16;
+        esp_uuid.uuid.uuid16 = uuid;
+
+        Self(esp_uuid)
+    }
+
+    pub fn uuid32(uuid: u32) -> Self {
+        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+
+        esp_uuid.len = 32;
+        esp_uuid.uuid.uuid32 = uuid;
+
+        Self(esp_uuid)
+    }
+
+    pub fn uuid128(uuid: u128) -> Self {
+        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+
+        esp_uuid.len = 128;
+        esp_uuid.uuid.uuid128 = uuid.to_ne_bytes();
+
+        Self(esp_uuid)
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            BtUuid::Uuid16(uuid) => uuid,
-            BtUuid::Uuid32(uuid) => uuid,
-            BtUuid::Uuid128(uuid) => uuid,
+        match self.0.len {
+            16 => unsafe {
+                core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 2)
+            },
+            32 => unsafe {
+                core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 4)
+            },
+            128 => unsafe { &self.0.uuid.uuid128 },
+            _ => unreachable!(),
         }
     }
 }
 
-impl From<&BtUuid> for esp_bt_uuid_t {
-    fn from(uuid: &BtUuid) -> Self {
-        let mut bt_uuid: esp_bt_uuid_t = Default::default();
+impl Debug for BtUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BtUuid {{{:?}}}", self.as_bytes())
+    }
+}
 
-        match uuid {
-            BtUuid::Uuid16(uuid) => bt_uuid.uuid.uuid16 = u16::from_le_bytes(uuid.clone()),
-            BtUuid::Uuid32(uuid) => bt_uuid.uuid.uuid32 = u32::from_le_bytes(uuid.clone()),
-            BtUuid::Uuid128(uuid) => bt_uuid.uuid.uuid128 = uuid.clone(),
-        }
+impl PartialEq for BtUuid {
+    fn eq(&self, other: &BtUuid) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
 
-        bt_uuid.len = uuid.as_bytes().len() as _;
+impl Eq for BtUuid {}
 
-        bt_uuid
+impl From<BtUuid> for esp_bt_uuid_t {
+    fn from(uuid: BtUuid) -> Self {
+        uuid.0
+    }
+}
+
+impl From<esp_bt_uuid_t> for BtUuid {
+    fn from(uuid: esp_bt_uuid_t) -> Self {
+        Self(uuid)
     }
 }
 
@@ -131,6 +162,41 @@ impl<E> BtCallback<E> {
 
 unsafe impl<E> Sync for BtCallback<E> {}
 unsafe impl<E> Send for BtCallback<E> {}
+
+pub trait BtMode {
+    fn mode() -> esp_bt_mode_t;
+}
+
+pub trait BleEnabled: BtMode {}
+pub trait BtClassicEnabled: BtMode {}
+
+pub struct BtClassic;
+impl BtClassicEnabled for BtClassic {}
+
+impl BtMode for BtClassic {
+    fn mode() -> esp_bt_mode_t {
+        esp_bt_mode_t_ESP_BT_MODE_BLE
+    }
+}
+
+pub struct Ble;
+impl BleEnabled for Ble {}
+
+impl BtMode for Ble {
+    fn mode() -> esp_bt_mode_t {
+        esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT
+    }
+}
+
+pub struct BtDual;
+impl BtClassicEnabled for BtDual {}
+impl BleEnabled for BtDual {}
+
+impl BtMode for BtDual {
+    fn mode() -> esp_bt_mode_t {
+        esp_bt_mode_t_ESP_BT_MODE_BTDM
+    }
+}
 
 pub struct BtDriver<'d, M>
 where

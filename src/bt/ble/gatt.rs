@@ -1,7 +1,9 @@
 use esp_idf_sys::{
-    esp_attr_control_t, esp_attr_value_t, esp_bt_uuid_t, esp_gatt_char_prop_t, esp_gatt_perm_t,
-    ESP_GATT_AUTO_RSP, ESP_GATT_RSP_BY_APP,
+    esp_attr_control_t, esp_attr_value_t, esp_gatt_char_prop_t, esp_gatt_perm_t, ESP_GATT_AUTO_RSP,
+    ESP_GATT_RSP_BY_APP,
 };
+
+use crate::bt::BtUuid;
 
 pub mod server;
 
@@ -71,34 +73,6 @@ pub enum ServiceUuid {
     HearingAccess,
     TMAS,
     PublicBroadcastAnnouncement,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum BtUuid {
-    Uuid16(u16),
-    Uuid32(u32),
-    Uuid128([u8; 16]),
-}
-
-impl From<&BtUuid> for esp_bt_uuid_t {
-    fn from(svc: &BtUuid) -> Self {
-        let mut bt_uuid: esp_bt_uuid_t = Default::default();
-        match svc {
-            BtUuid::Uuid16(uuid) => {
-                bt_uuid.len = 2;
-                bt_uuid.uuid.uuid16 = *uuid;
-            }
-            BtUuid::Uuid32(uuid) => {
-                bt_uuid.len = 4;
-                bt_uuid.uuid.uuid32 = *uuid;
-            }
-            BtUuid::Uuid128(uuid) => {
-                bt_uuid.len = 16;
-                bt_uuid.uuid.uuid128 = *uuid;
-            }
-        }
-        bt_uuid
-    }
 }
 
 pub struct AttributeValue<const S: usize> {

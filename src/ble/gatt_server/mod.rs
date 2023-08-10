@@ -325,9 +325,9 @@ impl GattServer {
             hw_recorrect_en: AGC_RECORRECT_EN as u8,
             cca_thresh: CONFIG_BT_CTRL_HW_CCA_VAL as u8,
             #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
-            scan_backoff_upperlimitmax: CONFIG_BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
+            scan_backoff_upperlimitmax: BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as u16,
             #[cfg(any(esp_idf_version = "5.0", esp_idf_version = "5.1"))]
-            dup_list_refresh_period: CONFIG_DUPL_SCAN_CACHE_REFRESH_PERIOD as u16,
+            dup_list_refresh_period: DUPL_SCAN_CACHE_REFRESH_PERIOD as u16,
             #[cfg(esp_idf_version = "5.1")]
             ble_50_feat_supp: BT_CTRL_50_FEATURE_SUPPORT != 0,
         };

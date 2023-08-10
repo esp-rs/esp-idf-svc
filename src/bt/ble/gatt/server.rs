@@ -374,12 +374,10 @@ where
     }
 
     pub fn create_service(&mut self, gatt_if: u8, service: &GattService) -> Result<(), EspError> {
-        let svc_uuid: esp_bt_uuid_t = (&service.id).into();
-
         let mut svc_id: esp_gatt_srvc_id_t = esp_gatt_srvc_id_t {
             is_primary: service.is_primary,
             id: esp_gatt_id_t {
-                uuid: svc_uuid,
+                uuid: service.id.clone().into(),
                 inst_id: service.instance_id,
             },
         };
@@ -396,15 +394,13 @@ where
         service_handle: u16,
         characteristic: &GattCharacteristic<S>,
     ) -> Result<(), EspError> {
-        let uuid = (&characteristic.uuid).into();
-
         let value = (&characteristic.value).into();
         let auto_rsp = characteristic.auto_rsp.into();
 
         esp!(unsafe {
             esp_ble_gatts_add_char(
                 service_handle,
-                &uuid as *const esp_bt_uuid_t as *mut _,
+                &characteristic.uuid.raw() as *const _ as *mut _,
                 characteristic.permissions,
                 characteristic.property,
                 &value as *const esp_attr_value_t as *mut _,
@@ -418,12 +414,10 @@ where
         service_handle: u16,
         descriptor: &GattDescriptor,
     ) -> Result<(), EspError> {
-        let mut uuid = (&descriptor.uuid).into();
-
         esp!(unsafe {
             esp_ble_gatts_add_char_descr(
                 service_handle,
-                &mut uuid,
+                &descriptor.uuid.raw() as *const _ as *mut _,
                 descriptor.permissions,
                 core::ptr::null_mut(),
                 core::ptr::null_mut(),

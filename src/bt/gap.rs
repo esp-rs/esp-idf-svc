@@ -1,10 +1,5 @@
 use core::cmp::min;
-use core::ops::BitOr;
-use core::{
-    borrow::Borrow,
-    fmt::{self, Debug},
-    marker::PhantomData,
-};
+use core::{borrow::Borrow, fmt::Debug, marker::PhantomData};
 
 use enumset::{EnumSet, EnumSetType};
 
@@ -13,12 +8,9 @@ use esp_idf_sys::*;
 use log::{debug, info};
 
 use crate::bt::BtCallback;
-use crate::{
-    bt::{BleEnabled, BtDriver, BtUuid},
-    private::cstr::to_cstring_arg,
-};
+use crate::bt::{BleEnabled, BtDriver, BtUuid};
 
-pub type BdAddr = esp_bd_addr_t;
+use super::BdAddr;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
@@ -43,7 +35,27 @@ pub enum InqMode {
     Limited = esp_bt_inq_mode_t_ESP_BT_INQ_MODE_LIMITED_INQUIRY,
 }
 
-pub type EirType = esp_bt_eir_type_t;
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct EirType(esp_bt_eir_type_t);
+
+impl EirType {
+    pub fn raw(&self) -> esp_bt_eir_type_t {
+        self.0
+    }
+}
+
+impl From<EirType> for esp_bt_eir_type_t {
+    fn from(value: EirType) -> Self {
+        value.0
+    }
+}
+
+impl From<esp_bt_eir_type_t> for EirType {
+    fn from(value: esp_bt_eir_type_t) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug, EnumSetType)]
 #[enumset(repr = "u8")]
@@ -81,6 +93,29 @@ impl<'a> From<&EirData<'a>> for esp_bt_eir_data_t {
     }
 }
 
+impl<'a> From<&esp_bt_eir_data_t> for EirData<'a> {
+    fn from(data: &esp_bt_eir_data_t) -> Self {
+        Self {
+            fec_required: data.fec_required,
+            include_txpower: data.include_txpower,
+            include_uuid: data.include_uuid,
+            flags: EnumSet::from_repr(data.flag),
+            manufacturer: unsafe {
+                core::slice::from_raw_parts(
+                    data.p_manufacturer_data as *mut u8,
+                    data.manufacturer_len as _,
+                )
+            },
+            url: unsafe {
+                core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                    data.p_url as *mut u8,
+                    data.url_len as _,
+                ))
+            },
+        }
+    }
+}
+
 #[derive(Debug, EnumSetType)]
 #[enumset(repr = "u32")]
 #[repr(u32)]
@@ -92,64 +127,338 @@ pub enum CodMode {
     Init = 10,           // overwrite major, minor, and service class
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Cod {
-    pub minor: u8,
-    pub major: u8,
-    pub service: u16,
+#[derive(Debug, Copy, Clone)]
+#[repr(transparent)]
+pub struct Cod(esp_bt_cod_t);
+
+impl Cod {
+    pub fn new(major: u32, minor: u32, service: u32) -> Self {
+        let mut cod: esp_bt_cod_t = Default::default();
+
+        cod.set_minor(minor);
+        cod.set_major(major);
+        cod.set_service(service);
+
+        Self(cod)
+    }
+
+    pub fn raw(&self) -> esp_bt_cod_t {
+        self.0
+    }
+
+    pub fn major(&self) -> u32 {
+        self.0.major()
+    }
+
+    pub fn minor(&self) -> u32 {
+        self.0.minor()
+    }
+
+    pub fn service(&self) -> u32 {
+        self.0.service()
+    }
 }
 
 impl From<Cod> for esp_bt_cod_t {
-    fn from(data: Cod) -> Self {
-        let mut cod: esp_bt_cod_t = Default::default();
-
-        cod.set_minor(data.minor as _);
-        cod.set_major(data.major as _);
-        cod.set_service(data.service as _);
-
-        cod
+    fn from(cod: Cod) -> Self {
+        cod.0
     }
 }
 
 impl From<esp_bt_cod_t> for Cod {
-    fn from(data: esp_bt_cod_t) -> Self {
-        Self {
-            minor: data.minor() as _,
-            major: data.major() as _,
-            service: data.service() as _,
+    fn from(cod: esp_bt_cod_t) -> Self {
+        Self(cod)
+    }
+}
+
+impl PartialEq for Cod {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.major() == other.0.major()
+            && self.0.minor() == other.0.minor()
+            && self.0.service() == other.0.service()
+    }
+}
+
+impl Eq for Cod {}
+
+#[derive(Debug)]
+pub enum DeviceProp<'a> {
+    BdName(&'a str),
+    Cod(Cod),
+    Rssi(u8),
+    EirData(EirData<'a>),
+}
+
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct PropData<'a> {
+    data: esp_bt_gap_dev_prop_t,
+    _p: PhantomData<&'a ()>,
+}
+
+#[allow(non_upper_case_globals)]
+impl<'a> PropData<'a> {
+    pub fn prop(&self) -> DeviceProp {
+        unsafe {
+            match self.data.type_ {
+                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_BDNAME => {
+                    DeviceProp::BdName(core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                        self.data.val as *mut u8 as *const _,
+                        self.data.len as _,
+                    )))
+                }
+                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_COD => {
+                    let esp_cod = (self.data.val as *mut esp_bt_cod_t).as_ref().unwrap();
+                    DeviceProp::Cod((*esp_cod).into())
+                }
+                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_RSSI => {
+                    let rssi = (self.data.val as *mut u8).as_ref().unwrap();
+                    DeviceProp::Rssi(*rssi)
+                }
+                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_EIR => {
+                    let esp_eir_data = (self.data.val as *mut esp_bt_eir_data_t).as_ref().unwrap();
+                    DeviceProp::EirData(esp_eir_data.into())
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }
 
-#[derive(Clone)]
-pub enum GapEvent {
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u32)]
+pub enum BtStatus {
+    // TODO
+    Success = esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
+    Fail = esp_bt_status_t_ESP_BT_STATUS_FAIL,
+    NotReady = esp_bt_status_t_ESP_BT_STATUS_NOT_READY,
+    NoMem = esp_bt_status_t_ESP_BT_STATUS_NOMEM,
+    Busy = esp_bt_status_t_ESP_BT_STATUS_BUSY,
+    Done = esp_bt_status_t_ESP_BT_STATUS_DONE,
+    Unsupported = esp_bt_status_t_ESP_BT_STATUS_UNSUPPORTED,
+    InvalidParam = esp_bt_status_t_ESP_BT_STATUS_PARM_INVALID,
+    Unhandled = esp_bt_status_t_ESP_BT_STATUS_UNHANDLED,
+    AuthFailure = esp_bt_status_t_ESP_BT_STATUS_AUTH_FAILURE,
+    RemoteDeviceDown = esp_bt_status_t_ESP_BT_STATUS_RMT_DEV_DOWN,
+    AuthRejected = esp_bt_status_t_ESP_BT_STATUS_AUTH_REJECTED,
+    InvalidStaticRandAddr = esp_bt_status_t_ESP_BT_STATUS_INVALID_STATIC_RAND_ADDR,
+    Pending = esp_bt_status_t_ESP_BT_STATUS_PENDING,
+    UnacceptedConnInterval = esp_bt_status_t_ESP_BT_STATUS_UNACCEPT_CONN_INTERVAL,
+    ParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_PARAM_OUT_OF_RANGE,
+    Timeout = esp_bt_status_t_ESP_BT_STATUS_TIMEOUT,
+    UnsupportedPeerLeDataLen = esp_bt_status_t_ESP_BT_STATUS_PEER_LE_DATA_LEN_UNSUPPORTED,
+    UnsupportedControlLeDataLen = esp_bt_status_t_ESP_BT_STATUS_CONTROL_LE_DATA_LEN_UNSUPPORTED,
+    IllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_ERR_ILLEGAL_PARAMETER_FMT,
+    MemoryFull = esp_bt_status_t_ESP_BT_STATUS_MEMORY_FULL,
+    EirTooLarge = esp_bt_status_t_ESP_BT_STATUS_EIR_TOO_LARGE,
+    HciSuccess = esp_bt_status_t_ESP_BT_STATUS_HCI_SUCCESS,
+    HciPending = esp_bt_status_t_ESP_BT_STATUS_HCI_PENDING,
+    HciIllegalCommand = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_COMMAND,
+    HciNoConnection = esp_bt_status_t_ESP_BT_STATUS_HCI_NO_CONNECTION,
+    HciHwFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_HW_FAILURE,
+    HciPageTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_PAGE_TIMEOUT,
+    HciAuthFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_AUTH_FAILURE,
+    HciKeyMissing = esp_bt_status_t_ESP_BT_STATUS_HCI_KEY_MISSING,
+    HciMemoryFull = esp_bt_status_t_ESP_BT_STATUS_HCI_MEMORY_FULL,
+    HciConnTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_TOUT,
+    HciConnectionsExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_CONNECTIONS,
+    HciScosExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_SCOS,
+    HciConnectionExists = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_EXISTS,
+    HciCommandDisallowed = esp_bt_status_t_ESP_BT_STATUS_HCI_COMMAND_DISALLOWED,
+    HciHostResourcesRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_RESOURCES,
+    HciHostSecurityRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_SECURITY,
+    HciHostDevideRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_DEVICE,
+    HciHostTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_TIMEOUT,
+    HciUnsupportedValue = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_VALUE,
+    HciIllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_PARAMETER_FMT,
+    HciPeerUser = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_USER,
+    HciPeerLowResources = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_LOW_RESOURCES,
+    HciPeerPowerOff = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_POWER_OFF,
+    HciConnectionCauseLocalHost = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_CAUSE_LOCAL_HOST,
+    HciRepeatedAttempts = esp_bt_status_t_ESP_BT_STATUS_HCI_REPEATED_ATTEMPTS,
+    HciPairingNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_NOT_ALLOWED,
+    HciUnkownLmpPdu = esp_bt_status_t_ESP_BT_STATUS_HCI_UNKNOWN_LMP_PDU,
+    HciUnsupportedRemFeature = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_REM_FEATURE,
+    HciScoOffsetRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_OFFSET_REJECTED,
+    HciScoInternalRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_INTERVAL_REJECTED,
+    HciScoAirMode = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_AIR_MODE,
+    HciInvalidLmpParam = esp_bt_status_t_ESP_BT_STATUS_HCI_INVALID_LMP_PARAM,
+    HciUnspecified = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSPECIFIED,
+    HciUnsupportedLmpParameters = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_LMP_PARAMETERS,
+    HciRoleChangeNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_CHANGE_NOT_ALLOWED,
+    HciLmpResponseTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_RESPONSE_TIMEOUT,
+    HciLmpErrTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_ERR_TRANS_COLLISION,
+    HciLmpPduNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_PDU_NOT_ALLOWED,
+    HciEntryModeNotAcceptable = esp_bt_status_t_ESP_BT_STATUS_HCI_ENCRY_MODE_NOT_ACCEPTABLE,
+    HciUnitKeyUsed = esp_bt_status_t_ESP_BT_STATUS_HCI_UNIT_KEY_USED,
+    HciUnsupportedQos = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_NOT_SUPPORTED,
+    HciInstantPassed = esp_bt_status_t_ESP_BT_STATUS_HCI_INSTANT_PASSED,
+    HciUnsupportedPairingWithUnitKey =
+        esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_WITH_UNIT_KEY_NOT_SUPPORTED,
+    HciDiffTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_DIFF_TRANSACTION_COLLISION,
+    HciUndefined0x2b = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x2B,
+    HciQosInvalidParam = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_UNACCEPTABLE_PARAM,
+    HciQosRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_REJECTED,
+    HciUnsupportedChanClassification = esp_bt_status_t_ESP_BT_STATUS_HCI_CHAN_CLASSIF_NOT_SUPPORTED,
+    HciInsufficientSecurity = esp_bt_status_t_ESP_BT_STATUS_HCI_INSUFFCIENT_SECURITY,
+    HciParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_HCI_PARAM_OUT_OF_RANGE,
+    HciUndefined0x31 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x31,
+    HciRoleSwitchPending = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_PENDING,
+    HciUndefined0x33 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x33,
+    HciReservedSlotViolation = esp_bt_status_t_ESP_BT_STATUS_HCI_RESERVED_SLOT_VIOLATION,
+    HciRoleSwitchFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_FAILED,
+    HciInqRespDataTooLarge = esp_bt_status_t_ESP_BT_STATUS_HCI_INQ_RSP_DATA_TOO_LARGE,
+    HciSimplePairingNotSupported = esp_bt_status_t_ESP_BT_STATUS_HCI_SIMPLE_PAIRING_NOT_SUPPORTED,
+    HciHostBusyPairing = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_BUSY_PAIRING,
+    HciRejNoSuitableChannel = esp_bt_status_t_ESP_BT_STATUS_HCI_REJ_NO_SUITABLE_CHANNEL,
+    HciControllerBusy = esp_bt_status_t_ESP_BT_STATUS_HCI_CONTROLLER_BUSY,
+    HciUnsupportedConnectionInterval = esp_bt_status_t_ESP_BT_STATUS_HCI_UNACCEPT_CONN_INTERVAL,
+    HciDirectedAdvertisingTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_DIRECTED_ADVERTISING_TIMEOUT,
+    HciConnectionTimeoutDueToMiscFailure =
+        esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_TOUT_DUE_TO_MIC_FAILURE,
+    HciConnectionEstablishmentFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_FAILED_ESTABLISHMENT,
+    HciMacConnectionFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_MAC_CONNECTION_FAILED,
+}
+
+impl From<esp_bt_status_t> for BtStatus {
+    fn from(value: esp_bt_status_t) -> Self {
+        unsafe { core::mem::transmute(value) } // TODO
+    }
+}
+
+impl From<BtStatus> for esp_bt_status_t {
+    fn from(value: BtStatus) -> Self {
+        value as _
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum GapEvent<'a> {
     DeviceDiscoveryStarted,
     DeviceDiscoveryStopped,
-    DeviceDiscovered,
-    RemoteServiceDiscovered,
-    RemoteServiceDetails,
-    AuthenticationCompleted,
-    PairingPinRequest,
-    PairingUserConfirmationRequest,
-    PairingPasskeyRequest,
-    PairingPasskey,
-    Rssi,
-    EirDataConfigured,
-    AfhChannelsConfigured,
-    RemoteName,
-    ModeChange,
-    BondedServiceRemoved,
-    AclConnected,
-    AclDisconnected,
+    DeviceDiscovered {
+        bda: BdAddr,
+        props: &'a [PropData<'a>],
+    },
+    RemoteServiceDiscovered {
+        bda: BdAddr,
+        status: BtStatus,
+        services: &'a [BtUuid],
+    },
+    RemoteServiceDetails {
+        bda: BdAddr,
+        status: BtStatus,
+    },
+    AuthenticationCompleted {
+        bda: BdAddr,
+        status: BtStatus,
+        device_name: &'a str,
+    },
+    PairingPinRequest {
+        bda: BdAddr,
+        min_16_digit: bool,
+    },
+    PairingUserConfirmationRequest {
+        bda: BdAddr,
+        number: u32,
+    },
+    PairingPasskeyRequest {
+        bda: BdAddr,
+    },
+    PairingPasskey {
+        bda: BdAddr,
+        passkey: u32,
+    },
+    Rssi {
+        bda: BdAddr,
+        status: BtStatus,
+        rssi: i8,
+    },
+    EirDataConfigured {
+        status: BtStatus,
+        eir_types: &'a [EirType],
+    },
+    AfhChannelsConfigured {
+        status: BtStatus,
+    },
+    RemoteName {
+        bda: BdAddr,
+        status: BtStatus,
+        name: &'a str,
+    },
+    ModeChange {
+        bda: BdAddr,
+        mode: u8,
+    },
+    BondedServiceRemoved {
+        bda: BdAddr,
+        status: BtStatus,
+    },
+    AclConnected {
+        bda: BdAddr,
+        status: BtStatus,
+        handle: u16,
+    },
+    AclDisconnected {
+        bda: BdAddr,
+        status: BtStatus,
+        handle: u16,
+    },
+    QosComplete {
+        bda: BdAddr,
+        status: BtStatus,
+        t_poll: u32,
+    },
 }
 
 #[allow(non_upper_case_globals)]
-impl From<(esp_bt_gap_cb_event_t, &esp_bt_gap_cb_param_t)> for GapEvent {
-    fn from(value: (esp_bt_gap_cb_event_t, &esp_bt_gap_cb_param_t)) -> Self {
+impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'a> {
+    fn from(value: (esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)) -> Self {
         let (evt, param) = value;
 
         unsafe {
             match evt {
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_DISC_RES_EVT => Self::DeviceDiscovered {
+                    bda: param.disc_res.bda.into(),
+                    props: core::slice::from_raw_parts(
+                        param.disc_res.prop as *mut PropData as *const _,
+                        param.disc_res.num_prop as _,
+                    ),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_DISC_STATE_CHANGED_EVT => {
+                    if param.disc_st_chg.state
+                        == esp_bt_gap_discovery_state_t_ESP_BT_GAP_DISCOVERY_STOPPED
+                    {
+                        Self::DeviceDiscoveryStarted
+                    } else {
+                        Self::DeviceDiscoveryStopped
+                    }
+                }
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVCS_EVT => Self::RemoteServiceDiscovered {
+                    bda: param.rmt_srvcs.bda.into(),
+                    status: param.rmt_srvcs.stat.into(),
+                    services: core::slice::from_raw_parts(
+                        param.rmt_srvcs.uuid_list as *mut BtUuid as *const _,
+                        param.rmt_srvcs.num_uuids as _,
+                    ),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVC_REC_EVT => Self::RemoteServiceDetails {
+                    bda: param.rmt_srvcs.bda.into(),
+                    status: param.rmt_srvcs.stat.into(),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_AUTH_CMPL_EVT => Self::AuthenticationCompleted {
+                    bda: param.auth_cmpl.bda.into(),
+                    status: param.auth_cmpl.stat.into(),
+                    device_name: core::str::from_utf8_unchecked(
+                        &param.auth_cmpl.device_name
+                            [..strlen(&param.auth_cmpl.device_name as *const _ as *const _) as _],
+                    ),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_PIN_REQ_EVT => Self::PairingPinRequest {
+                    bda: param.pin_req.bda.into(),
+                    min_16_digit: param.pin_req.min_16_digit,
+                },
+
                 //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT => {
                 //         Self::AdvertisingDatasetComplete(param.adv_data_cmpl)
                 //     }
@@ -338,14 +647,15 @@ where
         esp!(unsafe { esp_bt_gap_cancel_discovery() })
     }
 
-    pub fn get_remote_services(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
+    pub fn request_remote_services(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_get_remote_services(bd_addr as *const _ as *mut _) })
     }
 
     pub fn resolve_eir_data(&mut self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
         let mut len = 0;
-        let addr =
-            unsafe { esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type as _, &mut len) };
+        let addr = unsafe {
+            esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type.into(), &mut len)
+        };
 
         Ok(unsafe { core::slice::from_raw_parts(addr, len as _) })
     }
@@ -395,7 +705,7 @@ where
         })
     }
 
-    pub fn schedule_variable_pin(&mut self) -> Result<(), EspError> {
+    pub fn request_variable_pin(&mut self) -> Result<(), EspError> {
         esp!(unsafe {
             esp_bt_gap_set_pin(
                 esp_bt_pin_type_t_ESP_BT_PIN_TYPE_VARIABLE,
@@ -438,7 +748,7 @@ where
         esp!(unsafe { esp_bt_gap_ssp_confirm_reply(bd_addr as *const _ as *mut _, confirm) })
     }
 
-    pub fn set_afh_coannels_conf(&mut self, channels: &[u8; 10]) -> Result<(), EspError> {
+    pub fn set_afh_channels_conf(&mut self, channels: &[u8; 10]) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_set_afh_channels(channels as *const _ as *mut _) })
     }
 
