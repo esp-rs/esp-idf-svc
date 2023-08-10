@@ -14,9 +14,12 @@ use crate::nvs::EspDefaultNvsPartition;
 
 extern crate alloc;
 
+#[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_a2dp_enable))]
 pub mod a2dp;
 pub mod ble;
+#[cfg(all(esp32, esp_idf_bt_classic_enabled))]
 pub mod gap;
+#[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_hfp_enable))]
 pub mod hfp;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -175,11 +178,15 @@ pub trait BtMode {
 }
 
 pub trait BleEnabled: BtMode {}
+#[cfg(esp32)]
 pub trait BtClassicEnabled: BtMode {}
 
+#[cfg(esp32)]
 pub struct BtClassic;
+#[cfg(esp32)]
 impl BtClassicEnabled for BtClassic {}
 
+#[cfg(esp32)]
 impl BtMode for BtClassic {
     fn mode() -> esp_bt_mode_t {
         esp_bt_mode_t_ESP_BT_MODE_BLE
@@ -196,6 +203,7 @@ impl BtMode for Ble {
 }
 
 pub struct BtDual;
+#[cfg(esp32)]
 impl BtClassicEnabled for BtDual {}
 impl BleEnabled for BtDual {}
 

@@ -7,10 +7,7 @@ use esp_idf_sys::*;
 
 use log::{debug, info};
 
-use crate::bt::BtCallback;
-use crate::bt::{BleEnabled, BtDriver, BtUuid};
-
-use super::BdAddr;
+use super::{BdAddr, BtCallback, BtClassicEnabled, BtDriver, BtUuid};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
@@ -559,7 +556,7 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
 pub struct EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BleEnabled,
+    M: BtClassicEnabled,
 {
     _driver: T,
     _p: PhantomData<&'d ()>,
@@ -569,7 +566,7 @@ where
 impl<'d, M, T> EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BleEnabled,
+    M: BtClassicEnabled,
 {
     pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
@@ -736,7 +733,7 @@ where
 impl<'d, M, T> Drop for EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
-    M: BleEnabled,
+    M: BtClassicEnabled,
 {
     fn drop(&mut self) {
         esp!(unsafe { esp_bt_gap_register_callback(None) }).unwrap();

@@ -9,9 +9,8 @@ use esp_idf_sys::*;
 
 use log::{debug, info};
 
-use crate::bt::BtCallback;
 use crate::{
-    bt::{BleEnabled, BtDriver, BtUuid},
+    bt::{BleEnabled, BtCallback, BtDriver, BtUuid},
     private::cstr::to_cstring_arg,
 };
 
