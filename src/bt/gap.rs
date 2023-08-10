@@ -409,6 +409,7 @@ pub enum GapEvent<'a> {
         status: BtStatus,
         t_poll: u32,
     },
+    Other,
 }
 
 #[allow(non_upper_case_globals)]
@@ -548,7 +549,8 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                 //     }
                 _ => {
                     log::warn!("Unhandled event {:?}", evt);
-                    panic!("Unhandled event {:?}", evt)
+                    Self::Other
+                    //panic!("Unhandled event {:?}", evt)
                 }
             }
         }
@@ -785,4 +787,4 @@ where
     }
 }
 
-static CALLBACK: BtCallback<GapEvent> = BtCallback::new();
+static CALLBACK: BtCallback<GapEvent, ()> = BtCallback::new(());

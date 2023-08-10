@@ -1,6 +1,7 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
 use esp_idf_sys::*;
+use log::debug;
 
 use crate::bt::{BtClassicEnabled, BtDriver};
 
@@ -54,8 +55,29 @@ impl A2dpMode for Duplex {
     }
 }
 
-pub struct A2dpEvent {}
+#[derive(Debug)]
+pub enum A2dpEvent<'a> {
+    SinkData(&'a [u8]),
+    SourceData(&'a mut [u8]),
+    Other,
+}
 
+#[allow(non_upper_case_globals)]
+impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
+    fn from(value: (esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)) -> Self {
+        let (evt, param) = value;
+
+        unsafe {
+            match evt {
+                _ => {
+                    log::warn!("Unhandled event {:?}", evt);
+                    Self::Other
+                    //panic!("Unhandled event {:?}", evt)
+                }
+            }
+        }
+    }
+}
 pub struct EspA2dp<'d, M, T, S>
 where
     T: Borrow<BtDriver<'d, M>>,
@@ -75,9 +97,12 @@ where
 {
     pub fn new_sink<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&A2dpEvent) + Send + 'static,
+        F: Fn(A2dpEvent) + Send + 'static,
     {
-        Self::internal_new(driver, events_cb)
+        Self::internal_new(driver, move |event| {
+            events_cb(event);
+            0
+        })
     }
 }
 
@@ -88,7 +113,7 @@ where
 {
     pub fn new_source<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&A2dpEvent) + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'static,
     {
         Self::internal_new(driver, events_cb)
     }
@@ -101,7 +126,7 @@ where
 {
     pub fn new_duplex<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&A2dpEvent) + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'static,
     {
         Self::internal_new(driver, events_cb)
     }
@@ -115,7 +140,7 @@ where
 {
     fn internal_new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
     where
-        F: Fn(&A2dpEvent) + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'static,
     {
         CALLBACK.set(events_cb)?;
 
@@ -143,18 +168,25 @@ where
 
     unsafe extern "C" fn event_handler(event: esp_a2d_cb_event_t, param: *mut esp_a2d_cb_param_t) {
         let param = unsafe { param.as_ref() }.unwrap();
-        //let event = A2dpEvent::from((event, param));
+        let event = A2dpEvent::from((event, param));
 
-        //debug!("Got GAP event {{ {:#?} }}", &event);
+        debug!("Got event {{ {:#?} }}", event);
+
+        CALLBACK.call(event);
     }
 
     unsafe extern "C" fn sink_data_handler(buf: *const u8, len: u32) {
-        //debug!("Got GAP event {{ {:#?} }}", &event);
+        let event = A2dpEvent::SinkData(core::slice::from_raw_parts(buf, len as _));
+        debug!("Got event {{ {:#?} }}", event);
+
+        CALLBACK.call(event);
     }
 
     unsafe extern "C" fn source_data_handler(buf: *mut u8, len: i32) -> i32 {
-        //debug!("Got GAP event {{ {:#?} }}", &event);
-        panic!()
+        let event = A2dpEvent::SourceData(core::slice::from_raw_parts_mut(buf, len as _));
+        debug!("Got event {{ {:#?} }}", event);
+
+        CALLBACK.call(event) as _
     }
 }
 
@@ -181,4 +213,4 @@ where
     }
 }
 
-static CALLBACK: BtCallback<&A2dpEvent> = BtCallback::new();
+static CALLBACK: BtCallback<A2dpEvent, usize> = BtCallback::new(0);

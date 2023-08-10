@@ -475,4 +475,4 @@ where
     }
 }
 
-static CALLBACK: BtCallback<(u8, GattsEvent)> = BtCallback::new();
+static CALLBACK: BtCallback<(u8, GattsEvent), ()> = BtCallback::new(());

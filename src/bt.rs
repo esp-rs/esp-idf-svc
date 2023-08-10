@@ -117,22 +117,27 @@ impl From<esp_bt_uuid_t> for BtUuid {
     }
 }
 
-pub(crate) struct BtCallback<E> {
+pub(crate) struct BtCallback<A, R> {
     initialized: AtomicBool,
-    callback: UnsafeCell<Option<alloc::boxed::Box<alloc::boxed::Box<dyn Fn(E)>>>>,
+    callback: UnsafeCell<Option<alloc::boxed::Box<alloc::boxed::Box<dyn Fn(A) -> R>>>>,
+    default_result: R,
 }
 
-impl<E> BtCallback<E> {
-    pub const fn new() -> Self {
+impl<A, R> BtCallback<A, R>
+where
+    R: Clone,
+{
+    pub const fn new(default_result: R) -> Self {
         Self {
             initialized: AtomicBool::new(false),
             callback: UnsafeCell::new(None),
+            default_result,
         }
     }
 
     pub fn set<F>(&self, callback: F) -> Result<(), EspError>
     where
-        F: Fn(E) + Send + 'static,
+        F: Fn(A) -> R + Send + 'static,
     {
         self.initialized
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -153,15 +158,17 @@ impl<E> BtCallback<E> {
         Ok(())
     }
 
-    pub unsafe fn call(&self, arg: E) {
+    pub unsafe fn call(&self, arg: A) -> R {
         if let Some(callback) = unsafe { self.callback.get().as_ref() }.unwrap().as_ref() {
-            (callback)(arg);
+            (callback)(arg)
+        } else {
+            self.default_result.clone()
         }
     }
 }
 
-unsafe impl<E> Sync for BtCallback<E> {}
-unsafe impl<E> Send for BtCallback<E> {}
+unsafe impl<A, R> Sync for BtCallback<A, R> {}
+unsafe impl<A, R> Send for BtCallback<A, R> {}
 
 pub trait BtMode {
     fn mode() -> esp_bt_mode_t;

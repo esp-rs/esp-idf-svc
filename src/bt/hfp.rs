@@ -24,7 +24,7 @@ pub mod client {
     {
         pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
         where
-            F: Fn(&HfpcEvent) + Send + 'static,
+            F: Fn(&HfpcEvent) -> usize + Send + 'static,
         {
             CALLBACK.set(events_cb)?;
 
@@ -96,5 +96,5 @@ pub mod client {
         }
     }
 
-    static CALLBACK: BtCallback<&HfpcEvent> = BtCallback::new();
+    static CALLBACK: BtCallback<&HfpcEvent, usize> = BtCallback::new(0);
 }

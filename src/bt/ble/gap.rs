@@ -623,4 +623,4 @@ where
     }
 }
 
-static CALLBACK: BtCallback<GapEvent> = BtCallback::new();
+static CALLBACK: BtCallback<GapEvent, ()> = BtCallback::new(());
