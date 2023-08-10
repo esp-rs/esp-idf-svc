@@ -228,7 +228,6 @@ impl<'a> PropData<'a> {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
 pub enum BtStatus {
-    // TODO
     Success = esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
     Fail = esp_bt_status_t_ESP_BT_STATUS_FAIL,
     NotReady = esp_bt_status_t_ESP_BT_STATUS_NOT_READY,
@@ -557,47 +556,6 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
     }
 }
 
-// impl Debug for GapEvent {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-//         write!(
-//             f,
-//             "{}",
-//             match self {
-//                 Self::AdvertisingDatasetComplete(_) => "AdvertisingDatasetComplete",
-//                 Self::ScanResponseDatasetComplete(_) => "ScanResponseDatasetComplete",
-//                 Self::ScanParameterDatasetComplete(_) => "ScanParameterDatasetComplete",
-//                 Self::ScanResult(_) => "ScanResult",
-//                 Self::RawAdvertisingDatasetComplete(_) => "RawAdvertisingDatasetComplete",
-//                 Self::RawScanResponseDatasetComplete(_) => "RawScanResponseDatasetComplete",
-//                 Self::AdvertisingStartComplete(_) => "AdvertisingStartComplete",
-//                 Self::ScanStartComplete(_) => "ScanStartComplete",
-//                 Self::AuthenticationComplete(_) => "AuthenticationComplete",
-//                 Self::Key(_) => "Key",
-//                 Self::SecurityRequest(_) => "SecurityRequest",
-//                 Self::PasskeyNotification(_) => "PasskeyNotification",
-//                 Self::PasskeyRequest(_) => "PasskeyRequest",
-//                 Self::OOBRequest => "OOBRequest",
-//                 Self::LocalIR => "LocalIR",
-//                 Self::LocalER => "LocalER",
-//                 Self::NumericComparisonRequest(_) => "NumericComparisonRequest",
-//                 Self::AdvertisingStopComplete(_) => "AdvertisingStopComplete",
-//                 Self::ScanStopComplete(_) => "ScanStopComplete",
-//                 Self::SetStaticRandomAddressComplete(_) => "SetStaticRandomAddressComplete",
-//                 Self::UpdateConnectionParamsComplete(_) => "UpdateConnectionParamsComplete",
-//                 Self::SetPacketLengthComplete(_) => "SetPacketLengthComplete",
-//                 Self::SetLocalPrivacy(_) => "SetLocalPrivacy",
-//                 Self::RemoveDeviceBondComplete(_) => "RemoveDeviceBondComplete",
-//                 Self::ClearDeviceBondComplete(_) => "ClearDeviceBondComplete",
-//                 Self::GetDeviceBondComplete(_) => "GetDeviceBondComplete",
-//                 Self::ReadRssiComplete(_) => "ReadRssiComplete",
-//                 Self::UpdateWhitelistComplete(_) => "UpdateWhitelistComplete",
-//                 Self::UpdateDuplicateListComplete(_) => "UpdateDuplicateListComplete",
-//                 Self::SetChannelsComplete(_) => "SetChannelsComplete",
-//             }
-//         )
-//     }
-// }
-
 pub struct EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
@@ -769,7 +727,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GapEvent::from((event, param));
 
-        //debug!("Got GAP event {{ {:#?} }}", event);
+        debug!("Got event {{ {:#?} }}", event);
 
         CALLBACK.call(event);
     }
