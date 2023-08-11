@@ -1,7 +1,9 @@
 use core::{
     borrow::Borrow,
+    fmt::{self, Debug},
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
 };
 
 use esp_idf_sys::*;
@@ -9,7 +11,7 @@ use log::{debug, info};
 
 use crate::bt::{BtClassicEnabled, BtDriver};
 
-use super::BtCallback;
+use super::{BdAddr, BtCallback};
 
 pub trait A2dpMode {
     fn sink() -> bool;
@@ -59,8 +61,66 @@ impl A2dpMode for Duplex {
     }
 }
 
+#[derive(Clone)]
+pub enum Codec {
+    Sbc([u8; 4]),
+    Mpeg1_2([u8; 4]),
+    Mpeg2_4([u8; 6]),
+    Atrac([u8; 7]),
+    Unknown,
+}
+
+impl Codec {
+    pub fn bitrate(&self) -> Option<u32> {
+        if let Self::Sbc(data) = self {
+            let oct0 = data[0];
+            let sample_rate = if (oct0 & (0x01 << 6)) != 0 {
+                32000
+            } else if (oct0 & (0x01 << 5)) != 0 {
+                44100
+            } else if (oct0 & (0x01 << 4)) != 0 {
+                48000
+            } else {
+                16000
+            };
+
+            Some(sample_rate)
+        } else {
+            None
+        }
+    }
+
+    pub fn stereo(&self) -> Option<bool> {
+        if let Self::Sbc(data) = self {
+            Some((data[0] & (0x01 << 3)) == 0)
+        } else {
+            None
+        }
+    }
+}
+
+impl Debug for Codec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sbc(data) => f.debug_tuple("Sbc").field(data).finish()?,
+            Self::Mpeg1_2(data) => f.debug_tuple("Mpeg1_2").field(data).finish()?,
+            Self::Mpeg2_4(data) => f.debug_tuple("Mpeg2_4").field(data).finish()?,
+            Self::Atrac(data) => f.debug_tuple("Atrac").field(data).finish()?,
+            Self::Unknown => write!(f, "Unknown")?,
+        }
+
+        write!(
+            f,
+            " / bitrate: {:?}, stereo: {:?}",
+            self.bitrate(),
+            self.stereo()
+        )
+    }
+}
+
 #[derive(Debug)]
 pub enum A2dpEvent<'a> {
+    ConfigureAudio { bd_addr: BdAddr, codec: Codec },
     SinkData(&'a [u8]),
     SourceData(&'a mut [u8]),
     Other,
@@ -73,6 +133,16 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
 
         unsafe {
             match evt {
+                esp_a2d_cb_event_t_ESP_A2D_AUDIO_CFG_EVT => A2dpEvent::ConfigureAudio {
+                    bd_addr: param.audio_cfg.remote_bda.into(),
+                    codec: match param.audio_cfg.mcc.type_ as u32 {
+                        ESP_A2D_MCT_SBC => Codec::Sbc(param.audio_cfg.mcc.cie.sbc),
+                        ESP_A2D_MCT_M12 => Codec::Mpeg1_2(param.audio_cfg.mcc.cie.m12),
+                        ESP_A2D_MCT_M24 => Codec::Mpeg2_4(param.audio_cfg.mcc.cie.m24),
+                        ESP_A2D_MCT_ATRAC => Codec::Atrac(param.audio_cfg.mcc.cie.atrac),
+                        _ => Codec::Unknown,
+                    },
+                },
                 _ => {
                     log::warn!("Unknown event {:?}", evt);
                     Self::Other
@@ -119,6 +189,22 @@ where
             0
         })
     }
+
+    pub fn connect(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_sink_connect(bd_addr as *const _ as *mut _) })
+    }
+
+    pub fn disconnect(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_sink_disconnect(bd_addr as *const _ as *mut _) })
+    }
+
+    pub fn request_delay(&self) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_sink_get_delay_value() })
+    }
+
+    pub fn set_delay(&self, delay: Duration) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_sink_set_delay_value((delay.as_micros() / 100) as _) })
+    }
 }
 
 impl<'d, M, T> EspA2dp<'d, M, T, Source>
@@ -141,6 +227,14 @@ where
         F: Fn(A2dpEvent) -> usize + Send + 'd,
     {
         self.internal_initialize(events_cb)
+    }
+
+    pub fn connect(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_source_connect(bd_addr as *const _ as *mut _) })
+    }
+
+    pub fn disconnect(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
+        esp!(unsafe { esp_a2d_source_disconnect(bd_addr as *const _ as *mut _) })
     }
 }
 
