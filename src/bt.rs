@@ -11,6 +11,7 @@ use log::info;
 
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 use crate::nvs::EspDefaultNvsPartition;
+use crate::private::cstr::to_cstring_arg;
 
 extern crate alloc;
 
@@ -138,15 +139,17 @@ where
         }
     }
 
-    pub fn set<F>(&self, callback: F) -> Result<(), EspError>
+    pub fn set<'d, F>(&self, callback: F) -> Result<(), EspError>
     where
-        F: Fn(A) -> R + Send + 'static,
+        F: Fn(A) -> R + Send + 'd,
     {
         self.initialized
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
 
-        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(Box::new(Box::new(callback)));
+        let b: Box<dyn Fn(A) -> R + 'd> = Box::new(callback);
+        let b: Box<dyn Fn(A) -> R + 'static> = unsafe { core::mem::transmute(b) };
+        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(Box::new(b));
 
         Ok(())
     }
@@ -178,35 +181,59 @@ pub trait BtMode {
 }
 
 pub trait BleEnabled: BtMode {}
-#[cfg(esp32)]
 pub trait BtClassicEnabled: BtMode {}
 
 #[cfg(esp32)]
+#[cfg(not(esp_idf_btdm_ctrl_mode_ble_only))]
 pub struct BtClassic;
 #[cfg(esp32)]
+#[cfg(not(esp_idf_btdm_ctrl_mode_ble_only))]
 impl BtClassicEnabled for BtClassic {}
 
 #[cfg(esp32)]
+#[cfg(not(esp_idf_btdm_ctrl_mode_ble_only))]
 impl BtMode for BtClassic {
     fn mode() -> esp_bt_mode_t {
-        esp_bt_mode_t_ESP_BT_MODE_BLE
+        #[cfg(not(esp_idf_btdm_ctrl_mode_btdm))]
+        let mode = esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT;
+
+        #[cfg(esp_idf_btdm_ctrl_mode_btdm)]
+        let mode = esp_bt_mode_t_ESP_BT_MODE_BTDM;
+
+        mode
     }
 }
 
+#[cfg(not(esp_idf_btdm_ctrl_mode_br_edr_only))]
 pub struct Ble;
+#[cfg(not(esp_idf_btdm_ctrl_mode_br_edr_only))]
 impl BleEnabled for Ble {}
 
+#[cfg(not(esp_idf_btdm_ctrl_mode_br_edr_only))]
 impl BtMode for Ble {
     fn mode() -> esp_bt_mode_t {
-        esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT
+        #[cfg(not(esp_idf_btdm_ctrl_mode_btdm))]
+        let mode = esp_bt_mode_t_ESP_BT_MODE_BLE;
+
+        #[cfg(esp_idf_btdm_ctrl_mode_btdm)]
+        let mode = esp_bt_mode_t_ESP_BT_MODE_BTDM;
+
+        mode
     }
 }
 
+#[cfg(esp32)]
+#[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 pub struct BtDual;
 #[cfg(esp32)]
+#[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 impl BtClassicEnabled for BtDual {}
+#[cfg(esp32)]
+#[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 impl BleEnabled for BtDual {}
 
+#[cfg(esp32)]
+#[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 impl BtMode for BtDual {
     fn mode() -> esp_bt_mode_t {
         esp_bt_mode_t_ESP_BT_MODE_BTDM
@@ -277,8 +304,8 @@ where
             pcm_role: CONFIG_BTDM_CTRL_PCM_ROLE_EFF as _,
             pcm_polar: CONFIG_BTDM_CTRL_PCM_POLAR_EFF as _,
             hli: BTDM_CTRL_HLI != 0,
-            magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
             dup_list_refresh_period: SCAN_DUPL_CACHE_REFRESH_PERIOD as _,
+            magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
         };
 
         #[cfg(esp32c3)]
@@ -375,16 +402,13 @@ where
         info!("Enable bluedroid");
         esp!(unsafe { esp_bluedroid_enable() })?;
 
-        // esp!(unsafe { esp_ble_gatts_register_callback(Some(gatts_event_handler)) })?;
-
-        // esp!(unsafe { esp_ble_gap_register_callback(Some(gap_event_handler)) })?;
-
-        // esp!(unsafe { esp_ble_gatt_set_local_mtu(500) })?;
-
-        // let device_name_cstr = CString::new(device_name.clone()).unwrap();
-        // esp!(unsafe { esp_ble_gap_set_device_name(device_name_cstr.as_ptr() as _) })?;
-
         Ok(())
+    }
+
+    pub fn set_device_name(&self, device_name: &str) -> Result<(), EspError> {
+        let device_name = to_cstring_arg(device_name)?;
+
+        esp!(unsafe { esp_bt_dev_set_device_name(device_name.as_ptr()) })
     }
 }
 

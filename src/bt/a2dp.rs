@@ -1,7 +1,11 @@
-use core::{borrow::Borrow, marker::PhantomData};
+use core::{
+    borrow::Borrow,
+    marker::PhantomData,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use esp_idf_sys::*;
-use log::debug;
+use log::{debug, info};
 
 use crate::bt::{BtClassicEnabled, BtDriver};
 
@@ -70,9 +74,9 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
         unsafe {
             match evt {
                 _ => {
-                    log::warn!("Unhandled event {:?}", evt);
+                    log::warn!("Unknown event {:?}", evt);
                     Self::Other
-                    //panic!("Unhandled event {:?}", evt)
+                    //panic!("Unknown event {:?}", evt)
                 }
             }
         }
@@ -85,6 +89,7 @@ where
     S: A2dpMode,
 {
     _driver: T,
+    initialized: AtomicBool,
     _p: PhantomData<&'d ()>,
     _m: PhantomData<M>,
     _s: PhantomData<S>,
@@ -95,11 +100,21 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new_sink<F>(driver: T, events_cb: F) -> Result<Self, EspError>
+    pub fn new_sink(driver: T) -> Result<Self, EspError> {
+        Ok(Self {
+            _driver: driver,
+            initialized: AtomicBool::new(false),
+            _p: PhantomData,
+            _m: PhantomData,
+            _s: PhantomData,
+        })
+    }
+
+    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(A2dpEvent) + Send + 'static,
+        F: Fn(A2dpEvent) + Send + 'd,
     {
-        Self::internal_new(driver, move |event| {
+        self.internal_initialize(move |event| {
             events_cb(event);
             0
         })
@@ -111,11 +126,21 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new_source<F>(driver: T, events_cb: F) -> Result<Self, EspError>
+    pub fn new_source(driver: T) -> Result<Self, EspError> {
+        Ok(Self {
+            _driver: driver,
+            initialized: AtomicBool::new(false),
+            _p: PhantomData,
+            _m: PhantomData,
+            _s: PhantomData,
+        })
+    }
+
+    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(A2dpEvent) -> usize + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'd,
     {
-        Self::internal_new(driver, events_cb)
+        self.internal_initialize(events_cb)
     }
 }
 
@@ -124,11 +149,21 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new_duplex<F>(driver: T, events_cb: F) -> Result<Self, EspError>
+    pub fn new_duplex(driver: T) -> Result<Self, EspError> {
+        Ok(Self {
+            _driver: driver,
+            initialized: AtomicBool::new(false),
+            _p: PhantomData,
+            _m: PhantomData,
+            _s: PhantomData,
+        })
+    }
+
+    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(A2dpEvent) -> usize + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'd,
     {
-        Self::internal_new(driver, events_cb)
+        self.internal_initialize(events_cb)
     }
 }
 
@@ -138,9 +173,9 @@ where
     M: BtClassicEnabled,
     S: A2dpMode,
 {
-    fn internal_new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
+    fn internal_initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(A2dpEvent) -> usize + Send + 'static,
+        F: Fn(A2dpEvent) -> usize + Send + 'd,
     {
         CALLBACK.set(events_cb)?;
 
@@ -158,19 +193,16 @@ where
             esp!(unsafe { esp_a2d_source_init() })?;
         }
 
-        Ok(Self {
-            _driver: driver,
-            _p: PhantomData,
-            _m: PhantomData,
-            _s: PhantomData,
-        })
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
     }
 
     unsafe extern "C" fn event_handler(event: esp_a2d_cb_event_t, param: *mut esp_a2d_cb_param_t) {
         let param = unsafe { param.as_ref() }.unwrap();
         let event = A2dpEvent::from((event, param));
 
-        debug!("Got event {{ {:#?} }}", event);
+        info!("Got event {{ {:#?} }}", event);
 
         CALLBACK.call(event);
     }
@@ -197,19 +229,21 @@ where
     S: A2dpMode,
 {
     fn drop(&mut self) {
-        esp!(unsafe { esp_a2d_register_callback(None) }).unwrap();
+        if self.initialized.load(Ordering::SeqCst) {
+            esp!(unsafe { esp_a2d_register_callback(None) }).unwrap();
 
-        if S::sink() {
-            esp!(unsafe { esp_a2d_sink_register_data_callback(None) }).unwrap();
-            esp!(unsafe { esp_a2d_sink_deinit() }).unwrap();
+            if S::sink() {
+                esp!(unsafe { esp_a2d_sink_register_data_callback(None) }).unwrap();
+                esp!(unsafe { esp_a2d_sink_deinit() }).unwrap();
+            }
+
+            if S::source() {
+                esp!(unsafe { esp_a2d_source_register_data_callback(None) }).unwrap();
+                esp!(unsafe { esp_a2d_source_deinit() }).unwrap();
+            }
+
+            CALLBACK.clear().unwrap();
         }
-
-        if S::source() {
-            esp!(unsafe { esp_a2d_source_register_data_callback(None) }).unwrap();
-            esp!(unsafe { esp_a2d_source_deinit() }).unwrap();
-        }
-
-        CALLBACK.clear().unwrap();
     }
 }
 

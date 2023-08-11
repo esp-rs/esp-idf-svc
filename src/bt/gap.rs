@@ -1,4 +1,6 @@
 use core::cmp::min;
+use core::ffi;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::{borrow::Borrow, fmt::Debug, marker::PhantomData};
 
 use enumset::{EnumSet, EnumSetType};
@@ -8,6 +10,30 @@ use esp_idf_sys::*;
 use log::{debug, info};
 
 use super::{BdAddr, BtCallback, BtClassicEnabled, BtDriver, BtUuid};
+
+#[cfg(esp_idf_bt_ssp_enabled)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum IOCapabilities {
+    DisplayOnly = ESP_BT_IO_CAP_OUT as _,
+    DisplayInput = ESP_BT_IO_CAP_IO as _,
+    InputOnly = ESP_BT_IO_CAP_IN as _,
+    None = ESP_BT_IO_CAP_NONE as _,
+}
+
+#[cfg(esp_idf_bt_ssp_enabled)]
+impl From<esp_bt_io_cap_t> for IOCapabilities {
+    fn from(value: esp_bt_io_cap_t) -> Self {
+        unsafe { core::mem::transmute(value) } // TODO
+    }
+}
+
+#[cfg(esp_idf_bt_ssp_enabled)]
+impl From<IOCapabilities> for esp_bt_io_cap_t {
+    fn from(value: IOCapabilities) -> Self {
+        value as _
+    }
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
@@ -333,40 +359,40 @@ pub enum GapEvent<'a> {
     DeviceDiscoveryStarted,
     DeviceDiscoveryStopped,
     DeviceDiscovered {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         props: &'a [PropData<'a>],
     },
     RemoteServiceDiscovered {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         services: &'a [BtUuid],
     },
     RemoteServiceDetails {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
     },
     AuthenticationCompleted {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         device_name: &'a str,
     },
     PairingPinRequest {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         min_16_digit: bool,
     },
     PairingUserConfirmationRequest {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         number: u32,
     },
     PairingPasskeyRequest {
-        bda: BdAddr,
+        bd_addr: BdAddr,
     },
     PairingPasskey {
         bda: BdAddr,
         passkey: u32,
     },
     Rssi {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         rssi: i8,
     },
@@ -378,16 +404,16 @@ pub enum GapEvent<'a> {
         status: BtStatus,
     },
     RemoteName {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         name: &'a str,
     },
     ModeChange {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         mode: u8,
     },
     BondedServiceRemoved {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
     },
     AclConnected {
@@ -396,12 +422,12 @@ pub enum GapEvent<'a> {
         handle: u16,
     },
     AclDisconnected {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         handle: u16,
     },
     QosComplete {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         t_poll: u32,
     },
@@ -416,7 +442,7 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
         unsafe {
             match evt {
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_DISC_RES_EVT => Self::DeviceDiscovered {
-                    bda: param.disc_res.bda.into(),
+                    bd_addr: param.disc_res.bda.into(),
                     props: core::slice::from_raw_parts(
                         param.disc_res.prop as *mut PropData as *const _,
                         param.disc_res.num_prop as _,
@@ -432,7 +458,7 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                     }
                 }
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVCS_EVT => Self::RemoteServiceDiscovered {
-                    bda: param.rmt_srvcs.bda.into(),
+                    bd_addr: param.rmt_srvcs.bda.into(),
                     status: param.rmt_srvcs.stat.into(),
                     services: core::slice::from_raw_parts(
                         param.rmt_srvcs.uuid_list as *mut BtUuid as *const _,
@@ -440,11 +466,11 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                     ),
                 },
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVC_REC_EVT => Self::RemoteServiceDetails {
-                    bda: param.rmt_srvcs.bda.into(),
+                    bd_addr: param.rmt_srvcs.bda.into(),
                     status: param.rmt_srvcs.stat.into(),
                 },
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_AUTH_CMPL_EVT => Self::AuthenticationCompleted {
-                    bda: param.auth_cmpl.bda.into(),
+                    bd_addr: param.auth_cmpl.bda.into(),
                     status: param.auth_cmpl.stat.into(),
                     device_name: core::str::from_utf8_unchecked(
                         &param.auth_cmpl.device_name
@@ -452,10 +478,15 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                     ),
                 },
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_PIN_REQ_EVT => Self::PairingPinRequest {
-                    bda: param.pin_req.bda.into(),
+                    bd_addr: param.pin_req.bda.into(),
                     min_16_digit: param.pin_req.min_16_digit,
                 },
-
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_CFM_REQ_EVT => {
+                    Self::PairingUserConfirmationRequest {
+                        bd_addr: param.cfm_req.bda.into(),
+                        number: param.cfm_req.num_val,
+                    }
+                }
                 //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT => {
                 //         Self::AdvertisingDatasetComplete(param.adv_data_cmpl)
                 //     }
@@ -544,9 +575,9 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                 //         Self::SetChannelsComplete(param.ble_set_channels)
                 //     }
                 _ => {
-                    log::warn!("Unhandled event {:?}", evt);
+                    log::warn!("Unknown event {:?}", evt);
                     Self::Other
-                    //panic!("Unhandled event {:?}", evt)
+                    //panic!("Unknown event {:?}", evt)
                 }
             }
         }
@@ -559,6 +590,7 @@ where
     M: BtClassicEnabled,
 {
     _driver: T,
+    initialized: AtomicBool,
     _p: PhantomData<&'d ()>,
     _m: PhantomData<M>,
 }
@@ -568,23 +600,30 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new<F>(driver: T, events_cb: F) -> Result<Self, EspError>
-    where
-        F: Fn(GapEvent) + Send + 'static,
-    {
-        CALLBACK.set(events_cb)?;
-
-        esp!(unsafe { esp_bt_gap_register_callback(Some(Self::event_handler)) })?;
-
+    pub fn new(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
+            initialized: AtomicBool::new(false),
             _p: PhantomData,
             _m: PhantomData,
         })
     }
 
+    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
+    where
+        F: Fn(GapEvent) + Send + 'd,
+    {
+        CALLBACK.set(events_cb)?;
+
+        esp!(unsafe { esp_bt_gap_register_callback(Some(Self::event_handler)) })?;
+
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
+    }
+
     pub fn set_scan_mode(
-        &mut self,
+        &self,
         connectable: bool,
         discovery_mode: DiscoveryMode,
     ) -> Result<(), EspError> {
@@ -592,7 +631,7 @@ where
     }
 
     pub fn start_discovery(
-        &mut self,
+        &self,
         inq_mode: InqMode,
         inq_duration: u8,
         num_rsps: usize,
@@ -600,15 +639,15 @@ where
         esp!(unsafe { esp_bt_gap_start_discovery(inq_mode as _, inq_duration, num_rsps as _) })
     }
 
-    pub fn stop_discovery(&mut self) -> Result<(), EspError> {
+    pub fn stop_discovery(&self) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_cancel_discovery() })
     }
 
-    pub fn request_remote_services(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
+    pub fn request_remote_services(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_get_remote_services(bd_addr as *const _ as *mut _) })
     }
 
-    pub fn resolve_eir_data(&mut self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
+    pub fn resolve_eir_data(&self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
         let mut len = 0;
         let addr = unsafe {
             esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type.into(), &mut len)
@@ -617,28 +656,28 @@ where
         Ok(unsafe { core::slice::from_raw_parts(addr, len as _) })
     }
 
-    pub fn set_eir_data_conf(&mut self, eir_data: &EirData) -> Result<(), EspError> {
+    pub fn set_eir_data_conf(&self, eir_data: &EirData) -> Result<(), EspError> {
         let data = eir_data.into();
         esp!(unsafe { esp_bt_gap_config_eir_data(&data as *const esp_bt_eir_data_t as *mut _) })
     }
 
-    pub fn get_cod(&mut self) -> Result<Cod, EspError> {
+    pub fn get_cod(&self) -> Result<Cod, EspError> {
         let mut cod = Default::default();
         esp!(unsafe { esp_bt_gap_get_cod(&mut cod) })?;
 
         Ok(cod.into())
     }
 
-    pub fn set_cod(&mut self, cod: Cod, mode: EnumSet<CodMode>) -> Result<(), EspError> {
+    pub fn set_cod(&self, cod: Cod, mode: EnumSet<CodMode>) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_set_cod(cod.into(), mode.as_repr()) })
     }
 
-    pub fn request_rssi_delta(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
+    pub fn request_rssi_delta(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_read_rssi_delta(bd_addr as *const _ as *mut _) })
     }
 
     pub fn get_bond_services<'a>(
-        &mut self,
+        &self,
         buf: &'a mut [BdAddr],
     ) -> Result<(&'a [BdAddr], usize), EspError> {
         let mut dev_num = buf.len() as _;
@@ -648,11 +687,11 @@ where
         Ok((&buf[..min(dev_num as _, buf.len())], dev_num as _))
     }
 
-    pub fn remove_bond_service(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
+    pub fn remove_bond_service(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_remove_bond_device(bd_addr as *const _ as *mut _) })
     }
 
-    pub fn set_pin(&mut self, pin: &[u8]) -> Result<(), EspError> {
+    pub fn set_pin(&self, pin: &str) -> Result<(), EspError> {
         esp!(unsafe {
             esp_bt_gap_set_pin(
                 esp_bt_pin_type_t_ESP_BT_PIN_TYPE_FIXED,
@@ -662,7 +701,7 @@ where
         })
     }
 
-    pub fn request_variable_pin(&mut self) -> Result<(), EspError> {
+    pub fn request_variable_pin(&self) -> Result<(), EspError> {
         esp!(unsafe {
             esp_bt_gap_set_pin(
                 esp_bt_pin_type_t_ESP_BT_PIN_TYPE_VARIABLE,
@@ -672,11 +711,7 @@ where
         })
     }
 
-    pub fn reply_variable_pin(
-        &mut self,
-        bd_addr: &BdAddr,
-        pin: Option<&[u8]>,
-    ) -> Result<(), EspError> {
+    pub fn reply_variable_pin(&self, bd_addr: &BdAddr, pin: Option<&[u8]>) -> Result<(), EspError> {
         esp!(unsafe {
             esp_bt_gap_pin_reply(
                 bd_addr as *const _ as *mut _,
@@ -687,11 +722,7 @@ where
         })
     }
 
-    pub fn reply_passkey(
-        &mut self,
-        bd_addr: &BdAddr,
-        passkey: Option<u32>,
-    ) -> Result<(), EspError> {
+    pub fn reply_passkey(&self, bd_addr: &BdAddr, passkey: Option<u32>) -> Result<(), EspError> {
         esp!(unsafe {
             esp_bt_gap_ssp_passkey_reply(
                 bd_addr as *const _ as *mut _,
@@ -701,20 +732,33 @@ where
         })
     }
 
-    pub fn reply_confirm(&mut self, bd_addr: &BdAddr, confirm: bool) -> Result<(), EspError> {
+    #[cfg(esp_idf_bt_ssp_enabled)]
+    pub fn reply_ssp_confirm(&self, bd_addr: &BdAddr, confirm: bool) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_ssp_confirm_reply(bd_addr as *const _ as *mut _, confirm) })
     }
 
-    pub fn set_afh_channels_conf(&mut self, channels: &[u8; 10]) -> Result<(), EspError> {
+    pub fn set_afh_channels_conf(&self, channels: &[u8; 10]) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_set_afh_channels(channels as *const _ as *mut _) })
     }
 
-    pub fn request_remote_name(&mut self, bd_addr: &BdAddr) -> Result<(), EspError> {
+    pub fn request_remote_name(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_read_remote_name(bd_addr as *const _ as *mut _) })
     }
 
-    pub fn set_qos_conf(&mut self, bd_addr: &BdAddr, poll: u32) -> Result<(), EspError> {
+    pub fn set_qos_conf(&self, bd_addr: &BdAddr, poll: u32) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_set_qos(bd_addr as *const _ as *mut _, poll) })
+    }
+
+    #[cfg(esp_idf_bt_ssp_enabled)]
+    pub fn set_ssp_io_cap(&self, io_cap: IOCapabilities) -> Result<(), EspError> {
+        let io_cap: esp_bt_io_cap_t = io_cap.into();
+        esp!(unsafe {
+            esp_bt_gap_set_security_param(
+                esp_bt_sp_param_t_ESP_BT_SP_IOCAP_MODE,
+                &io_cap as *const _ as *mut ffi::c_void,
+                1,
+            )
+        })
     }
 
     unsafe extern "C" fn event_handler(
@@ -724,7 +768,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GapEvent::from((event, param));
 
-        debug!("Got event {{ {:#?} }}", event);
+        info!("Got event {{ {:#?} }}", event);
 
         CALLBACK.call(event);
     }
@@ -736,9 +780,11 @@ where
     M: BtClassicEnabled,
 {
     fn drop(&mut self) {
-        esp!(unsafe { esp_bt_gap_register_callback(None) }).unwrap();
+        if self.initialized.load(Ordering::SeqCst) {
+            esp!(unsafe { esp_bt_gap_register_callback(None) }).unwrap();
 
-        CALLBACK.clear().unwrap();
+            CALLBACK.clear().unwrap();
+        }
     }
 }
 
