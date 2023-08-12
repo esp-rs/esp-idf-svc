@@ -58,27 +58,99 @@ pub enum InqMode {
     Limited = esp_bt_inq_mode_t_ESP_BT_INQ_MODE_LIMITED_INQUIRY,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 #[repr(transparent)]
-pub struct EirType(esp_bt_eir_type_t);
+pub struct Eir<'a>(*const ffi::c_void, PhantomData<&'a ()>);
 
-impl EirType {
-    pub fn raw(&self) -> esp_bt_eir_type_t {
-        self.0
+impl<'a> Eir<'a> {
+    pub fn flags(&self) -> Option<EnumSet<EirFlags>> {
+        todo!()
     }
+
+    pub fn uuid(&self) -> Option<&BtUuid> {
+        todo!()
+    }
+
+    // pub fn uui16_incomplete(&self) -> Option<&[u8]> {
+    //     todo!()
+    // }
+
+    // pub fn uuid32(&self) -> Option<&[u8]> {
+    //     todo!()
+    // }
+
+    // pub fn uui32_incomplete(&self) -> Option<&[u8]> {
+    //     todo!()
+    // }
+
+    // pub fn uuid128(&self) -> Option<&[u8]> {
+    //     todo!()
+    // }
+
+    // pub fn uui128_incomplete(&self) -> Option<&[u8]> {
+    //     todo!()
+    // }
+
+    pub fn short_local_name(&self) -> Option<&str> {
+        todo!()
+    }
+
+    pub fn local_name(&self) -> Option<&str> {
+        todo!()
+    }
+
+    pub fn url(&self) -> Option<&str> {
+        todo!()
+    }
+
+    pub fn manufacturer_data(&self) -> Option<&[u8]> {
+        todo!()
+    }
+
+    // pub fn resolve_eir_data(&self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
+    //     let mut len = 0;
+    //     let addr = unsafe {
+    //         esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type.into(), &mut len)
+    //     };
+
+    //     Ok(unsafe { core::slice::from_raw_parts(addr, len as _) })
+    // }
 }
 
-impl From<EirType> for esp_bt_eir_type_t {
-    fn from(value: EirType) -> Self {
-        value.0
-    }
-}
+// #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+// #[repr(u8)]
+// pub enum EirType {
+//     Flags = ESP_BT_EIR_TYPE_FLAGS as _,
+//     Uuid16Incomplete = ESP_BT_EIR_TYPE_INCMPL_16BITS_UUID as _,
+//     Uuid16 = ESP_BT_EIR_TYPE_CMPL_16BITS_UUID as _,
+//     Uuid32Incomplete = ESP_BT_EIR_TYPE_INCMPL_32BITS_UUID as _,
+//     Uuid32 = ESP_BT_EIR_TYPE_CMPL_32BITS_UUID as _,
+//     Uuid128Incomplete = ESP_BT_EIR_TYPE_INCMPL_128BITS_UUID as _,
+//     Uuid128 = ESP_BT_EIR_TYPE_CMPL_128BITS_UUID as _,
+//     ShortLocalName = ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME as _,
+//     LocalName = ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME as _,
+//     TxPowerLevel = ESP_BT_EIR_TYPE_TX_POWER_LEVEL as _,
+//     Url = ESP_BT_EIR_TYPE_URL as _,
+//     ManufacturerData = ESP_BT_EIR_TYPE_MANU_SPECIFIC as _,
+// }
 
-impl From<esp_bt_eir_type_t> for EirType {
-    fn from(value: esp_bt_eir_type_t) -> Self {
-        Self(value)
-    }
-}
+// impl EirType {
+//     pub fn raw(&self) -> esp_bt_eir_type_t {
+//         self.0
+//     }
+// }
+
+// impl From<EirType> for esp_bt_eir_type_t {
+//     fn from(value: EirType) -> Self {
+//         value.0
+//     }
+// }
+
+// impl From<esp_bt_eir_type_t> for EirType {
+//     fn from(value: esp_bt_eir_type_t) -> Self {
+//         Self(value)
+//     }
+// }
 
 #[derive(Debug, EnumSetType)]
 #[enumset(repr = "u8")]
@@ -93,11 +165,11 @@ pub enum EirFlags {
 
 #[derive(Debug, Clone)]
 pub struct EirData<'a> {
-    pub fec_required: bool,       // FEC is required or not, true by default
-    pub include_txpower: bool,    // EIR data include TX power, false by default
-    pub include_uuid: bool,       // EIR data include UUID, false by default
+    pub fec_required: bool,          // FEC is required or not, true by default
+    pub include_txpower: bool,       // EIR data include TX power, false by default
+    pub include_uuid: bool,          // EIR data include UUID, false by default
     pub flags: EnumSet<EirFlags>, // EIR flags, see ESP_BT_EIR_FLAG for details, EIR will not include flag if it is 0, 0 by default
-    pub manufacturer: &'a [u8],   // Manufacturer data point
+    pub manufacturer_data: &'a [u8], // Manufacturer data point
     pub url: &'a str,             // URL point
 }
 
@@ -108,8 +180,8 @@ impl<'a> From<&EirData<'a>> for esp_bt_eir_data_t {
             include_txpower: data.include_txpower,
             include_uuid: data.include_uuid,
             flag: data.flags.as_repr(),
-            p_manufacturer_data: data.manufacturer.as_ptr() as *mut _,
-            manufacturer_len: data.manufacturer.len() as _,
+            p_manufacturer_data: data.manufacturer_data.as_ptr() as *mut _,
+            manufacturer_len: data.manufacturer_data.len() as _,
             p_url: data.url.as_ptr() as *mut _,
             url_len: data.url.len() as _,
         }
@@ -123,7 +195,7 @@ impl<'a> From<&esp_bt_eir_data_t> for EirData<'a> {
             include_txpower: data.include_txpower,
             include_uuid: data.include_uuid,
             flags: EnumSet::from_repr(data.flag),
-            manufacturer: unsafe {
+            manufacturer_data: unsafe {
                 core::slice::from_raw_parts(
                     data.p_manufacturer_data as *mut u8,
                     data.manufacturer_len as _,
@@ -209,7 +281,7 @@ pub enum DeviceProp<'a> {
     BdName(&'a str),
     Cod(Cod),
     Rssi(u8),
-    EirData(EirData<'a>),
+    Eir(Eir<'a>),
 }
 
 #[derive(Clone, Debug)]
@@ -239,8 +311,7 @@ impl<'a> PropData<'a> {
                     DeviceProp::Rssi(*rssi)
                 }
                 esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_EIR => {
-                    let esp_eir_data = (self.data.val as *mut esp_bt_eir_data_t).as_ref().unwrap();
-                    DeviceProp::EirData(esp_eir_data.into())
+                    DeviceProp::Eir(Eir(self.data.val, PhantomData))
                 }
                 _ => unreachable!(),
             }
@@ -398,7 +469,7 @@ pub enum GapEvent<'a> {
     },
     EirDataConfigured {
         status: BtStatus,
-        eir_types: &'a [EirType],
+        eir_types: &'a [Eir<'a>],
     },
     AfhChannelsConfigured {
         status: BtStatus,
@@ -452,9 +523,9 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                     if param.disc_st_chg.state
                         == esp_bt_gap_discovery_state_t_ESP_BT_GAP_DISCOVERY_STOPPED
                     {
-                        Self::DeviceDiscoveryStarted
-                    } else {
                         Self::DeviceDiscoveryStopped
+                    } else {
+                        Self::DeviceDiscoveryStarted
                     }
                 }
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVCS_EVT => Self::RemoteServiceDiscovered {
@@ -645,15 +716,6 @@ where
 
     pub fn request_remote_services(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
         esp!(unsafe { esp_bt_gap_get_remote_services(bd_addr as *const _ as *mut _) })
-    }
-
-    pub fn resolve_eir_data(&self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
-        let mut len = 0;
-        let addr = unsafe {
-            esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type.into(), &mut len)
-        };
-
-        Ok(unsafe { core::slice::from_raw_parts(addr, len as _) })
     }
 
     pub fn set_eir_data_conf(&self, eir_data: &EirData) -> Result<(), EspError> {
