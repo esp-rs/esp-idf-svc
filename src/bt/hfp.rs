@@ -1,3 +1,4 @@
+#[cfg(esp_idf_bt_hfp_client_enable)]
 pub mod client {
     use core::{
         borrow::Borrow,
@@ -20,6 +21,7 @@ pub mod client {
         Microphone(u8),
     }
 
+    #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     pub struct Source {
         pub sample_rate_hz: u32,
@@ -29,9 +31,11 @@ pub mod client {
 
     #[derive(Debug)]
     pub enum HfpcEvent<'a> {
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         RecvData(&'a [u8]),
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         SendData(&'a mut [u8]),
-        Other,
+        Other(PhantomData<&'a ()>),
     }
 
     #[allow(non_upper_case_globals)]
@@ -43,7 +47,7 @@ pub mod client {
                 match evt {
                     _ => {
                         log::warn!("Unknown event {:?}", evt);
-                        Self::Other
+                        Self::Other(PhantomData)
                         //panic!("Unknown event {:?}", evt)
                     }
                 }
@@ -58,6 +62,7 @@ pub mod client {
     {
         _driver: T,
         initialized: AtomicBool,
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         resampling_source: Option<Source>,
         _p: PhantomData<&'d ()>,
         _m: PhantomData<M>,
@@ -68,11 +73,22 @@ pub mod client {
         T: Borrow<BtDriver<'d, M>>,
         M: BtClassicEnabled,
     {
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         pub const fn new(driver: T, resampling_source: Option<Source>) -> Result<Self, EspError> {
             Ok(Self {
                 _driver: driver,
                 initialized: AtomicBool::new(false),
                 resampling_source,
+                _p: PhantomData,
+                _m: PhantomData,
+            })
+        }
+
+        #[cfg(not(esp_idf_bt_hfp_audio_data_path_hci))]
+        pub const fn new(driver: T) -> Result<Self, EspError> {
+            Ok(Self {
+                _driver: driver,
+                initialized: AtomicBool::new(false),
                 _p: PhantomData,
                 _m: PhantomData,
             })
@@ -87,6 +103,7 @@ pub mod client {
             esp!(unsafe { esp_hf_client_init() })?;
             esp!(unsafe { esp_hf_client_register_callback(Some(Self::event_handler)) })?;
 
+            #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
             esp!(unsafe {
                 esp_hf_client_register_data_callback(
                     Some(Self::recv_data_handler),
@@ -94,6 +111,7 @@ pub mod client {
                 )
             })?;
 
+            #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
             if let Some(resampling_source) = self.resampling_source {
                 unsafe {
                     esp_hf_client_pcm_resample_init(
@@ -186,11 +204,11 @@ pub mod client {
             esp!(unsafe { esp_hf_client_reject_call() })
         }
 
-        pub fn request_qurrent_calls(&self) -> Result<(), EspError> {
+        pub fn request_current_calls(&self) -> Result<(), EspError> {
             esp!(unsafe { esp_hf_client_query_current_calls() })
         }
 
-        pub fn request_qurrent_operator_name(&self) -> Result<(), EspError> {
+        pub fn request_current_operator_name(&self) -> Result<(), EspError> {
             esp!(unsafe { esp_hf_client_query_current_operator_name() })
         }
 
@@ -206,12 +224,14 @@ pub mod client {
             esp!(unsafe { esp_hf_client_send_nrec() })
         }
 
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         pub fn request_outgoing_data_ready(&self) {
             unsafe {
                 esp_hf_client_outgoing_data_ready();
             }
         }
 
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         pub fn pcm_resample(&self, src: &[u8], dst: &mut [u8]) -> Result<usize, EspError> {
             if self.resampling_source.is_some() {
                 if dst.len() >= src.len() {
@@ -240,6 +260,7 @@ pub mod client {
             info!("Got event {{ {:#?} }}", event);
         }
 
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         unsafe extern "C" fn recv_data_handler(buf: *const u8, len: u32) {
             let event = HfpcEvent::RecvData(core::slice::from_raw_parts(buf, len as _));
             debug!("Got event {{ {:#?} }}", event);
@@ -247,6 +268,7 @@ pub mod client {
             CALLBACK.call(event);
         }
 
+        #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         unsafe extern "C" fn send_data_handler(buf: *mut u8, len: u32) -> u32 {
             let event = HfpcEvent::SendData(core::slice::from_raw_parts_mut(buf, len as _));
             debug!("Got event {{ {:#?} }}", event);
@@ -262,13 +284,16 @@ pub mod client {
     {
         fn drop(&mut self) {
             if self.initialized.load(Ordering::SeqCst) {
+                #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
                 if self.resampling_source.is_some() {
                     unsafe {
                         esp_hf_client_pcm_resample_deinit();
                     }
                 }
 
+                #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
                 esp!(unsafe { esp_hf_client_register_data_callback(None, None) }).unwrap();
+
                 esp!(unsafe { esp_hf_client_register_callback(None) }).unwrap();
                 esp!(unsafe { esp_hf_client_deinit() }).unwrap();
 
