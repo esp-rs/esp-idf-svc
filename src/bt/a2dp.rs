@@ -152,6 +152,7 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
         }
     }
 }
+
 pub struct EspA2dp<'d, M, T, S>
 where
     T: Borrow<BtDriver<'d, M>>,
@@ -170,7 +171,7 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new_sink(driver: T) -> Result<Self, EspError> {
+    pub const fn new_sink(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
             initialized: AtomicBool::new(false),
@@ -212,7 +213,7 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new_source(driver: T) -> Result<Self, EspError> {
+    pub const fn new_source(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
             initialized: AtomicBool::new(false),

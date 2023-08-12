@@ -600,7 +600,7 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
 {
-    pub fn new(driver: T) -> Result<Self, EspError> {
+    pub const fn new(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
             initialized: AtomicBool::new(false),
