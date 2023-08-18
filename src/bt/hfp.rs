@@ -31,6 +31,8 @@ pub mod client {
 
     #[derive(Debug)]
     pub enum HfpcEvent<'a> {
+        AudioState,
+        IncomingCall,
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         RecvData(&'a [u8]),
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
@@ -45,6 +47,10 @@ pub mod client {
 
             unsafe {
                 match evt {
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_AUDIO_STATE_EVT => {
+                        HfpcEvent::AudioState {}
+                    }
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CCWA_EVT => HfpcEvent::IncomingCall {},
                     _ => {
                         log::warn!("Unknown event {:?}", evt);
                         Self::Other(PhantomData)
@@ -254,10 +260,11 @@ pub mod client {
             event: esp_hf_client_cb_event_t,
             param: *mut esp_hf_client_cb_param_t,
         ) {
-            let param = unsafe { param.as_ref() }.unwrap();
-            let event = HfpcEvent::from((event, param));
+            if let Some(param) = unsafe { param.as_ref() } {
+                let event = HfpcEvent::from((event, param));
 
-            info!("Got event {{ {:#?} }}", event);
+                info!("Got event {{ {:#?} }}", event);
+            }
         }
 
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]

@@ -222,6 +222,24 @@ pub enum CodMode {
     Init = 10,           // overwrite major, minor, and service class
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u32)]
+enum CodService {
+    Miscellaneous = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_MISC,
+    Computer = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_COMPUTER,
+    Phone = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_PHONE,
+    Lan = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_LAN_NAP,
+    AudioVideo = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_AV,
+    Peripheral = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_PERIPHERAL,
+    Imaging = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_IMAGING,
+    Wearable = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_WEARABLE,
+    Toy = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_TOY,
+    Health = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_HEALTH,
+    Other = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_UNCATEGORIZED,
+}
+
+enum CodMajorDeviceClass {}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
 pub struct Cod(esp_bt_cod_t);

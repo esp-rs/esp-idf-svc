@@ -281,6 +281,12 @@ where
     }
 
     fn init(_nvs_enabled: bool) -> Result<(), EspError> {
+        #[cfg(esp_idf_btdm_ctrl_mode_br_edr_only)]
+        esp!(unsafe { esp_bt_controller_mem_release(esp_bt_mode_t_ESP_BT_MODE_BLE) })?;
+
+        #[cfg(esp_idf_btdm_ctrl_mode_br_ble_only)]
+        esp!(unsafe { esp_bt_controller_mem_release(esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT) })?;
+
         #[cfg(esp32)]
         let mut bt_cfg = esp_bt_controller_config_t {
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as _,
