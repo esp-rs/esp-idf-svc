@@ -165,8 +165,8 @@ pub mod client {
         NetworkOperator(&'a str),
         CallResponseAndHold(HoldStatus),
         CallingLineIdentification(&'a str),
-        IncomingCall(&'a str),
-        CurrentCallsNotification {
+        CallWaiting(&'a str),
+        CurrentCall {
             index: usize,
             outgoing: bool,
             status: CurrentCallStatus,
@@ -226,8 +226,8 @@ pub mod client {
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_COPS_CURRENT_OPERATOR_EVT => Self::NetworkOperator(from_cstr_ptr(param.cops.name)),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_BTRH_EVT => Self::CallResponseAndHold(param.btrh.status.try_into().unwrap()),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_CLIP_EVT => Self::CallingLineIdentification(from_cstr_ptr(param.clip.number)),
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CCWA_EVT => Self::IncomingCall(from_cstr_ptr(param.ccwa.number)),
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CLCC_EVT => Self::CurrentCallsNotification {
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CCWA_EVT => Self::CallWaiting(from_cstr_ptr(param.ccwa.number)),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CLCC_EVT => Self::CurrentCall {
                         index: param.clcc.idx as _,
                         outgoing: param.clcc.dir == esp_hf_current_call_direction_t_ESP_HF_CURRENT_CALL_DIRECTION_OUTGOING,
                         status: param.clcc.status.try_into().unwrap(),
