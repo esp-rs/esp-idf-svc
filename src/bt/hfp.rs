@@ -2,17 +2,21 @@
 pub mod client {
     use core::{
         borrow::Borrow,
+        convert::TryInto,
         ffi,
         marker::PhantomData,
         sync::atomic::{AtomicBool, Ordering},
     };
 
     use esp_idf_sys::*;
+
     use log::{debug, info};
 
+    use num_enum::TryFromPrimitive;
+
     use crate::{
-        bt::{BtCallback, BtClassicEnabled, BtDriver},
-        private::cstr::to_cstring_arg,
+        bt::{BdAddr, BtCallback, BtClassicEnabled, BtDriver},
+        private::cstr::{from_cstr_ptr, to_cstring_arg},
     };
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -29,10 +33,159 @@ pub mod client {
         pub stereo: bool,
     }
 
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum ConnectionStatus {
+        Disconnected = esp_hf_client_connection_state_t_ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED,
+        Connecting = esp_hf_client_connection_state_t_ESP_HF_CLIENT_CONNECTION_STATE_CONNECTING,
+        Connected = esp_hf_client_connection_state_t_ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED,
+        SlcConnected =
+            esp_hf_client_connection_state_t_ESP_HF_CLIENT_CONNECTION_STATE_SLC_CONNECTED,
+        Disconnecting =
+            esp_hf_client_connection_state_t_ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTING,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum AudioStatus {
+        Disconnected = esp_hf_client_audio_state_t_ESP_HF_CLIENT_AUDIO_STATE_DISCONNECTED,
+        Connectng = esp_hf_client_audio_state_t_ESP_HF_CLIENT_AUDIO_STATE_CONNECTING,
+        Connected = esp_hf_client_audio_state_t_ESP_HF_CLIENT_AUDIO_STATE_CONNECTED,
+        ConnectedMsbc = esp_hf_client_audio_state_t_ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum CallSetupStatus {
+        Idle = esp_hf_call_setup_status_t_ESP_HF_CALL_SETUP_STATUS_IDLE,
+        Incoming = esp_hf_call_setup_status_t_ESP_HF_CALL_SETUP_STATUS_INCOMING,
+        OutgoingDialing = esp_hf_call_setup_status_t_ESP_HF_CALL_SETUP_STATUS_OUTGOING_DIALING,
+        OutgoingAlerting = esp_hf_call_setup_status_t_ESP_HF_CALL_SETUP_STATUS_OUTGOING_ALERTING,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum HoldStatus {
+        Held = esp_hf_btrh_status_t_ESP_HF_BTRH_STATUS_HELD,
+        Accepted = esp_hf_btrh_status_t_ESP_HF_BTRH_STATUS_ACCEPTED,
+        Rejected = esp_hf_btrh_status_t_ESP_HF_BTRH_STATUS_REJECTED,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum CallHeldStatus {
+        None = esp_hf_call_held_status_t_ESP_HF_CALL_HELD_STATUS_NONE,
+        HeldAndActive = esp_hf_call_held_status_t_ESP_HF_CALL_HELD_STATUS_HELD_AND_ACTIVE,
+        Held = esp_hf_call_held_status_t_ESP_HF_CALL_HELD_STATUS_HELD,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum ServiceType {
+        Unknown = esp_hf_subscriber_service_type_t_ESP_HF_SUBSCRIBER_SERVICE_TYPE_UNKNOWN,
+        Voice = esp_hf_subscriber_service_type_t_ESP_HF_SUBSCRIBER_SERVICE_TYPE_VOICE,
+        Fax = esp_hf_subscriber_service_type_t_ESP_HF_SUBSCRIBER_SERVICE_TYPE_FAX,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum AtResponseCode {
+        OK = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_OK,
+        Er = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_ERR,
+        NoCarrier = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_NO_CARRIER,
+        Busy = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_BUSY,
+        NoAnswer = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_NO_ANSWER,
+        Delayed = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_DELAYED,
+        DenyListed = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_BLACKLISTED,
+        AudioGatewayErr = esp_hf_at_response_code_t_ESP_HF_AT_RESPONSE_CODE_CME,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum AudioGatewayResponseCode {
+        AgFailure = esp_hf_cme_err_t_ESP_HF_CME_AG_FAILURE,
+        NoConnectionToPhone = esp_hf_cme_err_t_ESP_HF_CME_NO_CONNECTION_TO_PHONE,
+        OperationNotAllowed = esp_hf_cme_err_t_ESP_HF_CME_OPERATION_NOT_ALLOWED,
+        OperationNotSupported = esp_hf_cme_err_t_ESP_HF_CME_OPERATION_NOT_SUPPORTED,
+        PhSimPinRequired = esp_hf_cme_err_t_ESP_HF_CME_PH_SIM_PIN_REQUIRED,
+        SimNotInserted = esp_hf_cme_err_t_ESP_HF_CME_SIM_NOT_INSERTED,
+        SimPinRequired = esp_hf_cme_err_t_ESP_HF_CME_SIM_PIN_REQUIRED,
+        SimPukRequired = esp_hf_cme_err_t_ESP_HF_CME_SIM_PUK_REQUIRED,
+        SimFailure = esp_hf_cme_err_t_ESP_HF_CME_SIM_FAILURE,
+        SimBusy = esp_hf_cme_err_t_ESP_HF_CME_SIM_BUSY,
+        IncorrectPassword = esp_hf_cme_err_t_ESP_HF_CME_INCORRECT_PASSWORD,
+        SimPin2Required = esp_hf_cme_err_t_ESP_HF_CME_SIM_PIN2_REQUIRED,
+        SimPuk2Required = esp_hf_cme_err_t_ESP_HF_CME_SIM_PUK2_REQUIRED,
+        MemoryFull = esp_hf_cme_err_t_ESP_HF_CME_MEMORY_FULL,
+        InvalidIndex = esp_hf_cme_err_t_ESP_HF_CME_INVALID_INDEX,
+        MemoryFailure = esp_hf_cme_err_t_ESP_HF_CME_MEMORY_FAILURE,
+        TextStringTooLong = esp_hf_cme_err_t_ESP_HF_CME_TEXT_STRING_TOO_LONG,
+        InvalidCharsInTextString = esp_hf_cme_err_t_ESP_HF_CME_INVALID_CHARACTERS_IN_TEXT_STRING,
+        DialStringTooLong = esp_hf_cme_err_t_ESP_HF_CME_DIAL_STRING_TOO_LONG,
+        InvalidCharsInDialString = esp_hf_cme_err_t_ESP_HF_CME_INVALID_CHARACTERS_IN_DIAL_STRING,
+        NoNetworkService = esp_hf_cme_err_t_ESP_HF_CME_NO_NETWORK_SERVICE,
+        NetworkTimeout = esp_hf_cme_err_t_ESP_HF_CME_NETWORK_TIMEOUT,
+        NetworkNotAllowed = esp_hf_cme_err_t_ESP_HF_CME_NETWORK_NOT_ALLOWED,
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum CurrentCallStatus {
+        Active = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_ACTIVE,
+        Held = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_HELD,
+        Dialing = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_DIALING,
+        Alerting = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_ALERTING,
+        Incoming = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_INCOMING,
+        Waiting = esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_WAITING,
+        HeldByResponseAndHold =
+            esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_HELD_BY_RESP_HOLD,
+    }
+
     #[derive(Debug)]
     pub enum HfpcEvent<'a> {
-        AudioState,
-        IncomingCall,
+        ConnectionState {
+            bda: BdAddr,
+            status: ConnectionStatus,
+            peer_features: u32,
+            child_features: u32,
+        },
+        AudioState {
+            bda: BdAddr,
+            status: AudioStatus,
+        },
+        CallNone,
+        CallInProgress,
+        CallSetupStatus(CallSetupStatus),
+        VoiceRecognitionEnabled,
+        VoiceRecognitionDisabled,
+        CallHeld(CallHeldStatus),
+        NetworkServiceAvailability(bool),
+        SignalStrength(u8),
+        Roaming(bool),
+        BatteryLevel(u8),
+        NetworkOperator(&'a str),
+        CallResponseAndHold(HoldStatus),
+        CallingLineIdentification(&'a str),
+        IncomingCall(&'a str),
+        CurrentCallsNotification {
+            index: usize,
+            outgoing: bool,
+            status: CurrentCallStatus,
+            multi_party: bool,
+            number: &'a str,
+        },
+        VolumeControl(Volume),
+        AtResponse {
+            code: AtResponseCode,
+            extended_code: AudioGatewayResponseCode,
+        },
+        SubscriberInfo {
+            number: &'a str,
+            service_type: ServiceType,
+        },
+        RingTone(bool),
+        VoiceInput(&'a str),
+        RingIndication,
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         RecvData(&'a [u8]),
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
@@ -47,15 +200,64 @@ pub mod client {
 
             unsafe {
                 match evt {
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_AUDIO_STATE_EVT => {
-                        HfpcEvent::AudioState {}
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CONNECTION_STATE_EVT => Self::ConnectionState {
+                        bda: param.conn_stat.remote_bda.into(),
+                        status: param.conn_stat.state.try_into().unwrap(),
+                        peer_features: param.conn_stat.peer_feat,
+                        child_features: param.conn_stat.chld_feat,
+                    },
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_AUDIO_STATE_EVT => Self::AudioState {
+                        bda: param.audio_stat.remote_bda.into(),
+                        status: param.audio_stat.state.try_into().unwrap(),
+                    },
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_BVRA_EVT => {
+                        if param.bvra.value == esp_hf_vr_state_t_ESP_HF_VR_STATE_ENABLED {
+                            Self::VoiceRecognitionEnabled
+                        } else {
+                            Self::VoiceRecognitionDisabled
+                        }
                     }
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CCWA_EVT => HfpcEvent::IncomingCall {},
-                    _ => {
-                        log::warn!("Unknown event {:?}", evt);
-                        Self::Other(PhantomData)
-                        //panic!("Unknown event {:?}", evt)
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_EVT => {
+                        if param.call.status == esp_hf_call_status_t_ESP_HF_CALL_STATUS_CALL_IN_PROGRESS {
+                            Self::CallInProgress
+                        } else {
+                            Self::CallNone
+                        }
                     }
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_SETUP_EVT => Self::CallSetupStatus(param.call_setup.status.try_into().unwrap()),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_HELD_EVT => Self::CallHeld(param.call_held.status.try_into().unwrap()),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_SERVICE_AVAILABILITY_EVT => Self::NetworkServiceAvailability(param.service_availability.status != esp_hf_network_state_t_ESP_HF_NETWORK_STATE_NOT_AVAILABLE),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_SIGNAL_STRENGTH_EVT => Self::SignalStrength(param.signal_strength.value as _),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_ROAMING_STATUS_EVT => Self::Roaming(param.roaming.status != esp_hf_roaming_status_t_ESP_HF_ROAMING_STATUS_INACTIVE),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_BATTERY_LEVEL_EVT => Self::BatteryLevel(param.battery_level.value as _),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_COPS_CURRENT_OPERATOR_EVT => Self::NetworkOperator(from_cstr_ptr(param.cops.name)),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_BTRH_EVT => Self::CallResponseAndHold(param.btrh.status.try_into().unwrap()),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CLIP_EVT => Self::CallingLineIdentification(from_cstr_ptr(param.clip.number)),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CCWA_EVT => Self::IncomingCall(from_cstr_ptr(param.ccwa.number)),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CLCC_EVT => Self::CurrentCallsNotification {
+                        index: param.clcc.idx as _,
+                        outgoing: param.clcc.dir == esp_hf_current_call_direction_t_ESP_HF_CURRENT_CALL_DIRECTION_OUTGOING,
+                        status: param.clcc.status.try_into().unwrap(),
+                        multi_party: param.clcc.mpty != esp_hf_current_call_mpty_type_t_ESP_HF_CURRENT_CALL_MPTY_TYPE_SINGLE,
+                        number: from_cstr_ptr(param.clcc.number),
+                    },
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_VOLUME_CONTROL_EVT => Self::VolumeControl(if param.volume_control.type_ == esp_hf_volume_control_target_t_ESP_HF_VOLUME_CONTROL_TARGET_SPK {
+                        Volume::Speaker(param.volume_control.volume as _)
+                    } else {
+                        Volume::Microphone(param.volume_control.volume as _)
+                    }),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_AT_RESPONSE_EVT => Self::AtResponse {
+                        code: param.at_response.code.try_into().unwrap(),
+                        extended_code: param.at_response.cme.try_into().unwrap(),
+                    },
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CNUM_EVT => Self::SubscriberInfo {
+                        number: from_cstr_ptr(param.cnum.number),
+                        service_type: param.cnum.type_.try_into().unwrap(),
+                    },
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_BSIR_EVT => Self::RingTone(param.bsir.state != esp_hf_client_in_band_ring_state_t_ESP_HF_CLIENT_IN_BAND_RINGTONE_NOT_PROVIDED),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_BINP_EVT => Self::VoiceInput(from_cstr_ptr(param.binp.number)),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_RING_IND_EVT => Self::RingIndication,
+                    _ => Self::Other(PhantomData),
                 }
             }
         }
@@ -63,8 +265,8 @@ pub mod client {
 
     pub struct EspHfpc<'d, M, T>
     where
-        T: Borrow<BtDriver<'d, M>>,
         M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
     {
         _driver: T,
         initialized: AtomicBool,
@@ -76,8 +278,8 @@ pub mod client {
 
     impl<'d, M, T> EspHfpc<'d, M, T>
     where
-        T: Borrow<BtDriver<'d, M>>,
         M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
     {
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         pub const fn new(driver: T, resampling_source: Option<Source>) -> Result<Self, EspError> {
@@ -241,13 +443,15 @@ pub mod client {
         pub fn pcm_resample(&self, src: &[u8], dst: &mut [u8]) -> Result<usize, EspError> {
             if self.resampling_source.is_some() {
                 if dst.len() >= src.len() {
-                    Ok(unsafe {
+                    let samples_ct = unsafe {
                         esp_hf_client_pcm_resample(
                             src.as_ptr() as *mut ffi::c_void,
                             src.len() as _,
                             dst.as_ptr() as *mut ffi::c_void,
                         )
-                    } as _)
+                    };
+
+                    Ok(samples_ct as usize * 2)
                 } else {
                     Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())
                 }
@@ -264,6 +468,8 @@ pub mod client {
                 let event = HfpcEvent::from((event, param));
 
                 info!("Got event {{ {:#?} }}", event);
+
+                CALLBACK.call(event);
             }
         }
 
@@ -286,8 +492,8 @@ pub mod client {
 
     impl<'d, M, T> Drop for EspHfpc<'d, M, T>
     where
-        T: Borrow<BtDriver<'d, M>>,
         M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
     {
         fn drop(&mut self) {
             if self.initialized.load(Ordering::SeqCst) {

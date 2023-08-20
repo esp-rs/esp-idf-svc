@@ -675,8 +675,8 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
 
 pub struct EspGap<'d, M, T>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     _driver: T,
     initialized: AtomicBool,
@@ -686,8 +686,8 @@ where
 
 impl<'d, M, T> EspGap<'d, M, T>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     pub const fn new(driver: T) -> Result<Self, EspError> {
         Ok(Self {
@@ -856,8 +856,8 @@ where
 
 impl<'d, M, T> Drop for EspGap<'d, M, T>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     fn drop(&mut self) {
         if self.initialized.load(Ordering::SeqCst) {

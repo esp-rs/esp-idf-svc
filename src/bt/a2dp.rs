@@ -18,8 +18,8 @@ pub trait A2dpMode {
     fn source() -> bool;
 }
 
-pub trait SinkEnabled {}
-pub trait SourceEnabled {}
+pub trait SinkEnabled: A2dpMode {}
+pub trait SourceEnabled: A2dpMode {}
 
 pub struct Sink;
 impl SinkEnabled for Sink {}
@@ -155,8 +155,8 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
 
 pub struct EspA2dp<'d, M, T, S>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
     S: A2dpMode,
 {
     _driver: T,
@@ -168,8 +168,8 @@ where
 
 impl<'d, M, T> EspA2dp<'d, M, T, Sink>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     pub const fn new_sink(driver: T) -> Result<Self, EspError> {
         Ok(Self {
@@ -210,8 +210,8 @@ where
 
 impl<'d, M, T> EspA2dp<'d, M, T, Source>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     pub const fn new_source(driver: T) -> Result<Self, EspError> {
         Ok(Self {
@@ -241,8 +241,8 @@ where
 
 impl<'d, M, T> EspA2dp<'d, M, T, Duplex>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
 {
     pub fn new_duplex(driver: T) -> Result<Self, EspError> {
         Ok(Self {
@@ -264,8 +264,8 @@ where
 
 impl<'d, M, T, S> EspA2dp<'d, M, T, S>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
     S: A2dpMode,
 {
     fn internal_initialize<F>(&self, events_cb: F) -> Result<(), EspError>
@@ -319,8 +319,8 @@ where
 
 impl<'d, M, T, S> Drop for EspA2dp<'d, M, T, S>
 where
-    T: Borrow<BtDriver<'d, M>>,
     M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>>,
     S: A2dpMode,
 {
     fn drop(&mut self) {
