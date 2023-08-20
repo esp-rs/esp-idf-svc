@@ -153,9 +153,8 @@ pub mod client {
             bda: BdAddr,
             status: AudioStatus,
         },
-        CallNone,
-        CallInProgress,
-        CallSetupStatus(CallSetupStatus),
+        CallState(bool),
+        CallSetupState(CallSetupStatus),
         VoiceRecognitionEnabled,
         VoiceRecognitionDisabled,
         CallHeld(CallHeldStatus),
@@ -217,14 +216,8 @@ pub mod client {
                             Self::VoiceRecognitionDisabled
                         }
                     }
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_EVT => {
-                        if param.call.status == esp_hf_call_status_t_ESP_HF_CALL_STATUS_CALL_IN_PROGRESS {
-                            Self::CallInProgress
-                        } else {
-                            Self::CallNone
-                        }
-                    }
-                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_SETUP_EVT => Self::CallSetupStatus(param.call_setup.status.try_into().unwrap()),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_EVT => Self::CallState(param.call.status != esp_hf_call_status_t_ESP_HF_CALL_STATUS_NO_CALLS),
+                    esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_SETUP_EVT => Self::CallSetupState(param.call_setup.status.try_into().unwrap()),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_CALL_HELD_EVT => Self::CallHeld(param.call_held.status.try_into().unwrap()),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_SERVICE_AVAILABILITY_EVT => Self::NetworkServiceAvailability(param.service_availability.status != esp_hf_network_state_t_ESP_HF_NETWORK_STATE_NOT_AVAILABLE),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_CIND_SIGNAL_STRENGTH_EVT => Self::SignalStrength(param.signal_strength.value as _),
