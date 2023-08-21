@@ -512,10 +512,6 @@ pub mod client {
                     }
                 }
 
-                #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
-                esp!(unsafe { esp_hf_client_register_data_callback(None, None) }).unwrap();
-
-                esp!(unsafe { esp_hf_client_register_callback(None) }).unwrap();
                 esp!(unsafe { esp_hf_client_deinit() }).unwrap();
 
                 CALLBACK.clear().unwrap();

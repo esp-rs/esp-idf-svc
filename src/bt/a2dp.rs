@@ -432,15 +432,11 @@ where
 {
     fn drop(&mut self) {
         if self.initialized.load(Ordering::SeqCst) {
-            esp!(unsafe { esp_a2d_register_callback(None) }).unwrap();
-
             if S::sink() {
-                esp!(unsafe { esp_a2d_sink_register_data_callback(None) }).unwrap();
                 esp!(unsafe { esp_a2d_sink_deinit() }).unwrap();
             }
 
             if S::source() {
-                esp!(unsafe { esp_a2d_source_register_data_callback(None) }).unwrap();
                 esp!(unsafe { esp_a2d_source_deinit() }).unwrap();
             }
 

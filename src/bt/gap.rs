@@ -799,8 +799,6 @@ where
 {
     fn drop(&mut self) {
         if self.initialized.load(Ordering::SeqCst) {
-            esp!(unsafe { esp_bt_gap_register_callback(None) }).unwrap();
-
             CALLBACK.clear().unwrap();
         }
     }

@@ -412,12 +412,13 @@ pub mod controller {
             &self,
             transaction_label: u8,
             notification: NotificationType,
+            playback_pos_reporting_interval_ms: u32,
         ) -> Result<(), EspError> {
             esp!(unsafe {
                 esp_avrc_ct_send_register_notification_cmd(
                     transaction_label,
                     notification as _,
-                    0, /*TODO*/
+                    playback_pos_reporting_interval_ms,
                 )
             })
         }
@@ -467,7 +468,6 @@ pub mod controller {
     {
         fn drop(&mut self) {
             if self.initialized.load(Ordering::SeqCst) {
-                esp!(unsafe { esp_avrc_ct_register_callback(None) }).unwrap();
                 esp!(unsafe { esp_avrc_ct_deinit() }).unwrap();
 
                 CALLBACK.clear().unwrap();
