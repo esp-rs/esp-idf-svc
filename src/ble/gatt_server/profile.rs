@@ -99,7 +99,7 @@ impl Profile {
         // ATTENTION: Descriptors might have duplicate UUIDs!
         // We need to set them in order of creation.
 
-        let Some(service) = self.get_service(param.service_handle)  else {
+        let Some(service) = self.get_service(param.service_handle) else {
             warn!("Cannot find service described by handle 0x{:04x} received in descriptor creation event.", param.service_handle);
             return;
         };
@@ -109,7 +109,10 @@ impl Profile {
             .unwrap()
             .get_descriptors_by_id(param.descr_uuid);
 
-        let Some(descriptor) = descriptors.iter().find(|d| d.read().unwrap().attribute_handle.is_none()) else {
+        let Some(descriptor) = descriptors
+            .iter()
+            .find(|d| d.read().unwrap().attribute_handle.is_none())
+        else {
             warn!("Cannot find service described by identifier {} received in descriptor creation event.", BleUuid::from(param.descr_uuid));
             return;
         };
@@ -132,7 +135,11 @@ impl Profile {
             return;
         };
 
-        let Some(characteristic) = service.read().unwrap().get_characteristic_by_id(param.char_uuid) else {
+        let Some(characteristic) = service
+            .read()
+            .unwrap()
+            .get_characteristic_by_id(param.char_uuid)
+        else {
             warn!("Cannot find characteristic described by service handle 0x{:04x} and characteristic identifier {} received in characteristic creation event.", param.service_handle, BleUuid::from(param.char_uuid));
             return;
         };
@@ -298,7 +305,10 @@ impl Profile {
 
     pub(crate) fn on_start(&mut self, param: esp_ble_gatts_cb_param_t_gatts_start_evt_param) {
         let Some(service) = self.get_service(param.service_handle) else {
-            warn!("Cannot find service described by service handle {} received in start event.", param.service_handle);
+            warn!(
+                "Cannot find service described by service handle {} received in start event.",
+                param.service_handle
+            );
             return;
         };
 

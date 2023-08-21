@@ -1,5 +1,6 @@
 use core::{
     borrow::Borrow,
+    convert::TryInto,
     fmt::{self, Debug},
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
@@ -8,6 +9,7 @@ use core::{
 
 use esp_idf_sys::*;
 use log::{debug, info};
+use num_enum::TryFromPrimitive;
 
 use crate::bt::{BtClassicEnabled, BtDriver};
 
@@ -118,22 +120,103 @@ impl Debug for Codec {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum ConnectionStatus {
+    Disconnected = esp_a2d_connection_state_t_ESP_A2D_CONNECTION_STATE_DISCONNECTED,
+    Connecting = esp_a2d_connection_state_t_ESP_A2D_CONNECTION_STATE_CONNECTING,
+    Connected = esp_a2d_connection_state_t_ESP_A2D_CONNECTION_STATE_CONNECTED,
+    Disconnecting = esp_a2d_connection_state_t_ESP_A2D_CONNECTION_STATE_DISCONNECTING,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum AudioStatus {
+    SuspendedByRemote = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND,
+    Stopped = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_STOPPED,
+    Started = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_STARTED,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum MediaControlCommand {
+    None = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_NONE,
+    CheckSourceReady = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY,
+    Start = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_START,
+    Stop = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_STOP,
+    Suspend = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_SUSPEND,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum MediaControlStatus {
+    Success = esp_a2d_media_ctrl_ack_t_ESP_A2D_MEDIA_CTRL_ACK_SUCCESS,
+    Failure = esp_a2d_media_ctrl_ack_t_ESP_A2D_MEDIA_CTRL_ACK_FAILURE,
+    Busy = esp_a2d_media_ctrl_ack_t_ESP_A2D_MEDIA_CTRL_ACK_BUSY,
+}
+
+pub struct EventRawData<'a>(pub &'a esp_a2d_cb_param_t);
+
+impl<'a> Debug for EventRawData<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RawData").finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum A2dpEvent<'a> {
-    ConfigureAudio { bd_addr: BdAddr, codec: Codec },
+    ConnectionState {
+        bd_addr: BdAddr,
+        status: ConnectionStatus,
+        disconnect_abnormal: bool,
+    },
+    AudioState {
+        bd_addr: BdAddr,
+        status: AudioStatus,
+    },
+    AudioCodecConfigured {
+        bd_addr: BdAddr,
+        codec: Codec,
+    },
+    MediaControlAcknowledged {
+        command: MediaControlCommand,
+        status: MediaControlStatus,
+    },
+    Initialized,
+    Deinitialized,
+    SinkServiceCapabilitiesConfigured(u16),
+    SinkDelaySetState {
+        set: bool,
+        delay: u16,
+    },
+    SinkDelay(u16),
+    SourceDelay(u16),
     SinkData(&'a [u8]),
     SourceData(&'a mut [u8]),
-    Other,
+    Other {
+        raw_event: esp_a2d_cb_event_t,
+        raw_data: EventRawData<'a>,
+    },
 }
 
 #[allow(non_upper_case_globals)]
 impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
     fn from(value: (esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)) -> Self {
-        let (evt, param) = value;
+        let (event, param) = value;
 
         unsafe {
-            match evt {
-                esp_a2d_cb_event_t_ESP_A2D_AUDIO_CFG_EVT => A2dpEvent::ConfigureAudio {
+            match event {
+                esp_a2d_cb_event_t_ESP_A2D_CONNECTION_STATE_EVT => Self::ConnectionState {
+                    bd_addr: param.conn_stat.remote_bda.into(),
+                    status: param.conn_stat.state.try_into().unwrap(),
+                    disconnect_abnormal: param.conn_stat.disc_rsn
+                        != esp_a2d_disc_rsn_t_ESP_A2D_DISC_RSN_NORMAL,
+                },
+                esp_a2d_cb_event_t_ESP_A2D_AUDIO_STATE_EVT => Self::AudioState {
+                    bd_addr: param.audio_stat.remote_bda.into(),
+                    status: param.audio_stat.state.try_into().unwrap(),
+                },
+                esp_a2d_cb_event_t_ESP_A2D_AUDIO_CFG_EVT => Self::AudioCodecConfigured {
                     bd_addr: param.audio_cfg.remote_bda.into(),
                     codec: match param.audio_cfg.mcc.type_ as u32 {
                         ESP_A2D_MCT_SBC => Codec::Sbc(param.audio_cfg.mcc.cie.sbc),
@@ -143,11 +226,35 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
                         _ => Codec::Unknown,
                     },
                 },
-                _ => {
-                    log::warn!("Unknown event {:?}", evt);
-                    Self::Other
-                    //panic!("Unknown event {:?}", evt)
+                esp_a2d_cb_event_t_ESP_A2D_MEDIA_CTRL_ACK_EVT => Self::MediaControlAcknowledged {
+                    command: param.media_ctrl_stat.cmd.try_into().unwrap(),
+                    status: param.media_ctrl_stat.status.try_into().unwrap(),
+                },
+                esp_a2d_cb_event_t_ESP_A2D_PROF_STATE_EVT => {
+                    if param.a2d_prof_stat.init_state == esp_a2d_init_state_t_ESP_A2D_INIT_SUCCESS {
+                        Self::Initialized
+                    } else {
+                        Self::Deinitialized
+                    }
                 }
+                esp_a2d_cb_event_t_ESP_A2D_SNK_PSC_CFG_EVT => {
+                    Self::SinkServiceCapabilitiesConfigured(param.a2d_psc_cfg_stat.psc_mask)
+                } // TODO
+                esp_a2d_cb_event_t_ESP_A2D_SNK_SET_DELAY_VALUE_EVT => Self::SinkDelaySetState {
+                    set: param.a2d_set_delay_value_stat.set_state
+                        == esp_a2d_set_delay_value_state_t_ESP_A2D_SET_SUCCESS,
+                    delay: param.a2d_set_delay_value_stat.delay_value,
+                },
+                esp_a2d_cb_event_t_ESP_A2D_SNK_GET_DELAY_VALUE_EVT => {
+                    Self::SinkDelay(param.a2d_get_delay_value_stat.delay_value)
+                }
+                esp_a2d_cb_event_t_ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT => {
+                    Self::SourceDelay(param.a2d_report_delay_value_stat.delay_value)
+                }
+                _ => Self::Other {
+                    raw_event: event,
+                    raw_data: EventRawData(param),
+                },
             }
         }
     }

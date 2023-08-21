@@ -604,7 +604,11 @@ impl GattServer {
             return;
         };
 
-        let Some(characteristic) = service.read().unwrap().get_characteristic_by_handle(param.attr_handle) else {
+        let Some(characteristic) = service
+            .read()
+            .unwrap()
+            .get_characteristic_by_handle(param.attr_handle)
+        else {
             warn!("Cannot find characteristic described by service handle {} and attribute handle {} received in set attribute value event.", param.srvc_handle, param.attr_handle);
             return;
         };
@@ -639,7 +643,9 @@ impl GattServer {
                 .get_cccd_status(simulated_read_param);
 
             // Check that the status is not None, otherwise bail.
-            let Some((notification, indication)) = status else { return; };
+            let Some((notification, indication)) = status else {
+                return;
+            };
             let properties = characteristic.read().unwrap().properties;
 
             let mut internal_value = characteristic.write().unwrap().internal_value.clone();

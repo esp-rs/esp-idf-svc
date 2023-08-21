@@ -4,6 +4,7 @@ pub mod client {
         borrow::Borrow,
         convert::TryInto,
         ffi,
+        fmt::{self, Debug},
         marker::PhantomData,
         sync::atomic::{AtomicBool, Ordering},
     };
@@ -141,16 +142,24 @@ pub mod client {
             esp_hf_current_call_status_t_ESP_HF_CURRENT_CALL_STATUS_HELD_BY_RESP_HOLD,
     }
 
+    pub struct EventRawData<'a>(pub &'a esp_hf_client_cb_param_t);
+
+    impl<'a> Debug for EventRawData<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_tuple("RawData").finish()
+        }
+    }
+
     #[derive(Debug)]
     pub enum HfpcEvent<'a> {
         ConnectionState {
-            bda: BdAddr,
+            bd_addr: BdAddr,
             status: ConnectionStatus,
             peer_features: u32,
             child_features: u32,
         },
         AudioState {
-            bda: BdAddr,
+            bd_addr: BdAddr,
             status: AudioStatus,
         },
         CallState(bool),
@@ -189,24 +198,27 @@ pub mod client {
         RecvData(&'a [u8]),
         #[cfg(esp_idf_bt_hfp_audio_data_path_hci)]
         SendData(&'a mut [u8]),
-        Other(PhantomData<&'a ()>),
+        Other {
+            raw_event: esp_hf_client_cb_event_t,
+            raw_data: EventRawData<'a>,
+        },
     }
 
     #[allow(non_upper_case_globals)]
     impl<'a> From<(esp_hf_client_cb_event_t, &'a esp_hf_client_cb_param_t)> for HfpcEvent<'a> {
         fn from(value: (esp_hf_client_cb_event_t, &'a esp_hf_client_cb_param_t)) -> Self {
-            let (evt, param) = value;
+            let (event, param) = value;
 
             unsafe {
-                match evt {
+                match event {
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_CONNECTION_STATE_EVT => Self::ConnectionState {
-                        bda: param.conn_stat.remote_bda.into(),
+                        bd_addr: param.conn_stat.remote_bda.into(),
                         status: param.conn_stat.state.try_into().unwrap(),
                         peer_features: param.conn_stat.peer_feat,
                         child_features: param.conn_stat.chld_feat,
                     },
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_AUDIO_STATE_EVT => Self::AudioState {
-                        bda: param.audio_stat.remote_bda.into(),
+                        bd_addr: param.audio_stat.remote_bda.into(),
                         status: param.audio_stat.state.try_into().unwrap(),
                     },
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_BVRA_EVT => {
@@ -250,7 +262,10 @@ pub mod client {
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_BSIR_EVT => Self::RingTone(param.bsir.state != esp_hf_client_in_band_ring_state_t_ESP_HF_CLIENT_IN_BAND_RINGTONE_NOT_PROVIDED),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_BINP_EVT => Self::VoiceInput(from_cstr_ptr(param.binp.number)),
                     esp_hf_client_cb_event_t_ESP_HF_CLIENT_RING_IND_EVT => Self::RingIndication,
-                    _ => Self::Other(PhantomData),
+                    _ => Self::Other {
+                        raw_event: event,
+                        raw_data: EventRawData(param),
+                    },
                 }
             }
         }
@@ -328,20 +343,20 @@ pub mod client {
             Ok(())
         }
 
-        pub fn connect(&self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
-            esp!(unsafe { esp_hf_client_connect(remote_bda as *const _ as *mut _) })
+        pub fn connect(&self, bd_addr: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_connect(bd_addr as *const _ as *mut _) })
         }
 
-        pub fn disconnect(&self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
-            esp!(unsafe { esp_hf_client_disconnect(remote_bda as *const _ as *mut _) })
+        pub fn disconnect(&self, bd_addr: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_disconnect(bd_addr as *const _ as *mut _) })
         }
 
-        pub fn connect_audio(&self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
-            esp!(unsafe { esp_hf_client_connect_audio(remote_bda as *const _ as *mut _) })
+        pub fn connect_audio(&self, bd_addr: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_connect_audio(bd_addr as *const _ as *mut _) })
         }
 
-        pub fn disconnect_audio(&self, remote_bda: &esp_bd_addr_t) -> Result<(), EspError> {
-            esp!(unsafe { esp_hf_client_disconnect_audio(remote_bda as *const _ as *mut _) })
+        pub fn disconnect_audio(&self, bd_addr: &esp_bd_addr_t) -> Result<(), EspError> {
+            esp!(unsafe { esp_hf_client_disconnect_audio(bd_addr as *const _ as *mut _) })
         }
 
         pub fn start_voice_recognition(&self) -> Result<(), EspError> {

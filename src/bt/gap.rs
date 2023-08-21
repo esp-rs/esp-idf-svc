@@ -1,7 +1,9 @@
 use core::cmp::min;
+use core::convert::TryInto;
 use core::ffi;
+use core::fmt::{self, Debug};
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::{borrow::Borrow, fmt::Debug, marker::PhantomData};
+use core::{borrow::Borrow, marker::PhantomData};
 
 use enumset::{EnumSet, EnumSetType};
 
@@ -9,10 +11,12 @@ use esp_idf_sys::*;
 
 use log::{debug, info};
 
+use num_enum::TryFromPrimitive;
+
 use super::{BdAddr, BtCallback, BtClassicEnabled, BtDriver, BtUuid};
 
 #[cfg(esp_idf_bt_ssp_enabled)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 pub enum IOCapabilities {
     DisplayOnly = ESP_BT_IO_CAP_OUT as _,
@@ -21,21 +25,7 @@ pub enum IOCapabilities {
     None = ESP_BT_IO_CAP_NONE as _,
 }
 
-#[cfg(esp_idf_bt_ssp_enabled)]
-impl From<esp_bt_io_cap_t> for IOCapabilities {
-    fn from(value: esp_bt_io_cap_t) -> Self {
-        unsafe { core::mem::transmute(value) } // TODO
-    }
-}
-
-#[cfg(esp_idf_bt_ssp_enabled)]
-impl From<IOCapabilities> for esp_bt_io_cap_t {
-    fn from(value: IOCapabilities) -> Self {
-        value as _
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
 pub enum DiscoveryMode {
     NonDiscoverable = esp_bt_discovery_mode_t_ESP_BT_NON_DISCOVERABLE,
@@ -117,50 +107,32 @@ impl<'a> Eir<'a> {
     // }
 }
 
-// #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-// #[repr(u8)]
-// pub enum EirType {
-//     Flags = ESP_BT_EIR_TYPE_FLAGS as _,
-//     Uuid16Incomplete = ESP_BT_EIR_TYPE_INCMPL_16BITS_UUID as _,
-//     Uuid16 = ESP_BT_EIR_TYPE_CMPL_16BITS_UUID as _,
-//     Uuid32Incomplete = ESP_BT_EIR_TYPE_INCMPL_32BITS_UUID as _,
-//     Uuid32 = ESP_BT_EIR_TYPE_CMPL_32BITS_UUID as _,
-//     Uuid128Incomplete = ESP_BT_EIR_TYPE_INCMPL_128BITS_UUID as _,
-//     Uuid128 = ESP_BT_EIR_TYPE_CMPL_128BITS_UUID as _,
-//     ShortLocalName = ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME as _,
-//     LocalName = ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME as _,
-//     TxPowerLevel = ESP_BT_EIR_TYPE_TX_POWER_LEVEL as _,
-//     Url = ESP_BT_EIR_TYPE_URL as _,
-//     ManufacturerData = ESP_BT_EIR_TYPE_MANU_SPECIFIC as _,
-// }
-
-// impl EirType {
-//     pub fn raw(&self) -> esp_bt_eir_type_t {
-//         self.0
-//     }
-// }
-
-// impl From<EirType> for esp_bt_eir_type_t {
-//     fn from(value: EirType) -> Self {
-//         value.0
-//     }
-// }
-
-// impl From<esp_bt_eir_type_t> for EirType {
-//     fn from(value: esp_bt_eir_type_t) -> Self {
-//         Self(value)
-//     }
-// }
+#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u8)]
+pub enum EirType {
+    Flags = ESP_BT_EIR_TYPE_FLAGS as _,
+    Uuid16Incomplete = ESP_BT_EIR_TYPE_INCMPL_16BITS_UUID as _,
+    Uuid16 = ESP_BT_EIR_TYPE_CMPL_16BITS_UUID as _,
+    Uuid32Incomplete = ESP_BT_EIR_TYPE_INCMPL_32BITS_UUID as _,
+    Uuid32 = ESP_BT_EIR_TYPE_CMPL_32BITS_UUID as _,
+    Uuid128Incomplete = ESP_BT_EIR_TYPE_INCMPL_128BITS_UUID as _,
+    Uuid128 = ESP_BT_EIR_TYPE_CMPL_128BITS_UUID as _,
+    ShortLocalName = ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME as _,
+    LocalName = ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME as _,
+    TxPowerLevel = ESP_BT_EIR_TYPE_TX_POWER_LEVEL as _,
+    Url = ESP_BT_EIR_TYPE_URL as _,
+    ManufacturerData = ESP_BT_EIR_TYPE_MANU_SPECIFIC as _,
+}
 
 #[derive(Debug, EnumSetType)]
 #[enumset(repr = "u8")]
 #[repr(u8)]
 pub enum EirFlags {
-    LimitDisc = 0,
-    GenDisc = 1,
-    BredrNotSpt = 2,
-    DmtControllerSpt = 3,
-    DmtHostSpt = 4,
+    LimitDisc = 0,        //ESP_BT_EIR_FLAG_LIMIT_DISC as _,
+    GenDisc = 1,          //ESP_BT_EIR_FLAG_GEN_DISC as _,
+    BredrNotSpt = 2,      //ESP_BT_EIR_FLAG_BREDR_NOT_SPT as _,
+    DmtControllerSpt = 3, //ESP_BT_EIR_FLAG_DMT_CONTROLLER_SPT as _,
+    DmtHostSpt = 4,       //ESP_BT_EIR_FLAG_DMT_HOST_SPT as _,
 }
 
 #[derive(Debug, Clone)]
@@ -222,7 +194,7 @@ pub enum CodMode {
     Init = 10,           // overwrite major, minor, and service class
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
 enum CodService {
     Miscellaneous = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_MISC,
@@ -337,7 +309,7 @@ impl<'a> PropData<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
 pub enum BtStatus {
     Success = esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
@@ -431,19 +403,15 @@ pub enum BtStatus {
     HciMacConnectionFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_MAC_CONNECTION_FAILED,
 }
 
-impl From<esp_bt_status_t> for BtStatus {
-    fn from(value: esp_bt_status_t) -> Self {
-        unsafe { core::mem::transmute(value) } // TODO
+pub struct EventRawData<'a>(pub &'a esp_bt_gap_cb_param_t);
+
+impl<'a> Debug for EventRawData<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("EventRawData").finish()
     }
 }
 
-impl From<BtStatus> for esp_bt_status_t {
-    fn from(value: BtStatus) -> Self {
-        value as _
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum GapEvent<'a> {
     DeviceDiscoveryStarted,
     DeviceDiscoveryStopped,
@@ -473,12 +441,12 @@ pub enum GapEvent<'a> {
         bd_addr: BdAddr,
         number: u32,
     },
-    PairingPasskeyRequest {
+    SspPasskey {
         bd_addr: BdAddr,
-    },
-    PairingPasskey {
-        bda: BdAddr,
         passkey: u32,
+    },
+    SspPasskeyRequest {
+        bd_addr: BdAddr,
     },
     Rssi {
         bd_addr: BdAddr,
@@ -487,11 +455,9 @@ pub enum GapEvent<'a> {
     },
     EirDataConfigured {
         status: BtStatus,
-        eir_types: &'a [Eir<'a>],
+        eir_types: &'a [EirType],
     },
-    AfhChannelsConfigured {
-        status: BtStatus,
-    },
+    AfhChannelsConfigured(BtStatus),
     RemoteName {
         bd_addr: BdAddr,
         status: BtStatus,
@@ -506,7 +472,7 @@ pub enum GapEvent<'a> {
         status: BtStatus,
     },
     AclConnected {
-        bda: BdAddr,
+        bd_addr: BdAddr,
         status: BtStatus,
         handle: u16,
     },
@@ -520,16 +486,19 @@ pub enum GapEvent<'a> {
         status: BtStatus,
         t_poll: u32,
     },
-    Other,
+    Other {
+        raw_event: esp_bt_gap_cb_event_t,
+        raw_data: EventRawData<'a>,
+    },
 }
 
 #[allow(non_upper_case_globals)]
 impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'a> {
     fn from(value: (esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)) -> Self {
-        let (evt, param) = value;
+        let (event, param) = value;
 
         unsafe {
-            match evt {
+            match event {
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_DISC_RES_EVT => Self::DeviceDiscovered {
                     bd_addr: param.disc_res.bda.into(),
                     props: core::slice::from_raw_parts(
@@ -548,7 +517,7 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                 }
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVCS_EVT => Self::RemoteServiceDiscovered {
                     bd_addr: param.rmt_srvcs.bda.into(),
-                    status: param.rmt_srvcs.stat.into(),
+                    status: param.rmt_srvcs.stat.try_into().unwrap(),
                     services: core::slice::from_raw_parts(
                         param.rmt_srvcs.uuid_list as *mut BtUuid as *const _,
                         param.rmt_srvcs.num_uuids as _,
@@ -556,11 +525,11 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                 },
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_RMT_SRVC_REC_EVT => Self::RemoteServiceDetails {
                     bd_addr: param.rmt_srvcs.bda.into(),
-                    status: param.rmt_srvcs.stat.into(),
+                    status: param.rmt_srvcs.stat.try_into().unwrap(),
                 },
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_AUTH_CMPL_EVT => Self::AuthenticationCompleted {
                     bd_addr: param.auth_cmpl.bda.into(),
-                    status: param.auth_cmpl.stat.into(),
+                    status: param.auth_cmpl.stat.try_into().unwrap(),
                     device_name: core::str::from_utf8_unchecked(
                         &param.auth_cmpl.device_name
                             [..strlen(&param.auth_cmpl.device_name as *const _ as *const _) as _],
@@ -576,98 +545,67 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                         number: param.cfm_req.num_val,
                     }
                 }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT => {
-                //         Self::AdvertisingDatasetComplete(param.adv_data_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT => {
-                //         Self::ScanResponseDatasetComplete(param.scan_rsp_data_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT => {
-                //         Self::ScanParameterDatasetComplete(param.scan_param_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => {
-                //         Self::ScanResult(param.scan_rst)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT => {
-                //         Self::RawAdvertisingDatasetComplete(param.adv_data_raw_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT => {
-                //         Self::RawScanResponseDatasetComplete(param.scan_rsp_data_raw_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_START_COMPLETE_EVT => {
-                //         Self::AdvertisingStartComplete(param.adv_start_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_START_COMPLETE_EVT => {
-                //         Self::ScanStartComplete(param.scan_start_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_AUTH_CMPL_EVT => {
-                //         Self::AuthenticationComplete(param.ble_security)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_KEY_EVT => Self::Key(param.ble_security),
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SEC_REQ_EVT => {
-                //         Self::SecurityRequest(param.ble_security)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_PASSKEY_NOTIF_EVT => {
-                //         Self::PasskeyNotification(param.ble_security)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_PASSKEY_REQ_EVT => {
-                //         Self::PasskeyRequest(param.ble_security)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_OOB_REQ_EVT => Self::OOBRequest,
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_LOCAL_IR_EVT => Self::LocalIR,
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_LOCAL_ER_EVT => Self::LocalER,
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_NC_REQ_EVT => {
-                //         Self::NumericComparisonRequest(param.ble_security)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT => {
-                //         Self::AdvertisingStopComplete(param.adv_stop_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT => {
-                //         Self::ScanStopComplete(param.scan_stop_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_STATIC_RAND_ADDR_EVT => {
-                //         Self::SetStaticRandomAddressComplete(param.set_rand_addr_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT => {
-                //         Self::UpdateConnectionParamsComplete(param.update_conn_params)
-                //     }
-                //     #[cfg(esp_idf_version_major = "4")]
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT => {
-                //         Self::SetPacketLengthComplete(param.pkt_data_lenth_cmpl)
-                //     }
-                //     #[cfg(not(esp_idf_version_major = "4"))]
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT => {
-                //         Self::SetPacketLengthComplete(param.pkt_data_length_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_LOCAL_PRIVACY_COMPLETE_EVT => {
-                //         Self::SetLocalPrivacy(param.local_privacy_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_REMOVE_BOND_DEV_COMPLETE_EVT => {
-                //         Self::RemoveDeviceBondComplete(param.remove_bond_dev_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_CLEAR_BOND_DEV_COMPLETE_EVT => {
-                //         Self::ClearDeviceBondComplete(param.clear_bond_dev_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_GET_BOND_DEV_COMPLETE_EVT => {
-                //         Self::GetDeviceBondComplete(param.get_bond_dev_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT => {
-                //         Self::ReadRssiComplete(param.read_rssi_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_WHITELIST_COMPLETE_EVT => {
-                //         Self::UpdateWhitelistComplete(param.update_whitelist_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT => {
-                //         Self::UpdateDuplicateListComplete(param.update_duplicate_exceptional_list_cmpl)
-                //     }
-                //     esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_CHANNELS_EVT => {
-                //         Self::SetChannelsComplete(param.ble_set_channels)
-                //     }
-                _ => {
-                    log::warn!("Unknown event {:?}", evt);
-                    Self::Other
-                    //panic!("Unknown event {:?}", evt)
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_KEY_NOTIF_EVT => Self::SspPasskey {
+                    bd_addr: param.key_notif.bda.into(),
+                    passkey: param.key_notif.passkey,
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_KEY_REQ_EVT => Self::SspPasskeyRequest {
+                    bd_addr: param.key_req.bda.into(),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_READ_RSSI_DELTA_EVT => Self::Rssi {
+                    bd_addr: param.read_rssi_delta.bda.into(),
+                    status: param.read_rssi_delta.stat.try_into().unwrap(),
+                    rssi: param.read_rssi_delta.rssi_delta,
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_CONFIG_EIR_DATA_EVT => Self::EirDataConfigured {
+                    status: param.config_eir_data.stat.try_into().unwrap(),
+                    eir_types: core::mem::transmute(
+                        &param.config_eir_data.eir_type[..param.config_eir_data.eir_type_num as _],
+                    ),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_SET_AFH_CHANNELS_EVT => {
+                    Self::AfhChannelsConfigured(param.set_afh_channels.stat.try_into().unwrap())
                 }
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_READ_REMOTE_NAME_EVT => Self::RemoteName {
+                    bd_addr: param.read_rmt_name.bda.into(),
+                    status: param.read_rmt_name.stat.try_into().unwrap(),
+                    name: core::str::from_utf8_unchecked(
+                        &param.read_rmt_name.rmt_name
+                            [..strlen(param.read_rmt_name.rmt_name.as_ptr() as *const _) as _],
+                    ),
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_MODE_CHG_EVT => Self::ModeChange {
+                    bd_addr: param.mode_chg.bda.into(),
+                    mode: param.mode_chg.mode,
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT => {
+                    Self::BondedServiceRemoved {
+                        bd_addr: param.remove_bond_dev_cmpl.bda.into(),
+                        status: param.remove_bond_dev_cmpl.status.try_into().unwrap(),
+                    }
+                }
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_QOS_CMPL_EVT => Self::QosComplete {
+                    bd_addr: param.qos_cmpl.bda.into(),
+                    status: param.qos_cmpl.stat.try_into().unwrap(),
+                    t_poll: param.qos_cmpl.t_poll,
+                },
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT => Self::AclConnected {
+                    bd_addr: param.acl_conn_cmpl_stat.bda.into(),
+                    status: param.acl_conn_cmpl_stat.stat.try_into().unwrap(),
+                    handle: param.acl_conn_cmpl_stat.handle,
+                },
+                // #[doc = "< ACL disconnection complete status event"]
+                esp_bt_gap_cb_event_t_ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT => {
+                    Self::AclDisconnected {
+                        bd_addr: param.acl_disconn_cmpl_stat.bda.into(),
+                        status: param.acl_disconn_cmpl_stat.reason.try_into().unwrap(),
+                        handle: param.acl_disconn_cmpl_stat.handle,
+                    }
+                }
+                _ => Self::Other {
+                    raw_event: event,
+                    raw_data: EventRawData(param),
+                },
             }
         }
     }
@@ -831,7 +769,7 @@ where
 
     #[cfg(esp_idf_bt_ssp_enabled)]
     pub fn set_ssp_io_cap(&self, io_cap: IOCapabilities) -> Result<(), EspError> {
-        let io_cap: esp_bt_io_cap_t = io_cap.into();
+        let io_cap: esp_bt_io_cap_t = io_cap as _;
         esp!(unsafe {
             esp_bt_gap_set_security_param(
                 esp_bt_sp_param_t_ESP_BT_SP_IOCAP_MODE,
