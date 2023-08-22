@@ -1,3 +1,6 @@
+#![allow(non_upper_case_globals)]
+#![allow(non_snake_case)]
+
 use core::cmp::min;
 use core::convert::TryInto;
 use core::ffi;
@@ -9,7 +12,7 @@ use enumset::{EnumSet, EnumSetType};
 
 use esp_idf_sys::*;
 
-use log::{debug, info};
+use log::info;
 
 use num_enum::TryFromPrimitive;
 
@@ -33,15 +36,7 @@ pub enum DiscoveryMode {
     Discoverable = esp_bt_discovery_mode_t_ESP_BT_GENERAL_DISCOVERABLE,
 }
 
-// impl From<DiscoveryMode> for esp_bt_discovery_mode_t {
-//     fn from(value: DiscoveryMode) -> Self {
-//         match self {
-
-//         }
-//     }
-// }
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
 pub enum InqMode {
     General = esp_bt_inq_mode_t_ESP_BT_INQ_MODE_GENERAL_INQUIRY,
@@ -124,7 +119,7 @@ pub enum EirType {
     ManufacturerData = ESP_BT_EIR_TYPE_MANU_SPECIFIC as _,
 }
 
-#[derive(Debug, EnumSetType)]
+#[derive(Debug, EnumSetType, TryFromPrimitive)]
 #[enumset(repr = "u8")]
 #[repr(u8)]
 pub enum EirFlags {
@@ -183,15 +178,15 @@ impl<'a> From<&esp_bt_eir_data_t> for EirData<'a> {
     }
 }
 
-#[derive(Debug, EnumSetType)]
+#[derive(Debug, EnumSetType, TryFromPrimitive)]
 #[enumset(repr = "u32")]
 #[repr(u32)]
 pub enum CodMode {
-    SetMajorMinor = 1,   // overwrite major, minor class
-    SetServiceClass = 2, // set the bits in the input, the current bit will remain
-    ClrServiceClass = 4, // clear the bits in the input, others will remain
-    SetAll = 8,          // overwrite major, minor, set the bits in service class
-    Init = 10,           // overwrite major, minor, and service class
+    SetMajorMinor = 0,   // overwrite major, minor class
+    SetServiceClass = 1, // set the bits in the input, the current bit will remain
+    ClrServiceClass = 2, // clear the bits in the input, others will remain
+    SetAll = 3,          // overwrite major, minor, set the bits in service class
+    Init = 4,            // overwrite major, minor, and service class
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
@@ -210,7 +205,7 @@ enum CodService {
     Other = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_UNCATEGORIZED,
 }
 
-enum CodMajorDeviceClass {}
+// TODO enum CodMajorDeviceClass {}
 
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
@@ -594,7 +589,6 @@ impl<'a> From<(esp_bt_gap_cb_event_t, &'a esp_bt_gap_cb_param_t)> for GapEvent<'
                     status: param.acl_conn_cmpl_stat.stat.try_into().unwrap(),
                     handle: param.acl_conn_cmpl_stat.handle,
                 },
-                // #[doc = "< ACL disconnection complete status event"]
                 esp_bt_gap_cb_event_t_ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT => {
                     Self::AclDisconnected {
                         bd_addr: param.acl_disconn_cmpl_stat.bda.into(),

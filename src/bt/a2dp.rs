@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use core::{
     borrow::Borrow,
     convert::TryInto,

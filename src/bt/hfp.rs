@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 #[cfg(esp_idf_bt_hfp_client_enable)]
 pub mod client {
     use core::{

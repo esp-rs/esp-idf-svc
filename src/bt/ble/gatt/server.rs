@@ -1,7 +1,7 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
 use esp_idf_sys::*;
-use log::{debug, info};
+use log::info;
 
 use crate::bt::{BleEnabled, BtCallback, BtDriver, BtUuid};
 

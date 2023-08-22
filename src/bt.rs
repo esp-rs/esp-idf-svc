@@ -19,7 +19,8 @@ extern crate alloc;
 pub mod a2dp;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_a2dp_enable))]
 pub mod avrc;
-pub mod ble;
+// TODO: Future
+// pub mod ble;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled))]
 pub mod gap;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_hfp_enable))]
@@ -291,6 +292,7 @@ where
 
         #[cfg(esp32)]
         let mut bt_cfg = esp_bt_controller_config_t {
+            magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
             controller_task_stack_size: ESP_TASK_BT_CONTROLLER_STACK as _,
             controller_task_prio: ESP_TASK_BT_CONTROLLER_PRIO as _,
             hci_uart_no: BT_HCI_UART_NO_DEFAULT as _,
@@ -313,7 +315,6 @@ where
             pcm_polar: CONFIG_BTDM_CTRL_PCM_POLAR_EFF as _,
             hli: BTDM_CTRL_HLI != 0,
             dup_list_refresh_period: SCAN_DUPL_CACHE_REFRESH_PERIOD as _,
-            magic: ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,
         };
 
         #[cfg(esp32c3)]
@@ -398,10 +399,10 @@ where
 
         // ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 
-        info!("Init bluetooth controller.");
+        info!("Init bluetooth controller");
         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
 
-        info!("Enable bluetooth controller.");
+        info!("Enable bluetooth controller");
         esp!(unsafe { esp_bt_controller_enable(M::mode()) })?;
 
         info!("Init bluedroid");

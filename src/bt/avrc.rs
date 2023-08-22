@@ -1,3 +1,6 @@
+#![allow(non_upper_case_globals)]
+#![allow(non_snake_case)]
+
 use enumset::EnumSetType;
 
 use esp_idf_sys::*;
