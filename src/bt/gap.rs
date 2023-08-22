@@ -10,7 +10,7 @@ use core::{borrow::Borrow, marker::PhantomData};
 
 use enumset::{EnumSet, EnumSetType};
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
 use log::info;
 

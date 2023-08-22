@@ -3,7 +3,7 @@
 
 use enumset::EnumSetType;
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
 use num_enum::TryFromPrimitive;
 
@@ -267,8 +267,6 @@ pub mod controller {
     };
 
     use enumset::EnumSet;
-
-    use esp_idf_sys::*;
 
     use log::info;
 

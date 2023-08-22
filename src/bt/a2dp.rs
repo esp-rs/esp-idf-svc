@@ -9,7 +9,7 @@ use core::{
     time::Duration,
 };
 
-use esp_idf_sys::*;
+use crate::sys::*;
 use log::{debug, info};
 use num_enum::TryFromPrimitive;
 

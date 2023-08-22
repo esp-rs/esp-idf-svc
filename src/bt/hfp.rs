@@ -11,7 +11,7 @@ pub mod client {
         sync::atomic::{AtomicBool, Ordering},
     };
 
-    use esp_idf_sys::*;
+    use crate::sys::*;
 
     use log::{debug, info};
 

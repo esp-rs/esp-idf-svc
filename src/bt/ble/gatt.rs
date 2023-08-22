@@ -1,4 +1,4 @@
-use esp_idf_sys::{
+use crate::sys::{
     esp_attr_control_t, esp_attr_value_t, esp_gatt_char_prop_t, esp_gatt_perm_t, ESP_GATT_AUTO_RSP,
     ESP_GATT_RSP_BY_APP,
 };

@@ -3,10 +3,10 @@ use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use esp_idf_hal::modem::BluetoothModemPeripheral;
-use esp_idf_hal::peripheral::Peripheral;
+use crate::hal::modem::BluetoothModemPeripheral;
+use crate::hal::peripheral::Peripheral;
 
-use esp_idf_sys::*;
+use crate::sys::*;
 use log::info;
 
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
@@ -319,82 +319,82 @@ where
 
         #[cfg(esp32c3)]
         let mut bt_cfg = esp_bt_controller_config_t {
-            magic: esp_idf_sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL,
-            version: esp_idf_sys::ESP_BT_CTRL_CONFIG_VERSION,
-            controller_task_stack_size: esp_idf_sys::ESP_TASK_BT_CONTROLLER_STACK as _,
-            controller_task_prio: esp_idf_sys::ESP_TASK_BT_CONTROLLER_PRIO as _,
-            controller_task_run_cpu: esp_idf_sys::CONFIG_BT_CTRL_PINNED_TO_CORE as _,
-            bluetooth_mode: esp_idf_sys::CONFIG_BT_CTRL_MODE_EFF as _,
-            ble_max_act: esp_idf_sys::CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as _,
-            sleep_mode: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_MODE_EFF as _,
-            sleep_clock: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as _,
-            ble_st_acl_tx_buf_nb: esp_idf_sys::CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as _,
-            ble_hw_cca_check: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_EFF as _,
-            ble_adv_dup_filt_max: esp_idf_sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as _,
-            ce_len_type: esp_idf_sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
-            hci_tl_type: esp_idf_sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
+            magic: crate::sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL,
+            version: crate::sys::ESP_BT_CTRL_CONFIG_VERSION,
+            controller_task_stack_size: crate::sys::ESP_TASK_BT_CONTROLLER_STACK as _,
+            controller_task_prio: crate::sys::ESP_TASK_BT_CONTROLLER_PRIO as _,
+            controller_task_run_cpu: crate::sys::CONFIG_BT_CTRL_PINNED_TO_CORE as _,
+            bluetooth_mode: crate::sys::CONFIG_BT_CTRL_MODE_EFF as _,
+            ble_max_act: crate::sys::CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as _,
+            sleep_mode: crate::sys::CONFIG_BT_CTRL_SLEEP_MODE_EFF as _,
+            sleep_clock: crate::sys::CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as _,
+            ble_st_acl_tx_buf_nb: crate::sys::CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as _,
+            ble_hw_cca_check: crate::sys::CONFIG_BT_CTRL_HW_CCA_EFF as _,
+            ble_adv_dup_filt_max: crate::sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as _,
+            ce_len_type: crate::sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
+            hci_tl_type: crate::sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
             hci_tl_funcs: std::ptr::null_mut(),
-            txant_dft: esp_idf_sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
-            rxant_dft: esp_idf_sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
-            txpwr_dft: esp_idf_sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
-            cfg_mask: esp_idf_sys::CFG_MASK,
-            scan_duplicate_mode: esp_idf_sys::SCAN_DUPLICATE_MODE as _,
-            scan_duplicate_type: esp_idf_sys::SCAN_DUPLICATE_TYPE_VALUE as _,
-            normal_adv_size: esp_idf_sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as _,
-            mesh_adv_size: esp_idf_sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
+            txant_dft: crate::sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
+            rxant_dft: crate::sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
+            txpwr_dft: crate::sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
+            cfg_mask: crate::sys::CFG_MASK,
+            scan_duplicate_mode: crate::sys::SCAN_DUPLICATE_MODE as _,
+            scan_duplicate_type: crate::sys::SCAN_DUPLICATE_TYPE_VALUE as _,
+            normal_adv_size: crate::sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as _,
+            mesh_adv_size: crate::sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
             coex_phy_coded_tx_rx_time_limit:
-                esp_idf_sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
-            slave_ce_len_min: esp_idf_sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
-            hw_recorrect_en: esp_idf_sys::AGC_RECORRECT_EN as _,
-            cca_thresh: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
+                crate::sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
+            hw_target_code: crate::sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
+            slave_ce_len_min: crate::sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
+            hw_recorrect_en: crate::sys::AGC_RECORRECT_EN as _,
+            cca_thresh: crate::sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
             coex_param_en: false,
             coex_use_hooks: false,
-            ble_50_feat_supp: esp_idf_sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
-            dup_list_refresh_period: esp_idf_sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
-            scan_backoff_upperlimitmax: esp_idf_sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _,
+            ble_50_feat_supp: crate::sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
+            dup_list_refresh_period: crate::sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
+            scan_backoff_upperlimitmax: crate::sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _,
         };
 
         #[cfg(esp32s3)]
         let mut bt_cfg = esp_bt_controller_config_t {
-            magic: esp_idf_sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL as _,
-            version: esp_idf_sys::ESP_BT_CTRL_CONFIG_VERSION as _,
-            controller_task_stack_size: esp_idf_sys::ESP_TASK_BT_CONTROLLER_STACK as _,
-            controller_task_prio: esp_idf_sys::ESP_TASK_BT_CONTROLLER_PRIO as _,
-            controller_task_run_cpu: esp_idf_sys::CONFIG_BT_CTRL_PINNED_TO_CORE as _,
-            bluetooth_mode: esp_idf_sys::CONFIG_BT_CTRL_MODE_EFF as _,
-            ble_max_act: esp_idf_sys::CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as _,
-            sleep_mode: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_MODE_EFF as _,
-            sleep_clock: esp_idf_sys::CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as _,
-            ble_st_acl_tx_buf_nb: esp_idf_sys::CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as _,
-            ble_hw_cca_check: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_EFF as _,
-            ble_adv_dup_filt_max: esp_idf_sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as _,
+            magic: crate::sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL as _,
+            version: crate::sys::ESP_BT_CTRL_CONFIG_VERSION as _,
+            controller_task_stack_size: crate::sys::ESP_TASK_BT_CONTROLLER_STACK as _,
+            controller_task_prio: crate::sys::ESP_TASK_BT_CONTROLLER_PRIO as _,
+            controller_task_run_cpu: crate::sys::CONFIG_BT_CTRL_PINNED_TO_CORE as _,
+            bluetooth_mode: crate::sys::CONFIG_BT_CTRL_MODE_EFF as _,
+            ble_max_act: crate::sys::CONFIG_BT_CTRL_BLE_MAX_ACT_EFF as _,
+            sleep_mode: crate::sys::CONFIG_BT_CTRL_SLEEP_MODE_EFF as _,
+            sleep_clock: crate::sys::CONFIG_BT_CTRL_SLEEP_CLOCK_EFF as _,
+            ble_st_acl_tx_buf_nb: crate::sys::CONFIG_BT_CTRL_BLE_STATIC_ACL_TX_BUF_NB as _,
+            ble_hw_cca_check: crate::sys::CONFIG_BT_CTRL_HW_CCA_EFF as _,
+            ble_adv_dup_filt_max: crate::sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as _,
             coex_param_en: false,
-            ce_len_type: esp_idf_sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
+            ce_len_type: crate::sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
             coex_use_hooks: false,
-            hci_tl_type: esp_idf_sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
+            hci_tl_type: crate::sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
             hci_tl_funcs: std::ptr::null_mut(),
-            txant_dft: esp_idf_sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
-            rxant_dft: esp_idf_sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
-            txpwr_dft: esp_idf_sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
-            cfg_mask: esp_idf_sys::CFG_MASK as _,
-            scan_duplicate_mode: esp_idf_sys::SCAN_DUPLICATE_MODE as _,
-            scan_duplicate_type: esp_idf_sys::SCAN_DUPLICATE_TYPE_VALUE as _,
-            normal_adv_size: esp_idf_sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as _,
-            mesh_adv_size: esp_idf_sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
+            txant_dft: crate::sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
+            rxant_dft: crate::sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
+            txpwr_dft: crate::sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
+            cfg_mask: crate::sys::CFG_MASK as _,
+            scan_duplicate_mode: crate::sys::SCAN_DUPLICATE_MODE as _,
+            scan_duplicate_type: crate::sys::SCAN_DUPLICATE_TYPE_VALUE as _,
+            normal_adv_size: crate::sys::NORMAL_SCAN_DUPLICATE_CACHE_SIZE as _,
+            mesh_adv_size: crate::sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
             coex_phy_coded_tx_rx_time_limit:
-                esp_idf_sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
+                crate::sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
             #[cfg(esp_idf_version_major = "4")]
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0 as _,
+            hw_target_code: crate::sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0 as _,
             #[cfg(not(esp_idf_version_major = "4"))]
-            hw_target_code: esp_idf_sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
-            slave_ce_len_min: esp_idf_sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
-            hw_recorrect_en: esp_idf_sys::AGC_RECORRECT_EN as _,
-            cca_thresh: esp_idf_sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
+            hw_target_code: crate::sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
+            slave_ce_len_min: crate::sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
+            hw_recorrect_en: crate::sys::AGC_RECORRECT_EN as _,
+            cca_thresh: crate::sys::CONFIG_BT_CTRL_HW_CCA_VAL as _,
             ..Default::default() // TODO
-                                 // ble_50_feat_supp: esp_idf_sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
-                                 // dup_list_refresh_period: esp_idf_sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
-                                 // scan_backoff_upperlimitmax: esp_idf_sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _
+                                 // ble_50_feat_supp: crate::sys::BT_CTRL_50_FEATURE_SUPPORT != 0,
+                                 // dup_list_refresh_period: crate::sys::DUPL_SCAN_CACHE_REFRESH_PERIOD as _,
+                                 // scan_backoff_upperlimitmax: crate::sys::BT_CTRL_SCAN_BACKOFF_UPPERLIMITMAX as _
         };
 
         // ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));

@@ -1,6 +1,6 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
-use esp_idf_sys::*;
+use crate::sys::*;
 use log::info;
 
 use crate::bt::{BleEnabled, BtCallback, BtDriver, BtUuid};
