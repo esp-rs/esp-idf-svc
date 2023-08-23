@@ -45,22 +45,87 @@ pub enum InqMode {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Eir<'a>(*const ffi::c_void, PhantomData<&'a ()>);
+pub struct Eir<'a>(&'a [u8]);
 
 impl<'a> Eir<'a> {
-    pub fn flags(&self) -> Option<EnumSet<EirFlags>> {
-        todo!()
+    pub fn flags<'d, M, T>(&self, _gap: &EspGap<'d, M, T>) -> Option<EnumSet<EirFlags>>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::Flags)
+            .map(|slice| EnumSet::from_repr(slice[0]))
     }
 
-    pub fn uuid(&self) -> Option<&BtUuid> {
-        todo!()
+    pub fn uuid16<'d, M, T>(&self) -> Option<BtUuid>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::Uuid16)
+            .map(|slice| BtUuid::uuid16(u16::from_ne_bytes([slice[0], slice[1]])))
+    }
+
+    pub fn uuid32<'d, M, T>(&self) -> Option<BtUuid>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::Uuid32).map(|slice| {
+            BtUuid::uuid32(u32::from_ne_bytes([slice[0], slice[1], slice[2], slice[3]]))
+        })
+    }
+
+    pub fn uuid128<'d, M, T>(&self) -> Option<BtUuid>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::Uuid128).map(|slice| {
+            BtUuid::uuid128(u128::from_ne_bytes([
+                slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+                slice[8], slice[9], slice[10], slice[11], slice[12], slice[13], slice[14],
+                slice[15],
+            ]))
+        })
+    }
+
+    pub fn short_local_name<'d, M, T>(&self) -> Option<&str>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::ShortLocalName)
+            .map(|slice| unsafe { core::str::from_utf8_unchecked(slice) })
+    }
+
+    pub fn local_name<'d, M, T>(&self) -> Option<&str>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::LocalName)
+            .map(|slice| unsafe { core::str::from_utf8_unchecked(slice) })
+    }
+
+    pub fn url<'d, M, T>(&self) -> Option<&str>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::Url)
+            .map(|slice| unsafe { core::str::from_utf8_unchecked(slice) })
+    }
+
+    pub fn manufacturer_data<'d, M, T>(&self) -> Option<&[u8]>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>>,
+    {
+        self.resolve(EirType::ManufacturerData)
     }
 
     // pub fn uui16_incomplete(&self) -> Option<&[u8]> {
-    //     todo!()
-    // }
-
-    // pub fn uuid32(&self) -> Option<&[u8]> {
     //     todo!()
     // }
 
@@ -76,30 +141,30 @@ impl<'a> Eir<'a> {
     //     todo!()
     // }
 
-    pub fn short_local_name(&self) -> Option<&str> {
-        todo!()
+    fn resolve(&self, eir_type: EirType) -> Option<&[u8]> {
+        let mut len = self.0.len() as _;
+        let addr = unsafe {
+            esp_bt_gap_resolve_eir_data(self.0.as_ptr() as *mut _, eir_type as _, &mut len)
+        };
+
+        if addr.is_null() {
+            None
+        } else {
+            Some(unsafe { core::slice::from_raw_parts(addr, len as _) })
+        }
     }
+}
 
-    pub fn local_name(&self) -> Option<&str> {
-        todo!()
+impl<'a> From<&'a [u8]> for Eir<'a> {
+    fn from(value: &'a [u8]) -> Self {
+        Self(value)
     }
+}
 
-    pub fn url(&self) -> Option<&str> {
-        todo!()
+impl<'a> From<Eir<'a>> for &'a [u8] {
+    fn from(value: Eir<'a>) -> Self {
+        value.0
     }
-
-    pub fn manufacturer_data(&self) -> Option<&[u8]> {
-        todo!()
-    }
-
-    // pub fn resolve_eir_data(&self, eir: &[u8], eir_type: EirType) -> Result<&[u8], EspError> {
-    //     let mut len = 0;
-    //     let addr = unsafe {
-    //         esp_bt_gap_resolve_eir_data(eir.as_ptr() as *mut _, eir_type.into(), &mut len)
-    //     };
-
-    //     Ok(unsafe { core::slice::from_raw_parts(addr, len as _) })
-    // }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
@@ -178,20 +243,19 @@ impl<'a> From<&esp_bt_eir_data_t> for EirData<'a> {
     }
 }
 
-#[derive(Debug, EnumSetType, TryFromPrimitive)]
-#[enumset(repr = "u32")]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, TryFromPrimitive)]
 #[repr(u32)]
 pub enum CodMode {
-    SetMajorMinor = 0,   // overwrite major, minor class
-    SetServiceClass = 1, // set the bits in the input, the current bit will remain
-    ClrServiceClass = 2, // clear the bits in the input, others will remain
-    SetAll = 3,          // overwrite major, minor, set the bits in service class
-    Init = 4,            // overwrite major, minor, and service class
+    SetMajorMinor = esp_bt_cod_mode_t_ESP_BT_SET_COD_MAJOR_MINOR,
+    SetServicdeClass = esp_bt_cod_mode_t_ESP_BT_SET_COD_SERVICE_CLASS,
+    ClearServiceClass = esp_bt_cod_mode_t_ESP_BT_CLR_COD_SERVICE_CLASS,
+    SetAll = esp_bt_cod_mode_t_ESP_BT_SET_COD_ALL,
+    Init = esp_bt_cod_mode_t_ESP_BT_INIT_COD,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
-enum CodService {
+pub enum CodMajorDeviceType {
     Miscellaneous = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_MISC,
     Computer = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_COMPUTER,
     Phone = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_PHONE,
@@ -205,19 +269,39 @@ enum CodService {
     Other = esp_bt_cod_major_dev_t_ESP_BT_COD_MAJOR_DEV_UNCATEGORIZED,
 }
 
-// TODO enum CodMajorDeviceClass {}
+#[derive(Debug, EnumSetType, TryFromPrimitive)]
+#[enumset(repr = "u16")]
+#[repr(u16)]
+pub enum CodServiceClass {
+    LimitedDiscoverable = 0, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_LMTD_DISCOVER: esp_bt_cod_srvc_t = 1;
+    Unknown1 = 1,
+    Unknown2 = 2,
+    Positioning = 3, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_POSITIONING: esp_bt_cod_srvc_t = 8;
+    Networking = 4, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_NETWORKING: esp_bt_cod_srvc_t = 16;
+    Rendering = 5,  //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_RENDERING: esp_bt_cod_srvc_t = 32;
+    Capturing = 6,  //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_CAPTURING: esp_bt_cod_srvc_t = 64;
+    ObjectTransfer = 7, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_OBJ_TRANSFER: esp_bt_cod_srvc_t = 128;
+    Audio = 8, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_AUDIO: esp_bt_cod_srvc_t = 256;
+    Telephony = 9, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_TELEPHONY: esp_bt_cod_srvc_t = 512;
+    Information = 10, //pub const esp_bt_cod_srvc_t_ESP_BT_COD_SRVC_INFORMATION: esp_bt_cod_srvc_t = 1024;
+    Unknown3 = 11,
+    Unknown4 = 12,
+    Unknown5 = 13,
+    Unknown6 = 14,
+    Unknown7 = 15,
+}
 
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
 pub struct Cod(esp_bt_cod_t);
 
 impl Cod {
-    pub fn new(major: u32, minor: u32, service: u32) -> Self {
+    pub fn new(major: CodMajorDeviceType, minor: u32, services: EnumSet<CodServiceClass>) -> Self {
         let mut cod: esp_bt_cod_t = Default::default();
 
+        cod.set_major(major as _);
         cod.set_minor(minor);
-        cod.set_major(major);
-        cod.set_service(service);
+        cod.set_service(services.as_repr() as _);
 
         Self(cod)
     }
@@ -226,16 +310,16 @@ impl Cod {
         self.0
     }
 
-    pub fn major(&self) -> u32 {
-        self.0.major()
+    pub fn major(&self) -> CodMajorDeviceType {
+        self.0.major().try_into().unwrap()
     }
 
     pub fn minor(&self) -> u32 {
         self.0.minor()
     }
 
-    pub fn service(&self) -> u32 {
-        self.0.service()
+    pub fn services(&self) -> EnumSet<CodServiceClass> {
+        EnumSet::from_repr((self.0.service() & 0xffff) as u16)
     }
 }
 
@@ -265,7 +349,7 @@ impl Eq for Cod {}
 pub enum DeviceProp<'a> {
     BdName(&'a str),
     Cod(Cod),
-    Rssi(u8),
+    Rssi(i8),
     Eir(Eir<'a>),
 }
 
@@ -288,16 +372,20 @@ impl<'a> PropData<'a> {
                     )))
                 }
                 esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_COD => {
-                    let esp_cod = (self.data.val as *mut esp_bt_cod_t).as_ref().unwrap();
-                    DeviceProp::Cod((*esp_cod).into())
+                    let esp_cod: esp_bt_cod_t = core::mem::transmute(self.data.val as u32);
+                    DeviceProp::Cod(esp_cod.into())
                 }
                 esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_RSSI => {
-                    let rssi = (self.data.val as *mut u8).as_ref().unwrap();
-                    DeviceProp::Rssi(*rssi)
+                    let rssi = self.data.val as u32 as i8;
+                    DeviceProp::Rssi(rssi)
                 }
-                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_EIR => {
-                    DeviceProp::Eir(Eir(self.data.val, PhantomData))
-                }
+                esp_bt_gap_dev_prop_type_t_ESP_BT_GAP_DEV_PROP_EIR => DeviceProp::Eir(
+                    core::slice::from_raw_parts(
+                        self.data.val as *mut u8 as *const _,
+                        self.data.len as _,
+                    )
+                    .into(),
+                ),
                 _ => unreachable!(),
             }
         }
@@ -680,8 +768,8 @@ where
         Ok(cod.into())
     }
 
-    pub fn set_cod(&self, cod: Cod, mode: EnumSet<CodMode>) -> Result<(), EspError> {
-        esp!(unsafe { esp_bt_gap_set_cod(cod.into(), mode.as_repr()) })
+    pub fn set_cod(&self, cod: Cod, mode: CodMode) -> Result<(), EspError> {
+        esp!(unsafe { esp_bt_gap_set_cod(cod.into(), mode as _) })
     }
 
     pub fn request_rssi_delta(&self, bd_addr: &BdAddr) -> Result<(), EspError> {
