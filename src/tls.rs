@@ -1,16 +1,13 @@
 //! Type safe abstraction for esp-tls
 
-use core::{
-    ffi::CStr,
-    fmt::{Debug, Display},
-    time::Duration,
-};
+use core::{fmt::Debug, time::Duration};
 
 use embedded_svc::io;
 
 use crate::{
     errors::EspIOError,
-    sys::{EspError, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM, ESP_FAIL},
+    private::cstr::{c_char, cstr_arr_from_str_slice, cstr_from_str_truncating, CStr},
+    sys::{self, EspError, ESP_ERR_NO_MEM, ESP_FAIL},
 };
 
 /// see https://www.ietf.org/rfc/rfc3280.txt ub-common-name-length
@@ -33,7 +30,7 @@ impl EspTls {
     /// * `ESP_ERR_NO_MEM` if TLS context could not be allocated
     /// * `ESP_FAIL` if connection could not be established
     pub fn new(host: &str, port: u16, cfg: &Config) -> Result<Self, EspError> {
-        let mut rcfg: esp_idf_sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
+        let mut rcfg: sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
 
         if let Some(ca_cert) = cfg.ca_cert {
             rcfg.__bindgen_anon_1.cacert_buf = ca_cert.data().as_ptr();
@@ -51,9 +48,8 @@ impl EspTls {
         }
 
         if let Some(ckp) = cfg.client_key_password {
-            // TODO: maybe this is not actually required to be NUL-terminated
             rcfg.clientkey_password = ckp.as_ptr() as *const u8;
-            rcfg.clientkey_password_len = ckp.to_bytes().len() as u32;
+            rcfg.clientkey_password_len = ckp.len() as u32;
         }
 
         // allow up to 9 protocols
@@ -71,14 +67,14 @@ impl EspTls {
 
         if let Some(common_name) = cfg.common_name {
             let mut common_name_buf = [0; MAX_COMMON_NAME_LENGTH + 1];
-            rcfg.common_name = cstr_from_str(common_name, &mut common_name_buf).as_ptr();
+            rcfg.common_name = cstr_from_str_truncating(common_name, &mut common_name_buf).as_ptr();
         }
 
         rcfg.skip_common_name = cfg.skip_common_name;
 
-        let mut raw_kac: esp_idf_sys::tls_keep_alive_cfg;
+        let mut raw_kac: sys::tls_keep_alive_cfg;
         if let Some(kac) = &cfg.keep_alive_cfg {
-            raw_kac = esp_idf_sys::tls_keep_alive_cfg {
+            raw_kac = sys::tls_keep_alive_cfg {
                 keep_alive_enable: kac.enable,
                 keep_alive_idle: kac.idle.as_secs() as i32,
                 keep_alive_interval: kac.interval.as_secs() as i32,
@@ -87,9 +83,9 @@ impl EspTls {
             rcfg.keep_alive_cfg = &mut raw_kac as *mut _;
         }
 
-        let mut raw_psk: esp_idf_sys::psk_key_hint;
+        let mut raw_psk: sys::psk_key_hint;
         if let Some(psk) = &cfg.psk_hint_key {
-            raw_psk = esp_idf_sys::psk_key_hint {
+            raw_psk = sys::psk_key_hint {
                 key: psk.key.as_ptr(),
                 key_size: psk.key.len(),
                 hint: psk.hint.as_ptr(),
@@ -97,19 +93,20 @@ impl EspTls {
             rcfg.psk_hint_key = &mut raw_psk as *mut _;
         }
 
+        #[cfg(esp_idf_mbedtls_certificate_bundle)]
         if cfg.use_crt_bundle_attach {
-            rcfg.crt_bundle_attach = Some(esp_idf_sys::esp_crt_bundle_attach);
+            rcfg.crt_bundle_attach = Some(sys::esp_crt_bundle_attach);
         }
 
         rcfg.is_plain_tcp = cfg.is_plain_tcp;
         rcfg.if_name = std::ptr::null_mut();
 
-        let tls = unsafe { esp_idf_sys::esp_tls_init() };
+        let tls = unsafe { sys::esp_tls_init() };
         if tls == std::ptr::null_mut() {
             return Err(EspError::from_infallible::<ESP_ERR_NO_MEM>());
         }
         let ret = unsafe {
-            esp_idf_sys::esp_tls_conn_new_sync(
+            sys::esp_tls_conn_new_sync(
                 host.as_bytes().as_ptr() as *const i8,
                 host.len() as i32,
                 port as i32,
@@ -125,7 +122,7 @@ impl EspTls {
             })
         } else {
             unsafe {
-                esp_idf_sys::esp_tls_conn_destroy(tls);
+                sys::esp_tls_conn_destroy(tls);
             }
 
             Err(EspError::from_infallible::<ESP_FAIL>())
@@ -166,13 +163,16 @@ impl io::Write for EspTls {
 }
 
 pub struct EspTlsRead {
-    raw: *mut esp_idf_sys::esp_tls,
+    raw: *mut sys::esp_tls,
 }
 
 impl EspTlsRead {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         // cannot call esp_tls_conn_read bc it's inline
-        //let ret = unsafe { esp_idf_sys::esp_tls_conn_read(self.raw, buf.as_mut_ptr(), buf.len()) };
         let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
         let read_func = esp_tls.read.unwrap();
         let ret = unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) };
@@ -196,13 +196,16 @@ impl io::Read for EspTlsRead {
 }
 
 pub struct EspTlsWrite {
-    raw: *mut esp_idf_sys::esp_tls,
+    raw: *mut sys::esp_tls,
 }
 
 impl EspTlsWrite {
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
         // cannot call esp_tls_conn_write bc it's inline
-        //let ret = unsafe { esp_idf_sys::esp_tls_conn_write(self.raw, buf.as_ptr(), buf.len()) };
         let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
         let write_func = esp_tls.write.unwrap();
         let ret = unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) };
@@ -231,7 +234,7 @@ impl io::Write for EspTlsWrite {
 impl Drop for EspTls {
     fn drop(&mut self) {
         unsafe {
-            esp_idf_sys::esp_tls_conn_destroy(self.reader.raw);
+            sys::esp_tls_conn_destroy(self.reader.raw);
         }
     }
 }
@@ -242,7 +245,7 @@ pub struct Config<'a> {
     pub ca_cert: Option<X509<'a>>,
     pub client_cert: Option<X509<'a>>,
     pub client_key: Option<X509<'a>>,
-    pub client_key_password: Option<&'a CStr>,
+    pub client_key_password: Option<&'a str>,
     pub non_block: bool,
     pub use_secure_element: bool,
     pub timeout_ms: u32,
@@ -252,10 +255,12 @@ pub struct Config<'a> {
     pub keep_alive_cfg: Option<KeepAliveConfig>,
     pub psk_hint_key: Option<PskHintKey<'a>>,
     /// whether to use esp_crt_bundle_attach, see https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/protocols/esp_crt_bundle.html
+    #[cfg(esp_idf_mbedtls_certificate_bundle)]
     pub use_crt_bundle_attach: bool,
     // TODO ds_data not implemented
     pub is_plain_tcp: bool,
-    pub if_name: esp_idf_sys::ifreq,
+    #[cfg(esp_idf_comp_lwip_enabled)]
+    pub if_name: sys::ifreq,
 }
 
 impl<'a> Default for Config<'a> {
@@ -274,8 +279,10 @@ impl<'a> Default for Config<'a> {
             skip_common_name: Default::default(),
             keep_alive_cfg: Default::default(),
             psk_hint_key: Default::default(),
+            #[cfg(esp_idf_mbedtls_certificate_bundle)]
             use_crt_bundle_attach: Default::default(),
             is_plain_tcp: Default::default(),
+            #[cfg(esp_idf_comp_lwip_enabled)]
             if_name: Default::default(),
         }
     }
@@ -296,58 +303,6 @@ pub struct KeepAliveConfig {
 pub struct PskHintKey<'a> {
     pub key: &'a [u8],
     pub hint: &'a CStr,
-}
-
-/// str to cstr, will be truncated if str is larger than buf.len() - 1
-///
-/// # Panics
-///
-/// * Panics if buffer is empty.
-fn cstr_from_str<'a>(rust_str: &str, buf: &'a mut [u8]) -> &'a CStr {
-    assert!(buf.len() > 0);
-
-    let max_str_size = buf.len() - 1; // account for NUL
-    let truncated_str = &rust_str[..max_str_size.min(rust_str.len())];
-    buf[..truncated_str.len()].copy_from_slice(truncated_str.as_bytes());
-    buf[truncated_str.len()] = b'\0';
-
-    CStr::from_bytes_with_nul(&buf[..truncated_str.len() + 1]).unwrap()
-}
-
-/// Convert slice of rust strs to NULL-terminated fixed size array of c string pointers
-///
-/// # Panics
-///
-/// * Panics if cbuf is empty.
-/// * Panics if N is <= 1
-fn cstr_arr_from_str_slice<const N: usize>(
-    rust_strs: &[&str],
-    mut cbuf: &mut [u8],
-) -> Result<[*const i8; N], EspError> {
-    assert!(N > 1);
-    assert!(cbuf.len() > 0);
-
-    // ensure last element stays NULL
-    if rust_strs.len() > N - 1 {
-        return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
-    }
-
-    let mut cstrs = [std::ptr::null(); N];
-
-    for (i, s) in rust_strs.into_iter().enumerate() {
-        let max_str_size = cbuf.len() - 1; // account for NUL
-        if s.len() > max_str_size {
-            return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
-        }
-        cbuf[..s.len()].copy_from_slice(s.as_bytes());
-        cbuf[s.len()] = b'\0';
-        let cstr = CStr::from_bytes_with_nul(&cbuf[..s.len() + 1]).unwrap();
-        cstrs[i] = cstr.as_ptr();
-
-        cbuf = &mut cbuf[s.len() + 1..];
-    }
-
-    Ok(cstrs)
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -394,59 +349,5 @@ impl<'a> X509<'a> {
 impl<'a> Debug for X509<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         write!(f, "X509(...)")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::CStr;
-
-    use crate::{cstr_arr_from_str_slice, cstr_from_str};
-
-    #[test]
-    fn cstr_from_str_happy() {
-        let mut same_size = [0u8; 6];
-        let hello = cstr_from_str("Hello", &mut same_size);
-        assert_eq!(hello.to_bytes(), b"Hello");
-
-        let mut larger = [0u8; 42];
-        let hello = cstr_from_str("Hello", &mut larger);
-        assert_eq!(hello.to_bytes(), b"Hello");
-    }
-
-    #[test]
-    fn cstr_from_str_unhappy() {
-        let mut smaller = [0u8; 6];
-        let hello = cstr_from_str("Hello World", &mut smaller);
-        assert_eq!(hello.to_bytes(), b"Hello");
-    }
-
-    #[test]
-    fn cstr_arr_happy() {
-        let mut same_size = [0u8; 13];
-        let hello = cstr_arr_from_str_slice::<3>(&["Hello", "World"], &mut same_size).unwrap();
-        assert_eq!(unsafe { CStr::from_ptr(hello[0]) }.to_bytes(), b"Hello");
-        assert_eq!(unsafe { CStr::from_ptr(hello[1]) }.to_bytes(), b"World");
-        assert_eq!(hello[2], std::ptr::null());
-    }
-
-    #[test]
-    #[should_panic]
-    fn cstr_arr_unhappy_n1() {
-        let mut cbuf = [0u8; 25];
-        let _ = cstr_arr_from_str_slice::<1>(&["Hello"], &mut cbuf);
-    }
-
-    #[test]
-    fn cstr_arr_unhappy_n_too_small() {
-        let mut cbuf = [0u8; 25];
-        assert!(cstr_arr_from_str_slice::<2>(&["Hello", "World"], &mut cbuf).is_err());
-    }
-
-    #[test]
-    #[should_panic]
-    fn cstr_arr_unhappy_cbuf_too_small() {
-        let mut cbuf = [0u8; 12];
-        assert!(cstr_arr_from_str_slice::<3>(&["Hello", "World"], &mut cbuf).is_err());
     }
 }
