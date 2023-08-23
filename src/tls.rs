@@ -20,7 +20,7 @@ pub struct EspTls {
 }
 
 impl EspTls {
-    pub fn new(host: &str, port: u16, cfg: Config) -> Result<Self, EspError> {
+    pub fn new(host: &str, port: u16, cfg: &Config) -> Result<Self, EspError> {
         let mut rcfg: esp_idf_sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
 
         if let Some(ca_cert) = cfg.ca_cert {
@@ -65,7 +65,7 @@ impl EspTls {
         rcfg.skip_common_name = cfg.skip_common_name;
 
         let mut raw_kac: esp_idf_sys::tls_keep_alive_cfg;
-        if let Some(kac) = cfg.keep_alive_cfg {
+        if let Some(kac) = &cfg.keep_alive_cfg {
             raw_kac = esp_idf_sys::tls_keep_alive_cfg {
                 keep_alive_enable: kac.enable,
                 keep_alive_idle: kac.idle.as_secs() as i32,
@@ -76,7 +76,7 @@ impl EspTls {
         }
 
         let mut raw_psk: esp_idf_sys::psk_key_hint;
-        if let Some(psk) = cfg.psk_hint_key {
+        if let Some(psk) = &cfg.psk_hint_key {
             raw_psk = esp_idf_sys::psk_key_hint {
                 key: psk.key.as_ptr(),
                 key_size: psk.key.len(),
