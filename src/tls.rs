@@ -1,22 +1,26 @@
 //! Type safe abstraction for esp-tls
 
-use std::{
+use core::{
     ffi::CStr,
     fmt::{Debug, Display},
-    io::{self, Read, Write},
+    time::Duration,
 };
 
+use embedded_svc::io;
+use esp_idf_sys::{EspError, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM, ESP_FAIL};
+
+use crate::errors::EspIOError;
+
+/// see https://www.ietf.org/rfc/rfc3280.txt ub-common-name-length
+const MAX_COMMON_NAME_LENGTH: usize = 64;
+
 pub struct EspTls {
-    raw: *mut esp_idf_sys::esp_tls,
+    reader: EspTlsRead,
+    writer: EspTlsWrite,
 }
 
 impl EspTls {
-    pub fn new(host: &str, port: i32, cfg: Config) -> Result<Self> {
-        // TODO: where to put async version? seperate struct?
-        let tls = unsafe { esp_idf_sys::esp_tls_init() };
-        if tls == std::ptr::null_mut() {
-            return Err(Error::BadAlloc);
-        }
+    pub fn new(host: &str, port: u16, cfg: Config) -> Result<Self, EspError> {
         let mut rcfg: esp_idf_sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
 
         if let Some(ca_cert) = cfg.ca_cert {
@@ -40,13 +44,11 @@ impl EspTls {
             rcfg.clientkey_password_len = ckp.to_bytes().len() as u32;
         }
 
-        let mut alpn_protos: Vec<*const i8>;
+        // allow up to 9 protocols
+        let mut alpn_protos: [*const i8; 10];
+        let mut alpn_protos_cbuf = [0u8; 99];
         if let Some(protos) = cfg.alpn_protos {
-            alpn_protos = protos
-                .iter()
-                .map(|p| p.as_ptr())
-                .chain(std::iter::once(std::ptr::null()))
-                .collect();
+            alpn_protos = cstr_arr_from_str_slice(protos, &mut alpn_protos_cbuf)?;
             rcfg.alpn_protos = alpn_protos.as_mut_ptr();
         }
 
@@ -54,7 +56,12 @@ impl EspTls {
         rcfg.use_secure_element = cfg.use_secure_element;
         rcfg.timeout_ms = cfg.timeout_ms as i32;
         rcfg.use_global_ca_store = cfg.use_global_ca_store;
-        rcfg.common_name = cfg.common_name.as_ptr();
+
+        if let Some(common_name) = cfg.common_name {
+            let mut common_name_buf = [0; MAX_COMMON_NAME_LENGTH + 1];
+            rcfg.common_name = cstr_from_str(common_name, &mut common_name_buf).as_ptr();
+        }
+
         rcfg.skip_common_name = cfg.skip_common_name;
 
         let mut raw_kac: esp_idf_sys::tls_keep_alive_cfg;
@@ -81,61 +88,126 @@ impl EspTls {
         rcfg.is_plain_tcp = cfg.is_plain_tcp;
         rcfg.if_name = std::ptr::null_mut();
 
+        let tls = unsafe { esp_idf_sys::esp_tls_init() };
+        if tls == std::ptr::null_mut() {
+            return Err(EspError::from_infallible::<ESP_ERR_NO_MEM>());
+        }
         let ret = unsafe {
             esp_idf_sys::esp_tls_conn_new_sync(
                 host.as_bytes().as_ptr() as *const i8,
                 host.len() as i32,
-                port,
+                port as i32,
                 &rcfg,
                 tls,
             )
         };
 
         if ret == 1 {
-            Ok(EspTls { raw: tls })
+            Ok(EspTls {
+                reader: EspTlsRead { raw: tls },
+                writer: EspTlsWrite { raw: tls },
+            })
         } else {
             unsafe {
                 esp_idf_sys::esp_tls_conn_destroy(tls);
             }
 
-            Err(Error::ConnectionNotEstablished)
+            Err(EspError::from_infallible::<ESP_FAIL>())
         }
     }
 
-    pub fn close(self) {}
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
+        self.reader.read(buf)
+    }
+
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
+        self.writer.write(buf)
+    }
+
+    pub fn split(&mut self) -> (&mut EspTlsRead, &mut EspTlsWrite) {
+        (&mut self.reader, &mut self.writer)
+    }
 }
 
-impl Read for EspTls {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+impl io::Io for EspTls {
+    type Error = EspIOError;
+}
+
+impl io::Read for EspTls {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
+        self.read(buf)
+    }
+}
+
+impl io::Write for EspTls {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
+        self.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), EspIOError> {
+        Ok(())
+    }
+}
+
+pub struct EspTlsRead {
+    raw: *mut esp_idf_sys::esp_tls,
+}
+
+impl EspTlsRead {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
         // cannot call esp_tls_conn_read bc it's inline
         //let ret = unsafe { esp_idf_sys::esp_tls_conn_read(self.raw, buf.as_mut_ptr(), buf.len()) };
         let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
         let read_func = esp_tls.read.unwrap();
-        let ret = unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) } as i32;
+        let ret = unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) };
         // ESP docs treat 0 as error, but in Rust it's common to return 0 from `Read::read` to indicate eof
         if ret >= 0 {
             Ok(ret as usize)
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, Error::ReadError(ret)))
+            Err(EspIOError(EspError::from(ret as i32).unwrap()))
         }
     }
 }
 
-impl Write for EspTls {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl io::Io for EspTlsRead {
+    type Error = EspIOError;
+}
+
+impl io::Read for EspTlsRead {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
+        self.read(buf)
+    }
+}
+
+pub struct EspTlsWrite {
+    raw: *mut esp_idf_sys::esp_tls,
+}
+
+impl EspTlsWrite {
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
         // cannot call esp_tls_conn_write bc it's inline
         //let ret = unsafe { esp_idf_sys::esp_tls_conn_write(self.raw, buf.as_ptr(), buf.len()) };
         let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
         let write_func = esp_tls.write.unwrap();
-        let ret = unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) } as i32;
+        let ret = unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) };
         if ret >= 0 {
             Ok(ret as usize)
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, Error::WriteError(ret)))
+            Err(EspIOError(EspError::from(ret as i32).unwrap()))
         }
     }
+}
 
-    fn flush(&mut self) -> std::io::Result<()> {
+impl io::Io for EspTlsWrite {
+    type Error = EspIOError;
+}
+
+impl io::Write for EspTlsWrite {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
+        self.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), EspIOError> {
         Ok(())
     }
 }
@@ -143,13 +215,14 @@ impl Write for EspTls {
 impl Drop for EspTls {
     fn drop(&mut self) {
         unsafe {
-            esp_idf_sys::esp_tls_conn_destroy(self.raw);
+            esp_idf_sys::esp_tls_conn_destroy(self.reader.raw);
         }
     }
 }
 
 pub struct Config<'a> {
-    pub alpn_protos: Option<&'a [&'a CStr]>,
+    /// up to 9 ALPNs allowed, with avg 10 bytes for each name
+    pub alpn_protos: Option<&'a [&'a str]>,
     pub ca_cert: Option<X509<'a>>,
     pub client_cert: Option<X509<'a>>,
     pub client_key: Option<X509<'a>>,
@@ -158,7 +231,7 @@ pub struct Config<'a> {
     pub use_secure_element: bool,
     pub timeout_ms: u32,
     pub use_global_ca_store: bool,
-    pub common_name: &'a CStr,
+    pub common_name: Option<&'a str>,
     pub skip_common_name: bool,
     pub keep_alive_cfg: Option<KeepAliveConfig>,
     pub psk_hint_key: Option<PskHintKey<'a>>,
@@ -207,28 +280,57 @@ pub struct PskHintKey<'a> {
     pub hint: &'a CStr,
 }
 
-#[derive(Clone, Debug)]
-pub enum Error {
-    BadAlloc,
-    ConnectionNotEstablished,
-    ConnectionClosed,
-    ReadError(i32),
-    WriteError(i32),
+/// str to cstr, will be truncated if str is larger than buf.len() - 1
+///
+/// # Panics
+///
+/// * Panics if buffer is empty.
+fn cstr_from_str<'a>(rust_str: &str, buf: &'a mut [u8]) -> &'a CStr {
+    assert!(buf.len() > 0);
+
+    let max_str_size = buf.len() - 1; // account for NUL
+    let truncated_str = &rust_str[..max_str_size.min(rust_str.len())];
+    buf[..truncated_str.len()].copy_from_slice(truncated_str.as_bytes());
+    buf[truncated_str.len()] = b'\0';
+
+    CStr::from_bytes_with_nul(&buf[..truncated_str.len() + 1]).unwrap()
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::BadAlloc => write!(f, "bad alloc"),
-            Error::ConnectionNotEstablished => write!(f, "connection not established"),
-            Error::ConnectionClosed => write!(f, "connection closed"),
-            Error::ReadError(code) => write!(f, "read error {code}"),
-            Error::WriteError(code) => write!(f, "write error {code}"),
-        }
+/// Convert slice of rust strs to NULL-terminated fixed size array of c string pointers
+///
+/// # Panics
+///
+/// * Panics if cbuf is empty.
+/// * Panics if N is <= 1
+fn cstr_arr_from_str_slice<const N: usize>(
+    rust_strs: &[&str],
+    mut cbuf: &mut [u8],
+) -> Result<[*const i8; N], EspError> {
+    assert!(N > 1);
+    assert!(cbuf.len() > 0);
+
+    // ensure last element stays NULL
+    if rust_strs.len() > N - 1 {
+        return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
     }
-}
 
-impl std::error::Error for Error {}
+    let mut cstrs = [std::ptr::null(); N];
+
+    for (i, s) in rust_strs.into_iter().enumerate() {
+        let max_str_size = cbuf.len() - 1; // account for NUL
+        if s.len() > max_str_size {
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
+        }
+        cbuf[..s.len()].copy_from_slice(s.as_bytes());
+        cbuf[s.len()] = b'\0';
+        let cstr = CStr::from_bytes_with_nul(&cbuf[..s.len() + 1]).unwrap();
+        cstrs[i] = cstr.as_ptr();
+
+        cbuf = &mut cbuf[s.len() + 1..];
+    }
+
+    Ok(cstrs)
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct X509<'a>(&'a [u8]);
@@ -274,5 +376,59 @@ impl<'a> X509<'a> {
 impl<'a> Debug for X509<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         write!(f, "X509(...)")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CStr;
+
+    use crate::{cstr_arr_from_str_slice, cstr_from_str};
+
+    #[test]
+    fn cstr_from_str_happy() {
+        let mut same_size = [0u8; 6];
+        let hello = cstr_from_str("Hello", &mut same_size);
+        assert_eq!(hello.to_bytes(), b"Hello");
+
+        let mut larger = [0u8; 42];
+        let hello = cstr_from_str("Hello", &mut larger);
+        assert_eq!(hello.to_bytes(), b"Hello");
+    }
+
+    #[test]
+    fn cstr_from_str_unhappy() {
+        let mut smaller = [0u8; 6];
+        let hello = cstr_from_str("Hello World", &mut smaller);
+        assert_eq!(hello.to_bytes(), b"Hello");
+    }
+
+    #[test]
+    fn cstr_arr_happy() {
+        let mut same_size = [0u8; 13];
+        let hello = cstr_arr_from_str_slice::<3>(&["Hello", "World"], &mut same_size).unwrap();
+        assert_eq!(unsafe { CStr::from_ptr(hello[0]) }.to_bytes(), b"Hello");
+        assert_eq!(unsafe { CStr::from_ptr(hello[1]) }.to_bytes(), b"World");
+        assert_eq!(hello[2], std::ptr::null());
+    }
+
+    #[test]
+    #[should_panic]
+    fn cstr_arr_unhappy_n1() {
+        let mut cbuf = [0u8; 25];
+        let _ = cstr_arr_from_str_slice::<1>(&["Hello"], &mut cbuf);
+    }
+
+    #[test]
+    fn cstr_arr_unhappy_n_too_small() {
+        let mut cbuf = [0u8; 25];
+        assert!(cstr_arr_from_str_slice::<2>(&["Hello", "World"], &mut cbuf).is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn cstr_arr_unhappy_cbuf_too_small() {
+        let mut cbuf = [0u8; 12];
+        assert!(cstr_arr_from_str_slice::<3>(&["Hello", "World"], &mut cbuf).is_err());
     }
 }
