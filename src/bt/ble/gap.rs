@@ -10,7 +10,7 @@ use crate::sys::*;
 use log::{debug, info};
 
 use crate::{
-    bt::{BleEnabled, BtCallback, BtDriver, BtUuid},
+    bt::{BdAddr, BleEnabled, BtCallback, BtDriver, BtStatus, BtUuid},
     private::cstr::to_cstring_arg,
 };
 
@@ -230,17 +230,21 @@ impl<'a> From<&'a Configuration<'a>> for esp_ble_adv_data_t {
     }
 }
 
-#[derive(Clone)]
-pub enum GapEvent {
-    AdvertisingDatasetComplete(esp_ble_gap_cb_param_t_ble_adv_data_cmpl_evt_param),
-    ScanResponseDatasetComplete(esp_ble_gap_cb_param_t_ble_scan_rsp_data_cmpl_evt_param),
-    ScanParameterDatasetComplete(esp_ble_gap_cb_param_t_ble_scan_param_cmpl_evt_param),
+#[derive(Debug)]
+pub enum GapEvent<'a> {
+    AdvertisingDatasetComplete(BtStatus),
+    ScanResponseDatasetComplete(BtStatus),
+    ScanParameterDatasetComplete(BtStatus),
     ScanResult(esp_ble_gap_cb_param_t_ble_scan_result_evt_param),
-    RawAdvertisingDatasetComplete(esp_ble_gap_cb_param_t_ble_adv_data_raw_cmpl_evt_param),
-    RawScanResponseDatasetComplete(esp_ble_gap_cb_param_t_ble_scan_rsp_data_raw_cmpl_evt_param),
-    AdvertisingStartComplete(esp_ble_gap_cb_param_t_ble_adv_start_cmpl_evt_param),
-    ScanStartComplete(esp_ble_gap_cb_param_t_ble_scan_start_cmpl_evt_param),
-    AuthenticationComplete(esp_ble_sec_t),
+    RawAdvertisingDatasetComplete(BtStatus),
+    RawScanResponseDatasetComplete(BtStatus),
+    AdvertisingStartComplete(BtStatus),
+    ScanStartComplete(BtStatus),
+    AuthenticationComplete {
+        bd_addr: BdAddr,
+        status: BtStatus,
+        device_name: &'a str,
+    },
     Key(esp_ble_sec_t),
     SecurityRequest(esp_ble_sec_t),
     PasskeyNotification(esp_ble_sec_t),
@@ -249,54 +253,62 @@ pub enum GapEvent {
     LocalIR,
     LocalER,
     NumericComparisonRequest(esp_ble_sec_t),
-    AdvertisingStopComplete(esp_ble_gap_cb_param_t_ble_adv_stop_cmpl_evt_param),
-    ScanStopComplete(esp_ble_gap_cb_param_t_ble_scan_stop_cmpl_evt_param),
-    SetStaticRandomAddressComplete(esp_ble_gap_cb_param_t_ble_set_rand_cmpl_evt_param),
+    AdvertisingStopComplete(BtStatus),
+    ScanStopComplete(BtStatus),
+    SetStaticRandomAddressComplete(BtStatus),
     UpdateConnectionParamsComplete(esp_ble_gap_cb_param_t_ble_update_conn_params_evt_param),
     SetPacketLengthComplete(esp_ble_gap_cb_param_t_ble_pkt_data_length_cmpl_evt_param),
-    SetLocalPrivacy(esp_ble_gap_cb_param_t_ble_local_privacy_cmpl_evt_param),
-    RemoveDeviceBondComplete(esp_ble_gap_cb_param_t_ble_remove_bond_dev_cmpl_evt_param),
-    ClearDeviceBondComplete(esp_ble_gap_cb_param_t_ble_clear_bond_dev_cmpl_evt_param),
+    SetLocalPrivacy(BtStatus),
+    RemoveDeviceBondComplete {
+        bd_addr: BdAddr,
+        status: BtStatus,
+    },
+    ClearDeviceBondComplete(BtStatus),
     GetDeviceBondComplete(esp_ble_gap_cb_param_t_ble_get_bond_dev_cmpl_evt_param),
-    ReadRssiComplete(esp_ble_gap_cb_param_t_ble_read_rssi_cmpl_evt_param),
+    ReadRssiComplete {
+        bd_addr: BdAddr,
+        rssdi: i8,
+        status: BtStatus,
+    },
     UpdateWhitelistComplete(esp_ble_gap_cb_param_t_ble_update_whitelist_cmpl_evt_param),
     UpdateDuplicateListComplete(
         esp_ble_gap_cb_param_t_ble_update_duplicate_exceptional_list_cmpl_evt_param,
     ),
-    SetChannelsComplete(esp_ble_gap_cb_param_t_ble_set_channels_evt_param),
+    SetChannelsComplete(BtStatus),
+    // BLE 5.0
+    ReadFeaturesComplete(esp_ble_gap_cb_param_t_ble_read_phy_cmpl_evt_param),
+    SetPreferredDefaultPhyComplete(BtStatus),
+    SetPreferredPhyComplete(BtStatus),
+    ExtendedAdvertisingSetRandomAddressComplete(BtStatus),
+    ExtendedAdvertisingSetParametersComplete(BtStatus),
+    ExtendedAdvertisingDataSetComplete(BtStatus),
+    ExtendedAdvertisingScanResponseComplete(BtStatus),
+    ExtendedAdvertisingStartComplete(BtStatus),
+    ExtendedAdvertisingStopComplete(BtStatus),
+    ExtendedAdvertisingSetRemoveComplete(BtStatus),
+    ExtendedAdvertisingSetClearComplete(BtStatus),
+    PeriodicAdvertisingSetParametersComplete(BtStatus),
+    PeriodicAdvertisingDataSetComplete(BtStatus),
+    PeriodicAdvertisingStartComplete(BtStatus),
+    PeriodicAdvertisingStopComplete(BtStatus),
+    PeriodicAdvertisingCreateSyncComplete(BtStatus),
+    PeriodicAdvertisingCancelSyncComplete(BtStatus),
+    PeriodicAdvertisingTerminateSyncComplete(BtStatus),
+    PeriodicAdvertisingAddDeviceListComplete(BtStatus),
+    PeriodicAdvertisingRemoveDeviceListComplete(BtStatus),
+    PeriodicAdvertisingClearDeviceListComplete(BtStatus),
+    ExtendedAdvertisingScanParametersComplete(BtStatus),
+    ExtendedAdvertisingScanStartComplete(BtStatus),
+    ExtendedAdvertisingScanStopComplete(BtStatus),
+    ExtendedAdvertisingPreferExtendedConnectionParamsComplete(BtStatus),
     /*
     #if (BLE_50_FEATURE_SUPPORT == TRUE)
-        READ_PHY_COMPLETE_EVT,
-        SET_PREFERED_DEFAULT_PHY_COMPLETE_EVT,
-        SET_PREFERED_PHY_COMPLETE_EVT,
-        EXT_ADV_SET_RAND_ADDR_COMPLETE_EVT,
-        EXT_ADV_SET_PARAMS_COMPLETE_EVT,
-        EXT_ADV_DATA_SET_COMPLETE_EVT,
-        EXT_SCAN_RSP_DATA_SET_COMPLETE_EVT,
-        EXT_ADV_START_COMPLETE_EVT,
-        EXT_ADV_STOP_COMPLETE_EVT,
-        EXT_ADV_SET_REMOVE_COMPLETE_EVT,
-        EXT_ADV_SET_CLEAR_COMPLETE_EVT,
-        PERIODIC_ADV_SET_PARAMS_COMPLETE_EVT,
-        PERIODIC_ADV_DATA_SET_COMPLETE_EVT,
-        PERIODIC_ADV_START_COMPLETE_EVT,
-        PERIODIC_ADV_STOP_COMPLETE_EVT,
-        PERIODIC_ADV_CREATE_SYNC_COMPLETE_EVT,
-        PERIODIC_ADV_SYNC_CANCEL_COMPLETE_EVT,
-        PERIODIC_ADV_SYNC_TERMINATE_COMPLETE_EVT,
-        PERIODIC_ADV_ADD_DEV_COMPLETE_EVT,
-        PERIODIC_ADV_REMOVE_DEV_COMPLETE_EVT,
-        PERIODIC_ADV_CLEAR_DEV_COMPLETE_EVT,
-        SET_EXT_SCAN_PARAMS_COMPLETE_EVT,
-        EXT_SCAN_START_COMPLETE_EVT,
-        EXT_SCAN_STOP_COMPLETE_EVT,
-        PREFER_EXT_CONN_PARAMS_SET_COMPLETE_EVT,
         PHY_UPDATE_COMPLETE_EVT,
         EXT_ADV_REPORT_EVT,
         SCAN_TIMEOUT_EVT,
         ADV_TERMINATED_EVT,
         SCAN_REQ_RECEIVED_EVT,
-        CHANNEL_SELETE_ALGORITHM_EVT,
+        CHANNEL_SELECT_ALGORITHM_EVT,
         PERIODIC_ADV_REPORT_EVT,
         PERIODIC_ADV_SYNC_LOST_EVT,
         PERIODIC_ADV_SYNC_ESTAB_EVT,
@@ -306,8 +318,8 @@ pub enum GapEvent {
 }
 
 #[allow(non_upper_case_globals)]
-impl From<(esp_gap_ble_cb_event_t, &esp_ble_gap_cb_param_t)> for GapEvent {
-    fn from(value: (esp_gap_ble_cb_event_t, &esp_ble_gap_cb_param_t)) -> Self {
+impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for GapEvent<'a> {
+    fn from(value: (esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)) -> Self {
         let (evt, param) = value;
 
         unsafe {
@@ -408,47 +420,6 @@ impl From<(esp_gap_ble_cb_event_t, &esp_ble_gap_cb_param_t)> for GapEvent {
     }
 }
 
-impl Debug for GapEvent {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::AdvertisingDatasetComplete(_) => "AdvertisingDatasetComplete",
-                Self::ScanResponseDatasetComplete(_) => "ScanResponseDatasetComplete",
-                Self::ScanParameterDatasetComplete(_) => "ScanParameterDatasetComplete",
-                Self::ScanResult(_) => "ScanResult",
-                Self::RawAdvertisingDatasetComplete(_) => "RawAdvertisingDatasetComplete",
-                Self::RawScanResponseDatasetComplete(_) => "RawScanResponseDatasetComplete",
-                Self::AdvertisingStartComplete(_) => "AdvertisingStartComplete",
-                Self::ScanStartComplete(_) => "ScanStartComplete",
-                Self::AuthenticationComplete(_) => "AuthenticationComplete",
-                Self::Key(_) => "Key",
-                Self::SecurityRequest(_) => "SecurityRequest",
-                Self::PasskeyNotification(_) => "PasskeyNotification",
-                Self::PasskeyRequest(_) => "PasskeyRequest",
-                Self::OOBRequest => "OOBRequest",
-                Self::LocalIR => "LocalIR",
-                Self::LocalER => "LocalER",
-                Self::NumericComparisonRequest(_) => "NumericComparisonRequest",
-                Self::AdvertisingStopComplete(_) => "AdvertisingStopComplete",
-                Self::ScanStopComplete(_) => "ScanStopComplete",
-                Self::SetStaticRandomAddressComplete(_) => "SetStaticRandomAddressComplete",
-                Self::UpdateConnectionParamsComplete(_) => "UpdateConnectionParamsComplete",
-                Self::SetPacketLengthComplete(_) => "SetPacketLengthComplete",
-                Self::SetLocalPrivacy(_) => "SetLocalPrivacy",
-                Self::RemoveDeviceBondComplete(_) => "RemoveDeviceBondComplete",
-                Self::ClearDeviceBondComplete(_) => "ClearDeviceBondComplete",
-                Self::GetDeviceBondComplete(_) => "GetDeviceBondComplete",
-                Self::ReadRssiComplete(_) => "ReadRssiComplete",
-                Self::UpdateWhitelistComplete(_) => "UpdateWhitelistComplete",
-                Self::UpdateDuplicateListComplete(_) => "UpdateDuplicateListComplete",
-                Self::SetChannelsComplete(_) => "SetChannelsComplete",
-            }
-        )
-    }
-}
-
 pub struct EspGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>>,
@@ -464,22 +435,27 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BleEnabled,
 {
-    pub fn new<F>(driver: T, device_name: &str, events_cb: F) -> Result<Self, EspError>
-    where
-        F: Fn(GapEvent) + Send + 'static,
-    {
-        CALLBACK.set(events_cb)?;
-
-        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })?;
-
-        let device_name = to_cstring_arg(device_name)?;
-        esp!(unsafe { esp_ble_gap_set_device_name(device_name.as_ptr()) })?;
-
+    pub fn new<F>(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
             _p: PhantomData,
             _m: PhantomData,
         })
+    }
+
+    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
+    where
+        F: Fn(GapEvent) + Send + 'd,
+    {
+        CALLBACK.set(events_cb)?;
+
+        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })
+    }
+
+    pub fn set_device_name(&mut self, device_name: &str) -> Result<(), EspError> {
+        let device_name = to_cstring_arg(device_name)?;
+
+        esp!(unsafe { esp_ble_gap_set_device_name(device_name.as_ptr()) })
     }
 
     pub fn set_security_conf(&mut self, conf: &SecurityConfiguration) -> Result<(), EspError> {
@@ -526,35 +502,6 @@ where
             &conf.only_accept_specified_auth,
         )?;
         set(esp_ble_sm_param_t_ESP_BLE_SM_OOB_SUPPORT, &conf.enable_oob)?;
-
-        // TODO
-        // insert_gap_cb(GapCallbacks::SecurityRequest, |sec_req| {
-        //     if let GapEvent::SecurityRequest(mut sec_req) = sec_req {
-        //         info!("SecurityRequest");
-        //         match esp!(unsafe {
-        //             esp_ble_gap_security_rsp(sec_req.ble_req.bd_addr.as_mut_ptr(), true)
-        //         }) {
-        //             Ok(()) => info!("Security set"),
-        //             Err(err) => warn!("Error setting security: {}", err),
-        //         }
-        //     }
-        // });
-
-        // insert_gap_cb(GapCallbacks::SecurityRequest, |sec_req| {
-        //     if let GapEvent::SecurityRequest(sec_req) = sec_req {
-        //         let mut ble_sec_req: esp_ble_sec_req_t = unsafe { sec_req.ble_req };
-        //         info!("SecurityRequest: {:?}", ble_sec_req);
-        //         unsafe { esp_ble_gap_security_rsp(ble_sec_req.bd_addr.as_mut_ptr(), true) };
-        //     }
-        // });
-
-        // insert_gap_cb(GapCallbacks::NumericComparisonRequest, |ble_sec| {
-        //     info!("Numeric comparison request");
-        //     if let GapEvent::NumericComparisonRequest(mut ble_sec) = ble_sec {
-        //         esp!(unsafe { esp_ble_confirm_reply(ble_sec.ble_req.bd_addr.as_mut_ptr(), true) })
-        //             .expect("Unable to complete numeric comparison request");
-        //     }
-        // });
 
         Ok(())
     }
@@ -604,7 +551,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GapEvent::from((event, param));
 
-        debug!("Got GAP event {{ {:#?} }}", event);
+        info!("Got GAP event {{ {:#?} }}", event);
 
         CALLBACK.call(event);
     }
