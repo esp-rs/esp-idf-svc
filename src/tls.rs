@@ -7,9 +7,11 @@ use core::{
 };
 
 use embedded_svc::io;
-use esp_idf_sys::{EspError, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM, ESP_FAIL};
 
-use crate::errors::EspIOError;
+use crate::{
+    errors::EspIOError,
+    sys::{EspError, ESP_ERR_INVALID_SIZE, ESP_ERR_NO_MEM, ESP_FAIL},
+};
 
 /// see https://www.ietf.org/rfc/rfc3280.txt ub-common-name-length
 const MAX_COMMON_NAME_LENGTH: usize = 64;
