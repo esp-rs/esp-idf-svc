@@ -16,12 +16,22 @@ use crate::{
 /// see https://www.ietf.org/rfc/rfc3280.txt ub-common-name-length
 const MAX_COMMON_NAME_LENGTH: usize = 64;
 
+/// Wrapper for `esp-tls` module. Only supports synchronous operation for now.
 pub struct EspTls {
     reader: EspTlsRead,
     writer: EspTlsWrite,
 }
 
 impl EspTls {
+    /// Create a new blocking TLS/SSL connection.
+    ///
+    /// This function establishes a TLS/SSL connection with the specified host in a blocking manner.
+    ///
+    /// # Errors
+    ///
+    /// * `ESP_ERR_INVALID_SIZE` if `cfg.alpn_protos` exceeds 9 elements or avg 10 bytes/ALPN
+    /// * `ESP_ERR_NO_MEM` if TLS context could not be allocated
+    /// * `ESP_FAIL` if connection could not be established
     pub fn new(host: &str, port: u16, cfg: &Config) -> Result<Self, EspError> {
         let mut rcfg: esp_idf_sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
 
@@ -85,6 +95,10 @@ impl EspTls {
                 hint: psk.hint.as_ptr(),
             };
             rcfg.psk_hint_key = &mut raw_psk as *mut _;
+        }
+
+        if cfg.use_crt_bundle_attach {
+            rcfg.crt_bundle_attach = Some(esp_idf_sys::esp_crt_bundle_attach);
         }
 
         rcfg.is_plain_tcp = cfg.is_plain_tcp;
@@ -237,8 +251,9 @@ pub struct Config<'a> {
     pub skip_common_name: bool,
     pub keep_alive_cfg: Option<KeepAliveConfig>,
     pub psk_hint_key: Option<PskHintKey<'a>>,
-    // TODO crt_bundle_attach
-    // TODO ds_data
+    /// whether to use esp_crt_bundle_attach, see https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/api-reference/protocols/esp_crt_bundle.html
+    pub use_crt_bundle_attach: bool,
+    // TODO ds_data not implemented
     pub is_plain_tcp: bool,
     pub if_name: esp_idf_sys::ifreq,
 }
@@ -259,6 +274,7 @@ impl<'a> Default for Config<'a> {
             skip_common_name: Default::default(),
             keep_alive_cfg: Default::default(),
             psk_hint_key: Default::default(),
+            use_crt_bundle_attach: Default::default(),
             is_plain_tcp: Default::default(),
             if_name: Default::default(),
         }
