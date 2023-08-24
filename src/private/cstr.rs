@@ -87,7 +87,7 @@ pub fn to_cstring_arg(value: &str) -> Result<CString, crate::sys::EspError> {
 ///
 /// * Panics if buffer is empty.
 pub fn cstr_from_str_truncating<'a>(rust_str: &str, buf: &'a mut [u8]) -> &'a CStr {
-    assert!(buf.len() > 0);
+    assert!(!buf.is_empty());
 
     let max_str_size = buf.len() - 1; // account for NUL
     let truncated_str = &rust_str[..max_str_size.min(rust_str.len())];
@@ -108,7 +108,7 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
     mut cbuf: &mut [u8],
 ) -> Result<[*const i8; N], EspError> {
     assert!(N > 1);
-    assert!(cbuf.len() > 0);
+    assert!(!cbuf.is_empty());
 
     // ensure last element stays NULL
     if rust_strs.len() > N - 1 {
@@ -117,7 +117,7 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
 
     let mut cstrs = [std::ptr::null(); N];
 
-    for (i, s) in rust_strs.into_iter().enumerate() {
+    for (i, s) in rust_strs.iter().enumerate() {
         let max_str_size = cbuf.len() - 1; // account for NUL
         if s.len() > max_str_size {
             return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
@@ -137,23 +137,23 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
 mod tests {
     use std::ffi::CStr;
 
-    use crate::{cstr_arr_from_str_slice, cstr_from_str};
+    use super::{cstr_arr_from_str_slice, cstr_from_str_truncating};
 
     #[test]
     fn cstr_from_str_happy() {
         let mut same_size = [0u8; 6];
-        let hello = cstr_from_str("Hello", &mut same_size);
+        let hello = cstr_from_str_truncating("Hello", &mut same_size);
         assert_eq!(hello.to_bytes(), b"Hello");
 
         let mut larger = [0u8; 42];
-        let hello = cstr_from_str("Hello", &mut larger);
+        let hello = cstr_from_str_truncating("Hello", &mut larger);
         assert_eq!(hello.to_bytes(), b"Hello");
     }
 
     #[test]
     fn cstr_from_str_unhappy() {
         let mut smaller = [0u8; 6];
-        let hello = cstr_from_str("Hello World", &mut smaller);
+        let hello = cstr_from_str_truncating("Hello World", &mut smaller);
         assert_eq!(hello.to_bytes(), b"Hello");
     }
 

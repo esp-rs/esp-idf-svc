@@ -102,7 +102,7 @@ impl EspTls {
         rcfg.if_name = std::ptr::null_mut();
 
         let tls = unsafe { sys::esp_tls_init() };
-        if tls == std::ptr::null_mut() {
+        if tls.is_null() {
             return Err(EspError::from_infallible::<ESP_ERR_NO_MEM>());
         }
         let ret = unsafe {
@@ -239,6 +239,7 @@ impl Drop for EspTls {
     }
 }
 
+#[derive(Default)]
 pub struct Config<'a> {
     /// up to 9 ALPNs allowed, with avg 10 bytes for each name
     pub alpn_protos: Option<&'a [&'a str]>,
@@ -261,31 +262,6 @@ pub struct Config<'a> {
     pub is_plain_tcp: bool,
     #[cfg(esp_idf_comp_lwip_enabled)]
     pub if_name: sys::ifreq,
-}
-
-impl<'a> Default for Config<'a> {
-    fn default() -> Self {
-        Self {
-            alpn_protos: Default::default(),
-            ca_cert: None,
-            client_cert: None,
-            client_key: None,
-            client_key_password: Default::default(),
-            non_block: Default::default(),
-            use_secure_element: Default::default(),
-            timeout_ms: Default::default(),
-            use_global_ca_store: Default::default(),
-            common_name: Default::default(),
-            skip_common_name: Default::default(),
-            keep_alive_cfg: Default::default(),
-            psk_hint_key: Default::default(),
-            #[cfg(esp_idf_mbedtls_certificate_bundle)]
-            use_crt_bundle_attach: Default::default(),
-            is_plain_tcp: Default::default(),
-            #[cfg(esp_idf_comp_lwip_enabled)]
-            if_name: Default::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
