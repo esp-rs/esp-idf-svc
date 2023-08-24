@@ -181,16 +181,28 @@ impl EspTlsRead {
             return Ok(0);
         }
 
-        // cannot call esp_tls_conn_read bc it's inline
-        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
-        let read_func = esp_tls.read.unwrap();
-        let ret = unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) };
+        let ret = self.read_raw(buf);
         // ESP docs treat 0 as error, but in Rust it's common to return 0 from `Read::read` to indicate eof
         if ret >= 0 {
             Ok(ret as usize)
         } else {
             Err(EspIOError(EspError::from(ret as i32).unwrap()))
         }
+    }
+
+    #[cfg(esp_idf_version_major = "4")]
+    fn read_raw(&mut self, buf: &mut [u8]) -> isize {
+        // cannot call esp_tls_conn_read bc it's inline in v4
+        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
+        let read_func = esp_tls.read.unwrap();
+        unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) }
+    }
+
+    #[cfg(not(esp_idf_version_major = "4"))]
+    fn read_raw(&mut self, buf: &mut [u8]) -> isize {
+        use core::ffi::c_void;
+
+        unsafe { sys::esp_tls_conn_read(self.raw, buf.as_mut_ptr() as *mut c_void, buf.len()) }
     }
 }
 
@@ -214,15 +226,27 @@ impl EspTlsWrite {
             return Ok(0);
         }
 
-        // cannot call esp_tls_conn_write bc it's inline
-        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
-        let write_func = esp_tls.write.unwrap();
-        let ret = unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) };
+        let ret = self.write_raw(buf);
         if ret >= 0 {
             Ok(ret as usize)
         } else {
             Err(EspIOError(EspError::from(ret as i32).unwrap()))
         }
+    }
+
+    #[cfg(esp_idf_version_major = "4")]
+    fn write_raw(&mut self, buf: &[u8]) -> isize {
+        // cannot call esp_tls_conn_write bc it's inline
+        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
+        let write_func = esp_tls.write.unwrap();
+        unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) }
+    }
+
+    #[cfg(not(esp_idf_version_major = "4"))]
+    fn write_raw(&mut self, buf: &[u8]) -> isize {
+        use core::ffi::c_void;
+
+        unsafe { sys::esp_tls_conn_write(self.raw, buf.as_ptr() as *const c_void, buf.len()) }
     }
 }
 
