@@ -142,6 +142,15 @@ impl EspTls {
     }
 }
 
+impl std::os::fd::AsRawFd for EspTls {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        let mut fd = -1;
+        let _ = unsafe { sys::esp_tls_get_conn_sockfd(self.reader.raw, &mut fd) };
+
+        fd
+    }
+}
+
 impl io::Io for EspTls {
     type Error = EspIOError;
 }
