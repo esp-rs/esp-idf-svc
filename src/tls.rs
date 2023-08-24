@@ -48,7 +48,7 @@ impl EspTls {
         }
 
         if let Some(ckp) = cfg.client_key_password {
-            rcfg.clientkey_password = ckp.as_ptr() as *const u8;
+            rcfg.clientkey_password = ckp.as_ptr();
             rcfg.clientkey_password_len = ckp.len() as u32;
         }
 
