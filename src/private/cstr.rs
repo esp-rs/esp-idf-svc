@@ -115,7 +115,7 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
         return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
     }
 
-    let mut cstrs = [std::ptr::null(); N];
+    let mut cstrs = [core::ptr::null(); N];
 
     for (i, s) in rust_strs.iter().enumerate() {
         let max_str_size = cbuf.len() - 1; // account for NUL
@@ -135,9 +135,7 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::CStr;
-
-    use super::{cstr_arr_from_str_slice, cstr_from_str_truncating};
+    use super::{cstr_arr_from_str_slice, cstr_from_str_truncating, CStr};
 
     #[test]
     fn cstr_from_str_happy() {
@@ -163,7 +161,7 @@ mod tests {
         let hello = cstr_arr_from_str_slice::<3>(&["Hello", "World"], &mut same_size).unwrap();
         assert_eq!(unsafe { CStr::from_ptr(hello[0]) }.to_bytes(), b"Hello");
         assert_eq!(unsafe { CStr::from_ptr(hello[1]) }.to_bytes(), b"World");
-        assert_eq!(hello[2], std::ptr::null());
+        assert_eq!(hello[2], core::ptr::null());
     }
 
     #[test]
