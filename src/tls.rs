@@ -30,7 +30,7 @@ impl EspTls {
     /// * `ESP_ERR_NO_MEM` if TLS context could not be allocated
     /// * `ESP_FAIL` if connection could not be established
     pub fn new(host: &str, port: u16, cfg: &Config) -> Result<Self, EspError> {
-        let mut rcfg: sys::esp_tls_cfg = unsafe { std::mem::zeroed() };
+        let mut rcfg: sys::esp_tls_cfg = unsafe { core::mem::zeroed() };
 
         if let Some(ca_cert) = cfg.ca_cert {
             rcfg.__bindgen_anon_1.cacert_buf = ca_cert.data().as_ptr();
@@ -99,7 +99,7 @@ impl EspTls {
         }
 
         rcfg.is_plain_tcp = cfg.is_plain_tcp;
-        rcfg.if_name = std::ptr::null_mut();
+        rcfg.if_name = core::ptr::null_mut();
 
         let tls = unsafe { sys::esp_tls_init() };
         if tls.is_null() {
@@ -142,6 +142,7 @@ impl EspTls {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::os::fd::AsRawFd for EspTls {
     fn as_raw_fd(&self) -> std::os::fd::RawFd {
         let mut fd = -1;
@@ -193,7 +194,7 @@ impl EspTlsRead {
     #[cfg(esp_idf_version_major = "4")]
     fn read_raw(&mut self, buf: &mut [u8]) -> isize {
         // cannot call esp_tls_conn_read bc it's inline in v4
-        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
+        let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
         let read_func = esp_tls.read.unwrap();
         unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) }
     }
@@ -237,7 +238,7 @@ impl EspTlsWrite {
     #[cfg(esp_idf_version_major = "4")]
     fn write_raw(&mut self, buf: &[u8]) -> isize {
         // cannot call esp_tls_conn_write bc it's inline
-        let esp_tls = unsafe { std::ptr::read_unaligned(self.raw) };
+        let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
         let write_func = esp_tls.write.unwrap();
         unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) }
     }
