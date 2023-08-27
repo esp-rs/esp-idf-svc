@@ -119,9 +119,15 @@ pub mod client {
         IncorrectPassword = esp_hf_cme_err_t_ESP_HF_CME_INCORRECT_PASSWORD,
         SimPin2Required = esp_hf_cme_err_t_ESP_HF_CME_SIM_PIN2_REQUIRED,
         SimPuk2Required = esp_hf_cme_err_t_ESP_HF_CME_SIM_PUK2_REQUIRED,
+        #[cfg(not(esp_idf_version_major = "4"))]
         MemoryFull = esp_hf_cme_err_t_ESP_HF_CME_MEMORY_FULL,
+        #[cfg(esp_idf_version_major = "4")]
+        MemoryFull = esp_hf_cme_err_t_ESP_HF_CME_MEMEORY_FULL,
         InvalidIndex = esp_hf_cme_err_t_ESP_HF_CME_INVALID_INDEX,
+        #[cfg(not(esp_idf_version_major = "4"))]
         MemoryFailure = esp_hf_cme_err_t_ESP_HF_CME_MEMORY_FAILURE,
+        #[cfg(esp_idf_version_major = "4")]
+        MemoryFailure = esp_hf_cme_err_t_ESP_HF_CME_MEMEORY_FAILURE,
         TextStringTooLong = esp_hf_cme_err_t_ESP_HF_CME_TEXT_STRING_TOO_LONG,
         InvalidCharsInTextString = esp_hf_cme_err_t_ESP_HF_CME_INVALID_CHARACTERS_IN_TEXT_STRING,
         DialStringTooLong = esp_hf_cme_err_t_ESP_HF_CME_DIAL_STRING_TOO_LONG,

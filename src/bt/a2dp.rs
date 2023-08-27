@@ -6,7 +6,6 @@ use core::{
     fmt::{self, Debug},
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
 };
 
 use crate::sys::*;
@@ -186,12 +185,16 @@ pub enum A2dpEvent<'a> {
     },
     Initialized,
     Deinitialized,
+    #[cfg(not(esp_idf_version_major = "4"))]
     SinkServiceCapabilitiesConfigured(u16),
+    #[cfg(not(esp_idf_version_major = "4"))]
     SinkDelaySetState {
         set: bool,
         delay: u16,
     },
+    #[cfg(not(esp_idf_version_major = "4"))]
     SinkDelay(u16),
+    #[cfg(not(esp_idf_version_major = "4"))]
     SourceDelay(u16),
     SinkData(&'a [u8]),
     SourceData(&'a mut [u8]),
@@ -239,17 +242,21 @@ impl<'a> From<(esp_a2d_cb_event_t, &'a esp_a2d_cb_param_t)> for A2dpEvent<'a> {
                         Self::Deinitialized
                     }
                 }
+                #[cfg(not(esp_idf_version_major = "4"))]
                 esp_a2d_cb_event_t_ESP_A2D_SNK_PSC_CFG_EVT => {
                     Self::SinkServiceCapabilitiesConfigured(param.a2d_psc_cfg_stat.psc_mask)
                 } // TODO
+                #[cfg(not(esp_idf_version_major = "4"))]
                 esp_a2d_cb_event_t_ESP_A2D_SNK_SET_DELAY_VALUE_EVT => Self::SinkDelaySetState {
                     set: param.a2d_set_delay_value_stat.set_state
                         == esp_a2d_set_delay_value_state_t_ESP_A2D_SET_SUCCESS,
                     delay: param.a2d_set_delay_value_stat.delay_value,
                 },
+                #[cfg(not(esp_idf_version_major = "4"))]
                 esp_a2d_cb_event_t_ESP_A2D_SNK_GET_DELAY_VALUE_EVT => {
                     Self::SinkDelay(param.a2d_get_delay_value_stat.delay_value)
                 }
+                #[cfg(not(esp_idf_version_major = "4"))]
                 esp_a2d_cb_event_t_ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT => {
                     Self::SourceDelay(param.a2d_report_delay_value_stat.delay_value)
                 }
@@ -308,11 +315,13 @@ where
         esp!(unsafe { esp_a2d_sink_disconnect(bd_addr as *const _ as *mut _) })
     }
 
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub fn request_delay(&self) -> Result<(), EspError> {
         esp!(unsafe { esp_a2d_sink_get_delay_value() })
     }
 
-    pub fn set_delay(&self, delay: Duration) -> Result<(), EspError> {
+    #[cfg(not(esp_idf_version_major = "4"))]
+    pub fn set_delay(&self, delay: core::time::Duration) -> Result<(), EspError> {
         esp!(unsafe { esp_a2d_sink_set_delay_value((delay.as_micros() / 100) as _) })
     }
 }
