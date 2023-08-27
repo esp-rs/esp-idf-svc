@@ -60,27 +60,33 @@ impl BtUuid {
     }
 
     pub fn uuid16(uuid: u16) -> Self {
-        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+        let mut esp_uuid = esp_bt_uuid_t {
+            len: 16,
+            ..Default::default()
+        };
 
-        esp_uuid.len = 16;
         esp_uuid.uuid.uuid16 = uuid;
 
         Self(esp_uuid)
     }
 
     pub fn uuid32(uuid: u32) -> Self {
-        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+        let mut esp_uuid = esp_bt_uuid_t {
+            len: 32,
+            ..Default::default()
+        };
 
-        esp_uuid.len = 32;
         esp_uuid.uuid.uuid32 = uuid;
 
         Self(esp_uuid)
     }
 
     pub fn uuid128(uuid: u128) -> Self {
-        let mut esp_uuid: esp_bt_uuid_t = Default::default();
+        let mut esp_uuid = esp_bt_uuid_t {
+            len: 128,
+            ..Default::default()
+        };
 
-        esp_uuid.len = 128;
         esp_uuid.uuid.uuid128 = uuid.to_ne_bytes();
 
         Self(esp_uuid)
@@ -126,6 +132,8 @@ impl From<esp_bt_uuid_t> for BtUuid {
     }
 }
 
+#[allow(dead_code)]
+#[allow(clippy::type_complexity)]
 pub(crate) struct BtCallback<A, R> {
     initialized: AtomicBool,
     callback: UnsafeCell<Option<alloc::boxed::Box<alloc::boxed::Box<dyn Fn(A) -> R>>>>,
