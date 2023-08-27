@@ -28,6 +28,7 @@ extern crate alloc;
 #[cfg(all(
     esp_idf_bt_enabled,
     esp_idf_bt_bluedroid_enabled,
+    feature = "alloc",
     feature = "experimental"
 ))]
 pub mod bt;
