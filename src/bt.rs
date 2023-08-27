@@ -493,9 +493,9 @@ where
             mesh_adv_size: crate::sys::MESH_DUPLICATE_SCAN_CACHE_SIZE as _,
             coex_phy_coded_tx_rx_time_limit:
                 crate::sys::CONFIG_BT_CTRL_COEX_PHY_CODED_TX_RX_TLIM_EFF as _,
-            #[cfg(esp_idf_version_major = "4")]
-            hw_target_code: crate::sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0 as _,
             #[cfg(not(esp_idf_version_major = "4"))]
+            hw_target_code: crate::sys::BLE_HW_TARGET_CODE_ESP32S3_CHIP_ECO0 as _,
+            #[cfg(esp_idf_version_major = "4")]
             hw_target_code: crate::sys::BLE_HW_TARGET_CODE_CHIP_ECO0 as _,
             slave_ce_len_min: crate::sys::SLAVE_CE_LEN_MIN_DEFAULT as _,
             hw_recorrect_en: crate::sys::AGC_RECORRECT_EN as _,
