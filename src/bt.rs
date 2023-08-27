@@ -161,8 +161,8 @@ where
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
 
-        let b: Box<dyn Fn(A) -> R + 'd> = Box::new(callback);
-        let b: Box<dyn Fn(A) -> R + 'static> = unsafe { core::mem::transmute(b) };
+        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'd> = Box::new(callback);
+        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'static> = unsafe { core::mem::transmute(b) };
         *unsafe { self.callback.get().as_mut() }.unwrap() = Some(Box::new(b));
 
         Ok(())
