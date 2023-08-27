@@ -140,6 +140,7 @@ pub(crate) struct BtCallback<A, R> {
     default_result: R,
 }
 
+#[allow(dead_code)]
 impl<A, R> BtCallback<A, R>
 where
     R: Clone,
