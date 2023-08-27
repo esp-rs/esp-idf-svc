@@ -161,9 +161,9 @@ where
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
 
-        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'd> = Box::new(callback);
+        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'd> = alloc::boxed::Box::new(callback);
         let b: alloc::boxed::Box<dyn Fn(A) -> R + 'static> = unsafe { core::mem::transmute(b) };
-        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(Box::new(b));
+        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(alloc::boxed::Box::new(b));
 
         Ok(())
     }
@@ -442,7 +442,7 @@ where
             ble_adv_dup_filt_max: crate::sys::CONFIG_BT_CTRL_ADV_DUP_FILT_MAX as _,
             ce_len_type: crate::sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
             hci_tl_type: crate::sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
-            hci_tl_funcs: std::ptr::null_mut(),
+            hci_tl_funcs: core::ptr::null_mut(),
             txant_dft: crate::sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
             rxant_dft: crate::sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
             txpwr_dft: crate::sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
@@ -482,7 +482,7 @@ where
             ce_len_type: crate::sys::CONFIG_BT_CTRL_CE_LENGTH_TYPE_EFF as _,
             coex_use_hooks: false,
             hci_tl_type: crate::sys::CONFIG_BT_CTRL_HCI_TL_EFF as _,
-            hci_tl_funcs: std::ptr::null_mut(),
+            hci_tl_funcs: core::ptr::null_mut(),
             txant_dft: crate::sys::CONFIG_BT_CTRL_TX_ANTENNA_INDEX_EFF as _,
             rxant_dft: crate::sys::CONFIG_BT_CTRL_RX_ANTENNA_INDEX_EFF as _,
             txpwr_dft: crate::sys::CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_EFF as _,
