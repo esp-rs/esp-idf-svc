@@ -1,13 +1,18 @@
+use esp_idf_sys::{self as _}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
+
+#[cfg(esp32)]
 use esp_idf_svc::{
     eth::{BlockingEth, EspEth, EthDriver},
     eventloop::EspSystemEventLoop,
     hal::{gpio, prelude::Peripherals},
     log::EspLogger,
 };
-use esp_idf_sys::{self as _}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
+#[cfg(esp32)]
 use log::info;
 
+#[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
+    esp_idf_sys::link_patches();
     EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().unwrap();
@@ -52,4 +57,9 @@ fn main() -> anyhow::Result<()> {
     info!("Eth DHCP info: {:?}", ip_info);
 
     Ok(())
+}
+
+#[cfg(not(esp32))]
+fn main() {
+    panic!("This example is configured for esp32, please adjust pins to your module");
 }
