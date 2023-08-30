@@ -206,6 +206,7 @@ pub struct EirData<'a> {
 }
 
 impl<'a> From<&EirData<'a>> for esp_bt_eir_data_t {
+    #[allow(clippy::needless_update)]
     fn from(data: &EirData<'a>) -> Self {
         Self {
             fec_required: data.fec_required,
@@ -216,6 +217,8 @@ impl<'a> From<&EirData<'a>> for esp_bt_eir_data_t {
             manufacturer_len: data.manufacturer_data.len() as _,
             p_url: data.url.as_ptr() as *mut _,
             url_len: data.url.len() as _,
+            // Necessary as a strange flag - `include_name` - appeared in branch `release/v5.0` and ONLY there
+            ..Default::default()
         }
     }
 }
