@@ -1,5 +1,3 @@
-use esp_idf_sys::{self as _}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
-
 #[cfg(esp32)]
 use esp_idf_svc::{
     eth::{BlockingEth, EspEth, EthDriver},
@@ -12,7 +10,7 @@ use log::info;
 
 #[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
-    esp_idf_sys::link_patches();
+    esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().unwrap();
