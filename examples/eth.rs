@@ -59,5 +59,7 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(not(esp32))]
 fn main() {
+    use esp_idf_svc::{self as _};
+
     panic!("This example is configured for esp32, please adjust pins to your module");
 }
