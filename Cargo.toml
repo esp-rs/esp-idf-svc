@@ -17,7 +17,7 @@ rust-version = "1.71"
 
 [patch.crates-io]
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", branch = "afit" }
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
+esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal", branch = "e-hal-rc1" }
 
 [features]
 default = ["std", "native", "binstart"]

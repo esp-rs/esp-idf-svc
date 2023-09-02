@@ -30,7 +30,6 @@ extern crate alloc;
     feature = "experimental"
 ))]
 pub mod bt;
-pub mod errors;
 #[cfg(all(
     not(esp32h2),
     feature = "alloc",
@@ -59,6 +58,7 @@ pub mod hal;
 pub mod handle;
 #[cfg(feature = "alloc")]
 pub mod http;
+pub mod io;
 #[cfg(feature = "alloc")]
 pub mod log;
 #[cfg(all(

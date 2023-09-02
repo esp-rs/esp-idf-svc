@@ -18,7 +18,7 @@ use embedded_svc::ota;
 
 use crate::sys::*;
 
-use crate::errors::EspIOError;
+use crate::io::EspIOError;
 use crate::private::{common::*, cstr::*, mutex};
 
 static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);

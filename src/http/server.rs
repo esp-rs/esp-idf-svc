@@ -28,8 +28,8 @@ use crate::sys::*;
 
 use uncased::{Uncased, UncasedStr};
 
-use crate::errors::EspIOError;
 use crate::handle::RawHandle;
+use crate::io::EspIOError;
 use crate::private::common::Newtype;
 use crate::private::cstr::to_cstring_arg;
 use crate::private::cstr::{CStr, CString};

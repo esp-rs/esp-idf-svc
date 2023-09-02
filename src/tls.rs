@@ -122,7 +122,7 @@ mod esptls {
     use super::X509;
 
     use crate::{
-        errors::EspIOError,
+        io::EspIOError,
         private::cstr::{cstr_arr_from_str_slice, cstr_from_str_truncating, CStr},
         sys::{
             self, EspError, ESP_ERR_NO_MEM, ESP_FAIL, ESP_TLS_ERR_SSL_WANT_READ,
