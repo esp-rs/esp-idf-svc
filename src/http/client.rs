@@ -17,7 +17,7 @@ use ::log::*;
 
 use embedded_svc::http::client::*;
 use embedded_svc::http::*;
-use embedded_svc::io::{Io, Read, Write};
+use embedded_svc::io::{ErrorType, Read, Write};
 
 use crate::sys::*;
 
@@ -468,7 +468,7 @@ impl Headers for EspHttpConnection {
     }
 }
 
-impl Io for EspHttpConnection {
+impl ErrorType for EspHttpConnection {
     type Error = EspIOError;
 }
 

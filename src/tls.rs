@@ -560,7 +560,7 @@ mod esptls {
         }
     }
 
-    impl<S> io::Io for EspTls<S>
+    impl<S> io::ErrorType for EspTls<S>
     where
         S: Socket,
     {
@@ -730,7 +730,7 @@ mod esptls {
         not(esp_idf_version_major = "4"),
         any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
     ))]
-    impl<S> io::Io for AsyncEspTls<S>
+    impl<S> io::ErrorType for AsyncEspTls<S>
     where
         S: PollableSocket,
     {
