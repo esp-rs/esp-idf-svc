@@ -746,10 +746,8 @@ mod esptls {
     where
         S: PollableSocket,
     {
-        type ReadFuture<'a> = impl core::future::Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            async move { AsyncEspTls::read(self, buf).await.map_err(EspIOError) }
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            AsyncEspTls::read(self, buf).await.map_err(EspIOError)
         }
     }
 
@@ -762,15 +760,12 @@ mod esptls {
     where
         S: PollableSocket,
     {
-        type WriteFuture<'a> = impl core::future::Future<Output = Result<usize, Self::Error>> + 'a where Self: 'a;
-        type FlushFuture<'a> = impl core::future::Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
-
-        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-            async move { AsyncEspTls::write(self, buf).await.map_err(EspIOError) }
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+            AsyncEspTls::write(self, buf).await.map_err(EspIOError)
         }
 
-        fn flush(&mut self) -> Self::FlushFuture<'_> {
-            async move { Ok(()) }
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
         }
     }
 }
