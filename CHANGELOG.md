@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * TLS over TCP/IP support in the `tls` module via `EspTls` and `AsyncEspTls`
 * PSK support for `mqtt`
 * Dependencies `esp-idf-sys` and `esp-idf-hal` are now re-exported as `esp_idf_svc::sys` and `esp_idf_svc::hal`
-* Removed the deprecated module `httpd` and the dependency on `anyhow`
 * Upgraded to `embedded-svc` 0.26
-* OTA: `EspOtaUpdate` now parametric over time and returned by value
+* Breaking change: Removed the deprecated module `httpd` and the dependency on `anyhow`
+* Breaking change: OTA: `EspOtaUpdate` now parametric over time and returned by value
 
 ## [0.46.2] - 2023-07-30
 
