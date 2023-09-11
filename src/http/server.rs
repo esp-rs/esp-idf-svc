@@ -738,7 +738,7 @@ impl<'a> EspHttpConnection<'a> {
         Ok(())
     }
 
-    fn complete(&mut self) -> Result<(), HandlerError> {
+    pub fn complete(&mut self) -> Result<(), HandlerError> {
         let buf = &[];
 
         if self.response_headers.is_some() {
