@@ -752,6 +752,22 @@ impl<'a> EspHttpConnection<'a> {
         Ok(())
     }
 
+    /// Forces this connection to be send out by writing an empty buffer.
+    ///
+    /// This is a simple wrapper around [`Self::complete`] with a more "appropriate" name to suggest
+    /// the "dangers"/"problems" which might arise if this function is called.
+    ///
+    /// # Note
+    ///
+    /// There are not guarantees of the state this struct will be in after this call.
+    /// This function should only be used if it can be guaranteed, that the corresponding http
+    /// handler does never return (as this would be the normal way the response would be send out).
+    ///
+    /// See [`crate::httpd::IdfRequest::send`] for details.
+    pub fn force_complete(&mut self) -> Result<(), HandlerError> {
+        self.complete()
+    }
+
     fn handle_error<E>(&mut self, error: E)
     where
         E: Display,
