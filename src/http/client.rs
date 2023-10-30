@@ -248,7 +248,16 @@ impl EspHttpConnection {
 
         self.request_content_len = content_len.unwrap_or(0);
 
-        esp!(unsafe { esp_http_client_open(self.raw_client, self.request_content_len) })?;
+        esp!(unsafe {
+            esp_http_client_open(
+                self.raw_client,
+                if self.is_chunked_streaming_request(headers) {
+                    -1
+                } else {
+                    self.request_content_len
+                },
+            )
+        })?;
 
         self.state = State::Request;
 
@@ -441,6 +450,18 @@ impl EspHttpConnection {
         if self.state != State::Response {
             panic!("connection is not in response phase");
         }
+    }
+
+    fn is_chunked_streaming_request(&self, headers: &[(&str, &str)]) -> bool {
+        for (name, value) in headers {
+            if name.eq_ignore_ascii_case("Transfer-Encoding")
+                && value.eq_ignore_ascii_case("chunked")
+            {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
