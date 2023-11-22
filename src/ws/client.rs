@@ -18,6 +18,7 @@ use crate::io::EspIOError;
 use crate::private::common::Newtype;
 use crate::private::cstr::RawCstrs;
 use crate::private::mutex::{Condvar, Mutex};
+use crate::tls::{X509Encoding, X509};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum EspWebSocketTransport {
@@ -112,6 +113,7 @@ impl WebSocketClosingReason {
 
 #[derive(Debug)]
 pub enum WebSocketEventType<'a> {
+    BeforeConnect,
     Connected,
     Disconnected,
     Close(Option<WebSocketClosingReason>),
@@ -165,6 +167,8 @@ impl<'a> WebSocketEventType<'a> {
                 }
             }
             esp_websocket_event_id_t_WEBSOCKET_EVENT_CLOSED => Ok(Self::Closed),
+            #[cfg(esp_idf_version_major = "5")]
+            esp_websocket_event_id_t_WEBSOCKET_EVENT_BEFORE_CONNECT => Ok(Self::BeforeConnect),
             _ => Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>().into()),
         }
     }
@@ -195,9 +199,9 @@ pub struct EspWebSocketClientConfig<'a> {
     pub ping_interval_sec: time::Duration,
     #[cfg(esp_idf_version = "4.4")]
     pub if_name: Option<&'a str>,
-    pub cert_pem: Option<&'a str>,
-    pub client_cert: Option<&'a str>,
-    pub client_key: Option<&'a str>,
+    pub server_cert: Option<X509<'a>>,
+    pub client_cert: Option<X509<'a>>,
+    pub client_key: Option<X509<'a>>,
 }
 
 impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
@@ -231,12 +235,12 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
 
             ping_interval_sec: conf.ping_interval_sec.as_secs() as _,
 
-            cert_pem: cstrs.as_nptr(conf.cert_pem)?,
-            cert_len: conf.cert_pem.map(|c| c.len()).unwrap_or(0) as _,
-            client_cert: cstrs.as_nptr(conf.client_cert)?,
-            client_cert_len: conf.client_cert.map(|c| c.len()).unwrap_or(0) as _,
-            client_key: cstrs.as_nptr(conf.client_key)?,
-            client_key_len: conf.client_key.map(|c| c.len()).unwrap_or(0) as _,
+            cert_pem: cstrs.as_nptr(conf.server_cert.as_ref().map(x509_data))?,
+            cert_len: conf.server_cert.as_ref().map(x509_len).unwrap_or(0) as _,
+            client_cert: cstrs.as_nptr(conf.client_cert.as_ref().map(x509_data))?,
+            client_cert_len: conf.client_cert.as_ref().map(x509_len).unwrap_or(0) as _,
+            client_key: cstrs.as_nptr(conf.client_key.as_ref().map(x509_data))?,
+            client_key_len: conf.client_key.as_ref().map(x509_len).unwrap_or(0) as _,
 
             // NOTE: default keep_alive_* values are set below, so they are not explicitly listed
             // here
@@ -282,6 +286,37 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
         }
 
         Ok((c_conf, cstrs))
+    }
+}
+
+/// Return the X509 data without the null terminator.
+///
+/// X509 takes a CStr, which must contain a null terminator, and X509.data() returns a &[u8]
+/// including that null.
+///
+/// But RawCstrs.as_nptr() takes an Into<alloc::vec::Vec<u8>> and gives it to CString::new(),
+/// whose argument cannot contain a null character.
+///
+/// So this function returns the subset of the slice without the terminator.
+fn x509_data<'a>(x509: &'a X509) -> &'a [u8] {
+    &x509.data()[..x509.data().len().saturating_sub(1)]
+}
+
+/// Return the X509 data len to specify in esp_websocket_client_config_t fields for the given
+/// X509 encoding.
+///
+/// If the X509 data is PEM-encoded, then its length must be specified as `0`
+/// in the esp_websocket_client_config_t fields cert_len, client_cert_len, and client_key_len.
+///
+/// If the X509 data is DER-encoded, then its length should be specified as the actual length
+/// of the data (not including the null terminator).
+///
+/// So this function returns the appropriate length for the given encoding.
+fn x509_len(x509: &X509) -> usize {
+    if x509.encoding() == X509Encoding::PEM {
+        0
+    } else {
+        x509.data().len() - 1
     }
 }
 
@@ -380,6 +415,11 @@ pub struct EspWebSocketClient<'a> {
     // `send` method in the `Sender` trait in embedded_svc::ws does not take a timeout itself
     timeout: TickType_t,
     _callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>,
+    // CStrings that are used in the websocket configuration.
+    // We pass references into esp_websocket_client_init() via esp_websocket_client_config_t
+    // and must hold onto the CStrings they reference until the connection is dropped.
+    #[allow(dead_code)]
+    cstrs: RawCstrs,
 }
 
 impl EspWebSocketClient<'static> {
@@ -496,6 +536,7 @@ impl<'a> EspWebSocketClient<'a> {
             handle,
             timeout: t.0,
             _callback: boxed_raw_callback,
+            cstrs,
         };
 
         esp!(unsafe {
@@ -536,6 +577,10 @@ impl<'a> EspWebSocketClient<'a> {
         }
 
         Ok(())
+    }
+
+    pub fn is_connected(&self) -> bool {
+        unsafe { esp_websocket_client_is_connected(self.handle) }
     }
 
     extern "C" fn handle(

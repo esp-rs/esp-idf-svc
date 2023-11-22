@@ -34,6 +34,20 @@ with older `cargo-espflash`:
 $ cargo espflash --target riscv32imc-esp-espidf --example wifi --monitor /dev/ttyUSB0
 ```
 
+## Building with ESP IDF 5
+
+To build with ESP IDF 5.\*, you must configure rustflags with espidf_time64 in .cargo/config.toml:
+```
+[build]
+rustflags = "--cfg espidf_time64"
+```
+
+To build the websocket_client example with ESP IDF 5.\*, you must also add the esp_websocket_client extra component in Cargo.toml:
+```
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_websocket_client", version = "1.1.0" }
+```
+
 ## Setting up a "Hello, world!" binary crate with ESP IDF
 
 Use the [esp-idf-template](https://github.com/esp-rs/esp-idf-template) project. Everything would be arranged and built for you automatically - no need to manually clone the ESP IDF repository.

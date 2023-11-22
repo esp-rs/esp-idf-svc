@@ -69,11 +69,17 @@ impl<'a> TryFrom<&'a Psk<'a>> for TlsPsk {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub struct X509<'a>(&'a [u8]);
+pub struct X509<'a>(&'a [u8], X509Encoding);
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum X509Encoding {
+    PEM,
+    DER,
+}
 
 impl<'a> X509<'a> {
     pub fn pem(cstr: &'a CStr) -> Self {
-        Self(cstr.to_bytes_with_nul())
+        Self(cstr.to_bytes_with_nul(), X509Encoding::PEM)
     }
 
     pub const fn pem_until_nul(bytes: &'a [u8]) -> Self {
@@ -83,7 +89,7 @@ impl<'a> X509<'a> {
             if bytes[nul_pos] == 0 {
                 // TODO: replace with `<[u8]>::split_at(nul_pos + 1)` when const stabilized
                 let slice = unsafe { core::slice::from_raw_parts(bytes.as_ptr(), nul_pos + 1) };
-                return Self(slice);
+                return Self(slice, X509Encoding::PEM);
             }
             nul_pos += 1;
         }
@@ -91,11 +97,15 @@ impl<'a> X509<'a> {
     }
 
     pub const fn der(bytes: &'a [u8]) -> Self {
-        Self(bytes)
+        Self(bytes, X509Encoding::DER)
     }
 
     pub fn data(&self) -> &[u8] {
         self.0
+    }
+
+    pub fn encoding(&self) -> X509Encoding {
+        self.1
     }
 
     #[allow(unused)]
