@@ -568,6 +568,10 @@ impl<'a> EspWebSocketClient<'a> {
         Ok(())
     }
 
+    pub fn is_connected(&self) -> bool {
+        unsafe { esp_websocket_client_is_connected(self.handle) }
+    }
+
     extern "C" fn handle(
         event_handler_arg: *mut ffi::c_void,
         _event_base: esp_event_base_t,
