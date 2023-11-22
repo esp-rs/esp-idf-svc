@@ -378,6 +378,11 @@ pub struct EspWebSocketClient<'a> {
     // `send` method in the `Sender` trait in embedded_svc::ws does not take a timeout itself
     timeout: TickType_t,
     _callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>,
+    // CStrings that are used in the websocket configuration.
+    // We pass references into esp_websocket_client_init() via esp_websocket_client_config_t
+    // and must hold onto the CStrings they reference until the connection is dropped.
+    #[allow(dead_code)]
+    cstrs: RawCstrs,
 }
 
 impl EspWebSocketClient<'static> {
@@ -494,6 +499,7 @@ impl<'a> EspWebSocketClient<'a> {
             handle,
             timeout: t.0,
             _callback: boxed_raw_callback,
+            cstrs,
         };
 
         esp!(unsafe {
