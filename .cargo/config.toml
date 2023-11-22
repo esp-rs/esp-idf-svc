@@ -19,3 +19,6 @@ ESP_IDF_SDKCONFIG_DEFAULTS = ".github/configs/sdkconfig.defaults"
 [unstable]
 build-std = ["std", "panic_abort"]
 build-std-features = ["panic_immediate_abort"]
+
+[build]
+rustflags = "--cfg espidf_time64"

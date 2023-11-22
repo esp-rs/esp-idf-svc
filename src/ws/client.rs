@@ -170,6 +170,32 @@ impl<'a> WebSocketEventType<'a> {
     }
 }
 
+/// An encoding of an X.509 certificate or key.
+pub enum EspWebSocketX509Encoding<'a> {
+    PEM(&'a str),
+    DER(&'a str),
+}
+
+impl EspWebSocketX509Encoding<'_> {
+    fn len(&self) -> usize {
+        match self {
+            // Special case: when specified in esp_websocket_client_config_t, the PEM-encoded
+            // length is expected to be `0`, regardless of the actual length of the value.
+            // If the actual length is specified, then the underlying implementation will treat
+            // the value as being DER-encoded rather than PEM-encoded.
+            EspWebSocketX509Encoding::PEM(_) => 0,
+            EspWebSocketX509Encoding::DER(val) => val.len(),
+        }
+    }
+
+    fn val(&self) -> &str {
+        match self {
+            EspWebSocketX509Encoding::PEM(val) => val,
+            EspWebSocketX509Encoding::DER(val) => val,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct EspWebSocketClientConfig<'a> {
     pub username: Option<&'a str>,
@@ -195,9 +221,9 @@ pub struct EspWebSocketClientConfig<'a> {
     pub ping_interval_sec: time::Duration,
     #[cfg(esp_idf_version = "4.4")]
     pub if_name: Option<&'a str>,
-    pub cert_pem: Option<&'a str>,
-    pub client_cert: Option<&'a str>,
-    pub client_key: Option<&'a str>,
+    pub server_cert: Option<EspWebSocketX509Encoding<'a>>,
+    pub client_cert: Option<EspWebSocketX509Encoding<'a>>,
+    pub client_key: Option<EspWebSocketX509Encoding<'a>>,
 }
 
 impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
@@ -231,12 +257,12 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
 
             ping_interval_sec: conf.ping_interval_sec.as_secs() as _,
 
-            cert_pem: cstrs.as_nptr(conf.cert_pem)?,
-            cert_len: conf.cert_pem.map(|c| c.len()).unwrap_or(0) as _,
-            client_cert: cstrs.as_nptr(conf.client_cert)?,
-            client_cert_len: conf.client_cert.map(|c| c.len()).unwrap_or(0) as _,
-            client_key: cstrs.as_nptr(conf.client_key)?,
-            client_key_len: conf.client_key.map(|c| c.len()).unwrap_or(0) as _,
+            cert_pem: cstrs.as_nptr(conf.server_cert.as_ref().map(|c| c.val()))?,
+            cert_len: conf.server_cert.as_ref().map(|c| c.len()).unwrap_or(0) as _,
+            client_cert: cstrs.as_nptr(conf.client_cert.as_ref().map(|c| c.val()))?,
+            client_cert_len: conf.client_cert.as_ref().map(|c| c.len()).unwrap_or(0) as _,
+            client_key: cstrs.as_nptr(conf.client_key.as_ref().map(|c| c.val()))?,
+            client_key_len: conf.client_key.as_ref().map(|c| c.len()).unwrap_or(0) as _,
 
             // NOTE: default keep_alive_* values are set below, so they are not explicitly listed
             // here
