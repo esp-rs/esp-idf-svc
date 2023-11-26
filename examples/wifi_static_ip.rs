@@ -5,6 +5,7 @@
 
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration as WifiConfiguration};
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::ipv4::{
@@ -74,13 +75,14 @@ fn configure_wifi(wifi: &mut EspWifi<'_>) -> anyhow::Result<()> {
         ip_configuration: IpConfiguration::Client(IpClientConfiguration::Fixed(IpClientSettings {
             ip: static_ip,
             subnet: Subnet {
-                gateway: gateway_ip,
+                gateway: gateway_addr,
                 mask: Mask(netmask),
             },
             // Can also be set to Ipv4Addrs if you need DNS
             dns: None,
             secondary_dns: None,
         })),
+        route_priority: 0,
         stack: NetifStack::Sta,
         custom_mac: None,
     })?;
