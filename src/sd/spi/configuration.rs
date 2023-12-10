@@ -1,5 +1,6 @@
 use core::ops::Deref;
 
+use super::*;
 use crate::sys::*;
 use esp_idf_hal::{gpio, peripheral, spi};
 
@@ -11,8 +12,8 @@ impl From<sdspi_device_config_t> for SpiDeviceConfiguration {
     }
 }
 
-impl From<SpiDeviceConfiguration> for sdspi_device_config_t {
-    fn from(config: SpiDeviceConfiguration) -> Self {
+impl From<&mut SpiDeviceConfiguration> for sdspi_device_config_t {
+    fn from(config: &mut SpiDeviceConfiguration) -> Self {
         config.0
     }
 }
@@ -73,5 +74,13 @@ impl SpiDeviceConfiguration {
         let pin = peripheral_reference.deref();
         self.0.gpio_int = pin.pin();
         self
+    }
+
+    pub fn initialize(&mut self) -> Result<SpiDevice, esp_err_t> {
+        SpiDevice::initialize(self)
+    }
+
+    pub fn get_configuration(&self) -> &sdspi_device_config_t {
+        &self.0
     }
 }
