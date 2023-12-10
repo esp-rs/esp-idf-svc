@@ -101,5 +101,6 @@ pub mod wifi;
 pub mod ws;
 
 pub mod sd;
+pub mod fs;
 
 mod private;
