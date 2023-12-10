@@ -20,11 +20,11 @@ impl From<SpiDeviceConfiguration> for sdspi_device_config_t {
 impl Default for SpiDeviceConfiguration {
     fn default() -> Self {
         Self(sdspi_device_config_t {
-            host_id: 0,
-            gpio_cs: 0,
-            gpio_cd: 0,
-            gpio_wp: 0,
-            gpio_int: 0,
+            host_id: spi_host_device_t_SPI2_HOST,
+            gpio_cs: gpio_num_t_GPIO_NUM_13,
+            gpio_cd: gpio_num_t_GPIO_NUM_NC,
+            gpio_wp: gpio_num_t_GPIO_NUM_NC,
+            gpio_int: gpio_num_t_GPIO_NUM_NC,
         })
     }
 }
