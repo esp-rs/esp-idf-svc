@@ -246,6 +246,27 @@ static CLOSE_HANDLERS: Mutex<BTreeMap<u32, Vec<CloseHandler<'static>>>> =
 type NativeHandler<'a> = Box<dyn Fn(*mut httpd_req_t) -> ffi::c_int + 'a>;
 type CloseHandler<'a> = Box<dyn Fn(ffi::c_int) + Send + 'a>;
 
+trait Server<'a> {
+    type Connection<'r>: Connection;
+    type Error;
+
+    fn handler<H>(
+        &mut self,
+        uri: &str,
+        method: Method,
+        handler: H,
+    ) -> Result<&mut Self, Self::Error>
+    where
+        H: for<'r> Handler<Self::Connection<'r>> + Send + 'a;
+
+    fn fn_handler<F>(&mut self, uri: &str, method: Method, f: F) -> Result<&mut Self, Self::Error>
+    where
+        F: for<'r> Fn(Request<&mut Self::Connection<'r>>) -> HandlerResult + Send + 'a,
+    {
+        self.handler(uri, method, FnHandler::new(f))
+    }
+}
+
 pub struct EspHttpServer<'a> {
     sd: httpd_handle_t,
     registrations: Vec<(CString, crate::sys::httpd_uri_t)>,
@@ -255,6 +276,25 @@ pub struct EspHttpServer<'a> {
 impl EspHttpServer<'static> {
     pub fn new(conf: &Configuration) -> Result<Self, EspIOError> {
         Self::internal_new(conf)
+    }
+}
+
+impl Server<'a> for EspHttpServer<'a> {
+    type Connection<'r> = EspHttpConnection<'r>;
+    type Error = EspError;
+
+    fn handler<H>(
+        &mut self,
+        uri: &str,
+        method: Method,
+        handler: H,
+    ) -> Result<&mut Self, Self::Error>
+    where
+        H: for<'r> Handler<Self::Connection<'r>> + Send + 'a,
+    {
+        self.inner_handler(uri, method, handler)?;
+
+        Ok(self)
     }
 }
 
@@ -402,7 +442,7 @@ impl<'a> EspHttpServer<'a> {
         Ok(self)
     }
 
-    pub fn handler<H>(
+    fn inner_handler<H>(
         &mut self,
         uri: &str,
         method: Method,
@@ -433,13 +473,6 @@ impl<'a> EspHttpServer<'a> {
         self.registrations.push((c_str, conf));
 
         Ok(self)
-    }
-
-    pub fn fn_handler<F>(&mut self, uri: &str, method: Method, f: F) -> Result<&mut Self, EspError>
-    where
-        F: for<'r> Fn(Request<&mut EspHttpConnection<'r>>) -> HandlerResult + Send + 'a,
-    {
-        self.handler(uri, method, FnHandler::new(f))
     }
 
     fn to_native_handler<H>(&self, handler: H) -> NativeHandler<'a>
