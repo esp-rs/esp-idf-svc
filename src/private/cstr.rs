@@ -19,6 +19,13 @@ pub fn set_str(buf: &mut [u8], s: &str) -> Result<(), crate::sys::EspError> {
     Ok(())
 }
 
+#[cfg(feature = "alloc")]
+pub fn set_cchar_str(buf: &mut [c_char], s: &str) -> Result<(), crate::sys::EspError> {
+    let buf_u8 = unsafe { buf.as_mut_ptr() as *mut u8 };
+    let slice = unsafe { std::slice::from_raw_parts_mut(buf_u8, buf.len()) };
+    set_str(slice, s)
+}
+
 pub unsafe fn from_cstr_ptr<'a>(ptr: *const c_char) -> &'a str {
     CStr::from_ptr(ptr).to_str().unwrap()
 }
