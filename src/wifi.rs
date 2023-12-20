@@ -2457,6 +2457,14 @@ pub enum WpsType {
 }
 
 impl WpsType {
+    fn as_raw_type(&self) -> wps_type_t {
+        match self {
+            WpsType::Pbc => wps_type_WPS_TYPE_PBC,
+            WpsType::Pin(_) => wps_type_WPS_TYPE_PIN,
+        }
+    }
+
+    #[cfg(not(esp_idf_version_major = "4"))]
     fn as_pin(&self) -> [ffi::c_char; 9] {
         match self {
             WpsType::Pbc => [0; 9],
@@ -2468,13 +2476,6 @@ impl WpsType {
                 result[..pin.len()].copy_from_slice(slice);
                 result
             }
-        }
-    }
-
-    fn as_raw_type(&self) -> wps_type_t {
-        match self {
-            WpsType::Pbc => wps_type_WPS_TYPE_PBC,
-            WpsType::Pin(_) => wps_type_WPS_TYPE_PIN,
         }
     }
 }
