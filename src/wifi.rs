@@ -1831,10 +1831,10 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
                 let mut vec = heapless::Vec::new();
                 for i in 0..payload.ap_cred_cnt {
                     let creds = &payload.ap_cred[i as usize];
-                    let Ok(ssid) = std::str::from_utf8(&creds.ssid) else {
+                    let Ok(ssid) = core::str::from_utf8(&creds.ssid) else {
                         continue;
                     };
-                    let Ok(passphrase) = std::str::from_utf8(&creds.passphrase) else {
+                    let Ok(passphrase) = core::str::from_utf8(&creds.passphrase) else {
                         continue;
                     };
                     let creds = WpsCredentials {
@@ -1853,7 +1853,7 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN {
             let payload = unsafe { (data.payload as *const wifi_event_sta_wps_er_pin_t).as_ref() };
             let pin = payload.unwrap().pin_code;
-            let pin_str = std::str::from_utf8(&pin).unwrap_or("bad pin");
+            let pin_str = core::str::from_utf8(&pin).unwrap_or("bad pin");
             let pin_str = heapless::String::from(pin_str);
             WifiEvent::StaWpsPin(pin_str)
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
@@ -2472,7 +2472,7 @@ impl WpsType {
                 let mut result = [0; 9];
                 let bytes = pin.as_bytes();
                 let bytes_cchar = bytes.as_ptr() as *const ffi::c_char;
-                let slice = unsafe { std::slice::from_raw_parts(bytes_cchar, pin.len()) };
+                let slice = unsafe { core::slice::from_raw_parts(bytes_cchar, pin.len()) };
                 result[..pin.len()].copy_from_slice(slice);
                 result
             }
