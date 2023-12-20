@@ -1,8 +1,6 @@
-//! Example of using async wifi.
-//!
-//! Add your own ssid and password
+//! Example of using async WPS.
 
-use embedded_svc::wifi::Configuration;
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::log::EspLogger;

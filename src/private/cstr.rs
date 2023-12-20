@@ -10,7 +10,7 @@ use core::str::Utf8Error;
 use crate::sys::{EspError, ESP_ERR_INVALID_SIZE};
 
 #[cfg(feature = "alloc")]
-pub fn set_str(buf: &mut [u8], s: &str) -> Result<(), crate::sys::EspError> {
+pub fn set_str(buf: &mut [u8], s: &str) -> Result<(), EspError> {
     assert!(s.len() < buf.len());
     let cs = to_cstring_arg(s)?;
     let ss: &[u8] = cs.as_bytes_with_nul();
@@ -19,11 +19,14 @@ pub fn set_str(buf: &mut [u8], s: &str) -> Result<(), crate::sys::EspError> {
     Ok(())
 }
 
-#[cfg(feature = "alloc")]
-pub fn set_cchar_str(buf: &mut [c_char], s: &str) -> Result<(), crate::sys::EspError> {
-    let buf_u8 = unsafe { buf.as_mut_ptr() as *mut u8 };
-    let slice = unsafe { core::slice::from_raw_parts_mut(buf_u8, buf.len()) };
-    set_str(slice, s)
+pub fn set_cchar_slice(buf: &mut [c_char], s: &str) -> Result<(), EspError> {
+    if s.len() > buf.len() {
+        return Err(EspError::from_infallible::<ESP_ERR_INVALID_SIZE>());
+    }
+    let s_cchar = unsafe { s.as_bytes().as_ptr() as *const c_char };
+    let s_slice = unsafe { core::slice::from_raw_parts(s_cchar, s.len()) };
+    buf[..s.len()].copy_from_slice(s_slice);
+    Ok(())
 }
 
 pub unsafe fn from_cstr_ptr<'a>(ptr: *const c_char) -> &'a str {
