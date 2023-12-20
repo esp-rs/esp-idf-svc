@@ -2418,6 +2418,7 @@ impl TryFrom<&WpsConfig<'_>> for Newtype<esp_wps_config_t> {
         Ok(Newtype(esp_wps_config_t {
             wps_type: config.wps_type.as_raw_type(),
             factory_info,
+            #[cfg(not(esp_idf_version_major = "4"))]
             pin: config.wps_type.as_pin(),
         }))
     }
