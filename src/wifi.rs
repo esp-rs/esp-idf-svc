@@ -356,9 +356,9 @@ pub trait NonBlocking {
 
     fn start_wps(&mut self, config: &WpsConfig) -> Result<(), EspError>;
 
-    fn is_wps_active(&self) -> Result<bool, EspError>;
+    fn stop_wps(&mut self) -> Result<WpsStatus, EspError>;
 
-    fn take_wps_event(&mut self) -> Result<WpsEvent, EspError>;
+    fn is_wps_finished(&self) -> Result<bool, EspError>;
 }
 
 impl<T> NonBlocking for &mut T
@@ -396,12 +396,12 @@ where
         (**self).start_wps(config)
     }
 
-    fn is_wps_active(&self) -> Result<bool, EspError> {
-        (**self).is_wps_active()
+    fn stop_wps(&mut self) -> Result<WpsStatus, EspError> {
+        (**self).stop_wps()
     }
 
-    fn take_wps_event(&mut self) -> Result<WpsEvent, EspError> {
-        (**self).take_wps_event()
+    fn is_wps_finished(&self) -> Result<bool, EspError> {
+        (**self).is_wps_finished()
     }
 }
 
@@ -423,7 +423,7 @@ pub struct WifiDriver<'d> {
 struct WifiDriverStatus {
     pub sta: WifiEvent,
     pub ap: WifiEvent,
-    pub wps: Option<WpsEvent>,
+    pub wps: Option<WpsStatus>,
 }
 
 impl<'d> WifiDriver<'d> {
@@ -1101,25 +1101,24 @@ impl<'d> WifiDriver<'d> {
         esp!(unsafe { esp_wifi_wps_enable(&config.0 as *const _) })?;
         esp!(unsafe { esp_wifi_wps_start(0) })?;
 
-        self.status.lock().wps = Some(WpsEvent::Active);
+        self.status.lock().wps = None;
 
         Ok(())
     }
 
-    pub fn is_wps_active(&self) -> Result<bool, EspError> {
-        let status = self.status.lock();
-        Ok(matches!(status.wps, Some(WpsEvent::Active)))
-    }
-
     /// Gets the WPS status as a [`WPS Event`] and disables WPS.
-    fn take_wps_event(&mut self) -> Result<WpsEvent, EspError> {
+    fn stop_wps(&mut self) -> Result<WpsStatus, EspError> {
         let mut status = self.status.lock();
-        if status.wps.is_some() && !matches!(status.wps.as_ref().unwrap(), WpsEvent::Active) {
+        if let Some(status) = status.wps.take() {
             esp!(unsafe { esp_wifi_wps_disable() })?;
-            Ok(status.wps.take().unwrap())
+            Ok(status)
         } else {
             Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())
         }
+    }
+
+    fn is_wps_finished(&self) -> Result<bool, EspError> {
+        Ok(self.status.lock().wps.is_some())
     }
 
     fn get_sta_conf(&self) -> Result<ClientConfiguration, EspError> {
@@ -1307,12 +1306,12 @@ impl<'d> NonBlocking for WifiDriver<'d> {
         WifiDriver::start_wps(self, config)
     }
 
-    fn is_wps_active(&self) -> Result<bool, EspError> {
-        WifiDriver::is_wps_active(self)
+    fn stop_wps(&mut self) -> Result<WpsStatus, EspError> {
+        WifiDriver::stop_wps(self)
     }
 
-    fn take_wps_event(&mut self) -> Result<WpsEvent, EspError> {
-        WifiDriver::take_wps_event(self)
+    fn is_wps_finished(&self) -> Result<bool, EspError> {
+        WifiDriver::is_wps_finished(self)
     }
 }
 
@@ -1613,12 +1612,12 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().start_wps(config)
     }
 
-    pub fn is_wps_active(&self) -> Result<bool, EspError> {
-        self.driver().is_wps_active()
+    pub fn stop_wps(&mut self) -> Result<WpsStatus, EspError> {
+        self.driver_mut().stop_wps()
     }
 
-    pub fn take_wps_event(&mut self) -> Result<WpsEvent, EspError> {
-        self.driver_mut().take_wps_event()
+    pub fn is_wps_finished(&self) -> Result<bool, EspError> {
+        self.driver().is_wps_finished()
     }
 
     /// As per [`WifiDriver::get_mac()`].
@@ -1707,12 +1706,12 @@ impl<'d> NonBlocking for EspWifi<'d> {
         EspWifi::start_wps(self, config)
     }
 
-    fn is_wps_active(&self) -> Result<bool, EspError> {
-        EspWifi::is_wps_active(self)
+    fn stop_wps(&mut self) -> Result<WpsStatus, EspError> {
+        EspWifi::stop_wps(self)
     }
 
-    fn take_wps_event(&mut self) -> Result<WpsEvent, EspError> {
-        EspWifi::take_wps_event(self)
+    fn is_wps_finished(&self) -> Result<bool, EspError> {
+        EspWifi::is_wps_finished(self)
     }
 }
 
@@ -1780,8 +1779,6 @@ pub struct WpsCredentials {
     pub passphrase: heapless::String<64>,
 }
 
-const MAX_WPS_AP_CRED_USIZE: usize = MAX_WPS_AP_CRED as usize;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WifiEvent {
     Ready,
@@ -1795,10 +1792,10 @@ pub enum WifiEvent {
     StaAuthmodeChanged,
     StaBssRssiLow,
     StaBeaconTimeout,
-    StaWpsSuccess(Option<Arc<heapless::Vec<WpsCredentials, MAX_WPS_AP_CRED_USIZE>>>),
+    StaWpsSuccess(alloc::vec::Vec<WpsCredentials>),
     StaWpsFailed,
     StaWpsTimeout,
-    StaWpsPin(heapless::String<8>),
+    StaWpsPin(Option<u32>),
     StaWpsPbcOverlap,
 
     ApStarted,
@@ -1843,27 +1840,32 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS {
             let payload =
                 unsafe { (data.payload as *const wifi_event_sta_wps_er_success_t).as_ref() };
-            let credentials = payload.map(|payload| {
-                let mut vec = heapless::Vec::new();
+            let credentials = if let Some(payload) = payload {
+                let mut credentials = alloc::vec::Vec::with_capacity(payload.ap_cred_cnt.into());
                 for i in 0..payload.ap_cred_cnt {
                     let creds = &payload.ap_cred[i as usize];
-                    let Ok(ssid) = core::str::from_utf8(&creds.ssid) else {
+
+                    let Ok(ssid) = from_cstr_fallible(&creds.ssid) else {
                         log::warn!("Received a non-UTF-8 SSID via WPS");
                         continue;
                     };
-                    let Ok(passphrase) = core::str::from_utf8(&creds.passphrase) else {
+
+                    let Ok(passphrase) = from_cstr_fallible(&creds.passphrase) else {
                         log::warn!("Received a non-UTF-8 passphrase via WPS");
                         continue;
                     };
+
                     let creds = WpsCredentials {
                         ssid: ssid.into(),
                         passphrase: passphrase.into(),
                     };
-                    vec.push(creds).unwrap();
+                    credentials.push(creds);
                 }
-                vec
-            });
-            WifiEvent::StaWpsSuccess(credentials.map(Arc::new))
+                credentials
+            } else {
+                Vec::new()
+            };
+            WifiEvent::StaWpsSuccess(credentials)
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
             WifiEvent::StaWpsFailed
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT {
@@ -1872,8 +1874,8 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
             let payload = unsafe { (data.payload as *const wifi_event_sta_wps_er_pin_t).as_ref() };
             let pin = payload
                 .and_then(|x| core::str::from_utf8(&x.pin_code).ok())
-                .unwrap_or("bad pin");
-            WifiEvent::StaWpsPin(heapless::String::from(pin))
+                .and_then(|x| x.parse().ok());
+            WifiEvent::StaWpsPin(pin)
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP {
             WifiEvent::StaWpsPbcOverlap
         } else if event_id == wifi_event_t_WIFI_EVENT_AP_START {
@@ -2044,17 +2046,20 @@ where
     }
 
     /// Start WPS and perform a blocking wait until it connects, fails or times
-    /// out. A [`WpsEvent`] is returned that contains the success status of the
+    /// out. A [`WpsStatus`] is returned that contains the success status of the
     /// WPS connection. When the credentials of only one access point are
     /// received, the WiFi driver configuration will automatically be set to
     /// that access point. If multiple credentials were received, a
-    /// `WpsEvent::Success` will be returned with a vector containing those
+    /// `WpsStatus::Success` will be returned with a vector containing those
     /// credentials. The caller must then handle those credentials and set the
     /// configuration manually.
-    pub fn start_wps(&mut self, config: &WpsConfig) -> Result<WpsEvent, EspError> {
+    pub fn start_wps(&mut self, config: &WpsConfig) -> Result<WpsStatus, EspError> {
         self.wifi.start_wps(config)?;
-        self.wifi_wait_while(|| self.wifi.is_wps_active(), Some(WPS_TIMEOUT))?;
-        Ok(self.wifi.take_wps_event().unwrap_or(WpsEvent::Timeout))
+        self.wifi_wait_while(
+            || self.wifi.is_wps_finished().map(|x| !x),
+            Some(WPS_TIMEOUT),
+        )?;
+        Ok(self.wifi.stop_wps().unwrap_or(WpsStatus::Timeout))
     }
 }
 
@@ -2298,18 +2303,21 @@ where
     }
 
     /// Start WPS and perform a wait asynchronously until it connects, fails or
-    /// times out. A [`WpsEvent`] is returned that contains the success status
+    /// times out. A [`WpsStatus`] is returned that contains the success status
     /// of the WPS connection. When the credentials of only one access point are
     /// received, the WiFi driver configuration will automatically be set to
     /// that access point. If multiple credentials were received, a
-    /// `WpsEvent::Success` will be returned with a vector containing those
+    /// `WpsStatus::Success` will be returned with a vector containing those
     /// credentials. The caller must then handle those credentials and set the
     /// configuration manually.
-    pub async fn start_wps(&mut self, config: &WpsConfig<'_>) -> Result<WpsEvent, EspError> {
+    pub async fn start_wps(&mut self, config: &WpsConfig<'_>) -> Result<WpsStatus, EspError> {
         self.wifi.start_wps(config)?;
-        self.wifi_wait(|| self.wifi.is_wps_active(), Some(WPS_TIMEOUT))
-            .await?;
-        Ok(self.wifi.take_wps_event().unwrap_or(WpsEvent::Timeout))
+        self.wifi_wait(
+            || self.wifi.is_wps_finished().map(|x| !x),
+            Some(WPS_TIMEOUT),
+        )
+        .await?;
+        Ok(self.wifi.stop_wps().unwrap_or(WpsStatus::Timeout))
     }
 }
 
@@ -2471,7 +2479,7 @@ impl TryFrom<&WpsFactoryInfo<'_>> for Newtype<wps_factory_information_t> {
 
 pub enum WpsType {
     Pbc,
-    Pin(heapless::String<8>),
+    Pin(u32),
 }
 
 impl WpsType {
@@ -2488,10 +2496,13 @@ impl WpsType {
             WpsType::Pbc => [0; 9],
             WpsType::Pin(pin) => {
                 let mut result = [0; 9];
-                let bytes = pin.as_bytes();
-                let bytes_cchar = bytes.as_ptr() as *const ffi::c_char;
-                let slice = unsafe { core::slice::from_raw_parts(bytes_cchar, pin.len()) };
-                result[..pin.len()].copy_from_slice(slice);
+                let mut pin = *pin;
+                let mut rem: u32;
+                for i in 0..8 {
+                    rem = pin % 10;
+                    pin /= 10;
+                    result[7 - i] = (rem as ffi::c_char) + 48;
+                }
                 result
             }
         }
@@ -2499,25 +2510,31 @@ impl WpsType {
 }
 
 #[derive(Debug)]
-pub enum WpsEvent {
-    Active,
-    Success(Option<Arc<heapless::Vec<WpsCredentials, MAX_WPS_AP_CRED_USIZE>>>),
+pub enum WpsStatus {
+    SuccessConnected,
+    SuccessMultipleAccessPoints(alloc::vec::Vec<WpsCredentials>),
     Failure,
     Timeout,
-    Pin(heapless::String<8>),
+    Pin(Option<u32>),
     PbcOverlap,
 }
 
-impl TryFrom<&WifiEvent> for WpsEvent {
+impl TryFrom<&WifiEvent> for WpsStatus {
     type Error = EspError;
 
     fn try_from(event: &WifiEvent) -> Result<Self, Self::Error> {
         match event {
-            WifiEvent::StaWpsSuccess(credentials) => Ok(WpsEvent::Success(credentials.clone())),
-            WifiEvent::StaWpsFailed => Ok(WpsEvent::Failure),
-            WifiEvent::StaWpsTimeout => Ok(WpsEvent::Timeout),
-            WifiEvent::StaWpsPin(pin) => Ok(WpsEvent::Pin(pin.clone())),
-            WifiEvent::StaWpsPbcOverlap => Ok(WpsEvent::PbcOverlap),
+            WifiEvent::StaWpsSuccess(credentials) => {
+                if credentials.is_empty() {
+                    Ok(WpsStatus::SuccessConnected)
+                } else {
+                    Ok(WpsStatus::SuccessMultipleAccessPoints(credentials.clone()))
+                }
+            }
+            WifiEvent::StaWpsFailed => Ok(WpsStatus::Failure),
+            WifiEvent::StaWpsTimeout => Ok(WpsStatus::Timeout),
+            WifiEvent::StaWpsPin(pin) => Ok(WpsStatus::Pin(*pin)),
+            WifiEvent::StaWpsPbcOverlap => Ok(WpsStatus::PbcOverlap),
             _ => Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>()),
         }
     }

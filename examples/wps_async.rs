@@ -6,7 +6,7 @@ use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use esp_idf_svc::wifi::{WpsConfig, WpsEvent, WpsFactoryInfo, WpsType};
+use esp_idf_svc::wifi::{WpsConfig, WpsFactoryInfo, WpsStatus, WpsType};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 
 use futures::executor::block_on;
@@ -55,11 +55,10 @@ async fn connect_wps(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<(
     info!("Wifi started");
 
     match wifi.start_wps(&WPS_CONFIG).await? {
-        WpsEvent::Active => anyhow::bail!("invalid WPS response"),
-        WpsEvent::Success(None) => (), // credentials only received for one network, configuration will be set automatically
-        WpsEvent::Success(Some(credentials)) => {
+        WpsStatus::SuccessConnected => (),
+        WpsStatus::SuccessMultipleAccessPoints(credentials) => {
             log::info!("received multiple credentials, connecting to first one:");
-            for i in credentials.as_ref() {
+            for i in &credentials {
                 log::info!(" - ssid: {}", i.ssid);
             }
             let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
@@ -71,10 +70,10 @@ async fn connect_wps(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<(
             });
             wifi.set_configuration(&wifi_configuration)?;
         }
-        WpsEvent::Failure => anyhow::bail!("WPS failure"),
-        WpsEvent::Timeout => anyhow::bail!("WPS timeout"),
-        WpsEvent::Pin(_) => anyhow::bail!("WPS pin"),
-        WpsEvent::PbcOverlap => anyhow::bail!("WPS PBC overlap"),
+        WpsStatus::Failure => anyhow::bail!("WPS failure"),
+        WpsStatus::Timeout => anyhow::bail!("WPS timeout"),
+        WpsStatus::Pin(_) => anyhow::bail!("WPS pin"),
+        WpsStatus::PbcOverlap => anyhow::bail!("WPS PBC overlap"),
     }
 
     match wifi.get_configuration()? {
