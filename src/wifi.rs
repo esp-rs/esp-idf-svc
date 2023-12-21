@@ -2468,10 +2468,22 @@ impl TryFrom<&WpsFactoryInfo<'_>> for Newtype<wps_factory_information_t> {
             device_name: [0; 33],
         });
 
-        set_cchar_slice(&mut result.0.manufacturer, info.manufacturer)?;
-        set_cchar_slice(&mut result.0.model_number, info.model_number)?;
-        set_cchar_slice(&mut result.0.model_name, info.model_name)?;
-        set_cchar_slice(&mut result.0.device_name, info.device_name)?;
+        set_str(
+            c_char_to_u8_slice_mut(&mut result.0.manufacturer),
+            info.manufacturer,
+        )?;
+        set_str(
+            c_char_to_u8_slice_mut(&mut result.0.model_number),
+            info.model_number,
+        )?;
+        set_str(
+            c_char_to_u8_slice_mut(&mut result.0.model_name),
+            info.model_name,
+        )?;
+        set_str(
+            c_char_to_u8_slice_mut(&mut result.0.device_name),
+            info.device_name,
+        )?;
 
         Ok(result)
     }
