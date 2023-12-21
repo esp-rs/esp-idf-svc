@@ -581,7 +581,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_u8(&self, name: &str, val: u8) -> Result<(), EspError> {
+    pub fn set_u8(&mut self, name: &str, val: u8) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_u8(self.1, c_key.as_ptr(), val) })?;
@@ -606,7 +606,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_i8(&self, name: &str, val: i8) -> Result<(), EspError> {
+    pub fn set_i8(&mut self, name: &str, val: i8) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_i8(self.1, c_key.as_ptr(), val) })?;
@@ -631,7 +631,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_u16(&self, name: &str, val: u16) -> Result<(), EspError> {
+    pub fn set_u16(&mut self, name: &str, val: u16) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_u16(self.1, c_key.as_ptr(), val) })?;
@@ -656,7 +656,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_i16(&self, name: &str, val: i16) -> Result<(), EspError> {
+    pub fn set_i16(&mut self, name: &str, val: i16) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_i16(self.1, c_key.as_ptr(), val) })?;
@@ -681,7 +681,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_u32(&self, name: &str, val: u32) -> Result<(), EspError> {
+    pub fn set_u32(&mut self, name: &str, val: u32) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_u32(self.1, c_key.as_ptr(), val) })?;
@@ -706,7 +706,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_i32(&self, name: &str, val: i32) -> Result<(), EspError> {
+    pub fn set_i32(&mut self, name: &str, val: i32) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_i32(self.1, c_key.as_ptr(), val) })?;
@@ -731,7 +731,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_u64(&self, name: &str, val: u64) -> Result<(), EspError> {
+    pub fn set_u64(&mut self, name: &str, val: u64) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_u64(self.1, c_key.as_ptr(), val) })?;
@@ -756,7 +756,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn set_i64(&self, name: &str, val: i64) -> Result<(), EspError> {
+    pub fn set_i64(&mut self, name: &str, val: i64) -> Result<(), EspError> {
         let c_key = to_cstring_arg(name)?;
 
         esp!(unsafe { nvs_set_i64(self.1, c_key.as_ptr(), val) })?;
