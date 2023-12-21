@@ -1863,7 +1863,7 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
                 }
                 credentials
             } else {
-                Vec::new()
+                alloc::vec::Vec::new()
             };
             WifiEvent::StaWpsSuccess(credentials)
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
