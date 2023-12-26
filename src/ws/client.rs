@@ -112,6 +112,7 @@ impl WebSocketClosingReason {
 
 #[derive(Debug)]
 pub enum WebSocketEventType<'a> {
+    BeforeConnect,
     Connected,
     Disconnected,
     Close(Option<WebSocketClosingReason>),
@@ -165,6 +166,8 @@ impl<'a> WebSocketEventType<'a> {
                 }
             }
             esp_websocket_event_id_t_WEBSOCKET_EVENT_CLOSED => Ok(Self::Closed),
+            #[cfg(esp_idf_version_major = "5")]
+            esp_websocket_event_id_t_WEBSOCKET_EVENT_BEFORE_CONNECT => Ok(Self::BeforeConnect),
             _ => Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>().into()),
         }
     }

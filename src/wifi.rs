@@ -528,6 +528,7 @@ impl<'d> WifiDriver<'d> {
             wifi_task_core_id: WIFI_TASK_CORE_ID as _,
             beacon_max_len: WIFI_SOFTAP_BEACON_MAX_LEN as _,
             mgmt_sbuf_num: WIFI_MGMT_SBUF_NUM as _,
+            #[cfg(esp_idf_version_major = "4")]
             feature_caps: unsafe { g_wifi_feature_caps },
             sta_disconnected_pm: WIFI_STA_DISCONNECTED_PM_ENABLED != 0,
             // Available since ESP IDF V4.4.4+
