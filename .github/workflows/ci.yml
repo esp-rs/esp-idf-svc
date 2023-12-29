@@ -51,6 +51,7 @@ jobs:
         env:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          ESP_IDF_COMPONENT_MANAGER: "${{ matrix.idf-version == 'v5.1.1' && 'y' || 'n'}}"
           RUSTFLAGS: "${{ matrix.idf-version == 'v5.1.1' && '--cfg espidf_time64' || ''}}"
         run: cargo clippy --features nightly,experimental --no-deps --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Dwarnings
 
@@ -58,6 +59,7 @@ jobs:
         env:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          ESP_IDF_COMPONENT_MANAGER: "${{ matrix.idf-version == 'v5.1.1' && 'y' || 'n'}}"
           RUSTFLAGS: "${{ matrix.idf-version == 'v5.1.1' && '--cfg espidf_time64' || ''}}"
         run: cargo build --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
 
@@ -65,6 +67,7 @@ jobs:
         env:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          ESP_IDF_COMPONENT_MANAGER: "${{ matrix.idf-version == 'v5.1.1' && 'y' || 'n'}}"
           RUSTFLAGS: "${{ matrix.idf-version == 'v5.1.1' && '--cfg espidf_time64' || ''}}"
         run: cargo build --no-default-features --features nightly,experimental --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
 
@@ -72,6 +75,7 @@ jobs:
         env:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          ESP_IDF_COMPONENT_MANAGER: "${{ matrix.idf-version == 'v5.1.1' && 'y' || 'n'}}"
           RUSTFLAGS: "${{ matrix.idf-version == 'v5.1.1' && '--cfg espidf_time64' || ''}}"
         run: cargo build --no-default-features --features nightly,experimental,alloc --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
 
@@ -86,6 +90,7 @@ jobs:
         env:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          ESP_IDF_COMPONENT_MANAGER: "${{ matrix.idf-version == 'v5.1.1' && 'y' || 'n'}}"
           RUSTFLAGS: "${{ matrix.idf-version == 'v5.1.1' && '--cfg espidf_time64 ' || ''}} ${{ '-C default-linker-libraries' }}"
           WIFI_SSID: "ssid"
           WIFI_PASS: "pass"

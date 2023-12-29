@@ -82,6 +82,7 @@ name = "ws_guessing_game"
 # Add the esp_websocket_client extra component to build the websocket_client
 # example with ESP-IDF 5.*, which doesn't include the component by default.
 # Must be disabled to build the websocket_client example with ESP-IDF 4.*,
-# which does include the component by default.
-# [[package.metadata.esp-idf-sys.extra_components]]
-# remote_component = { name = "espressif/esp_websocket_client", version = "1.1.0" }
+# which includes an earlier version of the component by default, and which isn't
+# compatible with the version of the client in the component registry.
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_websocket_client", version = "1.1.0" }
