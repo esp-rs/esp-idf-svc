@@ -209,7 +209,7 @@ fn initialize_netif_stack() -> Result<(), EspError> {
 }
 
 #[derive(Debug)]
-pub struct EspNetif(*mut esp_netif_t);
+pub struct EspNetif(SendSyncPtr<esp_netif_t>);
 
 impl EspNetif {
     pub fn new(stack: NetifStack) -> Result<Self, EspError> {
@@ -332,7 +332,9 @@ impl EspNetif {
             stack: conf.stack.default_raw_stack(),
         };
 
-        let mut handle = Self(unsafe { esp_netif_new(&cfg).as_mut() }.unwrap());
+        let mut handle = Self(SendSyncPtr::new(
+            unsafe { esp_netif_new(&cfg).as_mut() }.unwrap(),
+        ));
 
         if let Some(dns) = dns {
             handle.set_dns(dns);
@@ -347,7 +349,7 @@ impl EspNetif {
 
                 esp!(unsafe {
                     esp_netif_dhcps_option(
-                        handle.0,
+                        handle.0.as_mut_ptr(),
                         esp_netif_dhcp_option_mode_t_ESP_NETIF_OP_SET,
                         esp_netif_dhcp_option_id_t_ESP_NETIF_DOMAIN_NAME_SERVER,
                         &mut dhcps_dns_value as *mut _ as *mut _,
@@ -369,11 +371,11 @@ impl EspNetif {
     }
 
     pub fn is_up(&self) -> Result<bool, EspError> {
-        if !unsafe { esp_netif_is_netif_up(self.0) } {
+        if !unsafe { esp_netif_is_netif_up(self.0.as_mut_ptr()) } {
             Ok(false)
         } else {
             let mut ip_info = Default::default();
-            unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
+            unsafe { esp!(esp_netif_get_ip_info(self.0.as_mut_ptr(), &mut ip_info)) }?;
 
             Ok(ipv4::IpInfo::from(Newtype(ip_info)).ip != ipv4::Ipv4Addr::new(0, 0, 0, 0))
         }
@@ -381,7 +383,7 @@ impl EspNetif {
 
     pub fn get_ip_info(&self) -> Result<ipv4::IpInfo, EspError> {
         let mut ip_info = Default::default();
-        unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
+        unsafe { esp!(esp_netif_get_ip_info(self.0.as_mut_ptr(), &mut ip_info)) }?;
 
         Ok(ipv4::IpInfo {
             // Get the DNS information
@@ -392,18 +394,20 @@ impl EspNetif {
     }
 
     pub fn get_key(&self) -> heapless::String<32> {
-        unsafe { from_cstr_ptr(esp_netif_get_ifkey(self.0)) }.into()
+        unsafe { from_cstr_ptr(esp_netif_get_ifkey(self.0.as_mut_ptr())) }.into()
     }
 
     pub fn get_index(&self) -> u32 {
-        unsafe { esp_netif_get_netif_impl_index(self.0) as _ }
+        unsafe { esp_netif_get_netif_impl_index(self.0.as_mut_ptr()) as _ }
     }
 
     pub fn get_name(&self) -> heapless::String<6> {
         let mut netif_name = [0u8; 7];
 
-        esp!(unsafe { esp_netif_get_netif_impl_name(self.0, netif_name.as_mut_ptr() as *mut _) })
-            .unwrap();
+        esp!(unsafe {
+            esp_netif_get_netif_impl_name(self.0.as_mut_ptr(), netif_name.as_mut_ptr() as *mut _)
+        })
+        .unwrap();
 
         from_cstr(&netif_name).into()
     }
@@ -411,12 +415,12 @@ impl EspNetif {
     pub fn get_mac(&self) -> Result<[u8; 6], EspError> {
         let mut mac = [0u8; 6];
 
-        esp!(unsafe { esp_netif_get_mac(self.0, mac.as_mut_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_get_mac(self.0.as_mut_ptr(), mac.as_mut_ptr() as *mut _) })?;
         Ok(mac)
     }
 
     pub fn set_mac(&mut self, mac: &[u8; 6]) -> Result<(), EspError> {
-        esp!(unsafe { esp_netif_set_mac(self.0, mac.as_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_set_mac(self.0.as_mut_ptr(), mac.as_ptr() as *mut _) })?;
         Ok(())
     }
 
@@ -425,7 +429,7 @@ impl EspNetif {
 
         unsafe {
             esp!(esp_netif_get_dns_info(
-                self.0,
+                self.0.as_mut_ptr(),
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
@@ -442,7 +446,7 @@ impl EspNetif {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(dns).0;
 
             esp!(esp_netif_set_dns_info(
-                self.0,
+                self.0.as_mut_ptr(),
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
@@ -455,7 +459,7 @@ impl EspNetif {
 
         unsafe {
             esp!(esp_netif_get_dns_info(
-                self.0,
+                self.0.as_mut_ptr(),
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
@@ -472,7 +476,7 @@ impl EspNetif {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(secondary_dns).0;
 
             esp!(esp_netif_set_dns_info(
-                self.0,
+                self.0.as_mut_ptr(),
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
@@ -482,7 +486,7 @@ impl EspNetif {
 
     pub fn get_hostname(&self) -> Result<heapless::String<30>, EspError> {
         let mut ptr: *const ffi::c_char = ptr::null();
-        esp!(unsafe { esp_netif_get_hostname(self.0, &mut ptr) })?;
+        esp!(unsafe { esp_netif_get_hostname(self.0.as_mut_ptr(), &mut ptr) })?;
 
         Ok(unsafe { from_cstr_ptr(ptr).into() })
     }
@@ -490,7 +494,9 @@ impl EspNetif {
     fn set_hostname(&mut self, hostname: &str) -> Result<(), EspError> {
         let hostname = to_cstring_arg(hostname)?;
 
-        esp!(unsafe { esp_netif_set_hostname(self.0, hostname.as_ptr() as *const _) })?;
+        esp!(unsafe {
+            esp_netif_set_hostname(self.0.as_mut_ptr(), hostname.as_ptr() as *const _)
+        })?;
 
         Ok(())
     }
@@ -508,7 +514,7 @@ impl EspNetif {
 
 impl Drop for EspNetif {
     fn drop(&mut self) {
-        unsafe { esp_netif_destroy(self.0) };
+        unsafe { esp_netif_destroy(self.0.as_mut_ptr()) };
 
         info!("Dropped");
     }
@@ -520,7 +526,7 @@ impl RawHandle for EspNetif {
     type Handle = *mut esp_netif_t;
 
     fn handle(&self) -> Self::Handle {
-        self.0
+        self.0.as_mut_ptr()
     }
 }
 
