@@ -1846,12 +1846,12 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
                     let creds = &payload.ap_cred[i as usize];
 
                     let Ok(ssid) = from_cstr_fallible(&creds.ssid) else {
-                        log::warn!("Received a non-UTF-8 SSID via WPS");
+                        warn!("Received a non-UTF-8 SSID via WPS");
                         continue;
                     };
 
                     let Ok(passphrase) = from_cstr_fallible(&creds.passphrase) else {
-                        log::warn!("Received a non-UTF-8 passphrase via WPS");
+                        warn!("Received a non-UTF-8 passphrase via WPS");
                         continue;
                     };
 
