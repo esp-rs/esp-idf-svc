@@ -15,8 +15,8 @@ unsafe impl<T> Sync for UnsafeCellSendSync<T> {}
 pub struct SendSyncPtr<T>(*mut T);
 
 impl<T> SendSyncPtr<T> {
-    pub fn new(ptr: *mut T) -> Self {
-        Self(ptr)
+    pub fn new(ptr: *const T) -> Self {
+        Self(ptr as *mut T)
     }
 
     pub fn as_ptr(&self) -> *const T {

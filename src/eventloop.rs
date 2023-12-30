@@ -19,6 +19,7 @@ use crate::hal::cpu::Core;
 use crate::hal::delay::TickType;
 use crate::hal::interrupt;
 
+use crate::private::common::SendSyncPtr;
 use crate::sys::*;
 
 use crate::handle::RawHandle;
@@ -215,8 +216,8 @@ struct UnsafeCallback<'a>(*mut Box<dyn FnMut(&EspEventFetchData) + Send + 'a>);
 
 impl<'a> UnsafeCallback<'a> {
     #[allow(clippy::type_complexity)]
-    fn from(boxed: &mut Box<Box<dyn FnMut(&EspEventFetchData) + Send + 'a>>) -> Self {
-        Self(boxed.as_mut())
+    fn from(boxed: &mut Box<dyn FnMut(&EspEventFetchData) + Send + 'a>) -> Self {
+        Self(boxed)
     }
 
     unsafe fn from_ptr(ptr: *mut ffi::c_void) -> Self {
@@ -239,11 +240,11 @@ where
     T: EspEventLoopType,
 {
     event_loop_handle: Arc<EventLoopHandle<T>>,
-    handler_instance: esp_event_handler_instance_t,
-    source: *const ffi::c_char,
+    handler_instance: SendSyncPtr<::core::ffi::c_void>,
+    source: SendSyncPtr<::core::ffi::c_char>,
     event_id: i32,
     #[allow(clippy::type_complexity)]
-    _callback: Box<Box<dyn FnMut(&EspEventFetchData) + Send + 'a>>,
+    _callback: mutex::Mutex<Box<dyn FnMut(&EspEventFetchData) + Send + 'a>>,
 }
 
 impl<'a, T> EspSubscription<'a, T>
@@ -278,9 +279,9 @@ where
         if T::is_system() {
             unsafe {
                 esp!(esp_event_handler_instance_unregister(
-                    self.source,
+                    self.source.as_ptr(),
                     self.event_id,
-                    self.handler_instance
+                    self.handler_instance.as_mut_ptr()
                 ))
                 .unwrap();
             }
@@ -291,9 +292,9 @@ where
 
                 esp!(esp_event_handler_instance_unregister_with(
                     user.0,
-                    self.source,
+                    self.source.as_ptr(),
                     self.event_id,
-                    self.handler_instance
+                    self.handler_instance.as_mut_ptr()
                 ))
                 .unwrap();
             }
@@ -308,7 +309,7 @@ where
     type Handle = esp_event_handler_instance_t;
 
     fn handle(&self) -> Self::Handle {
-        self.handler_instance
+        self.handler_instance.as_mut_ptr()
     }
 }
 
@@ -440,10 +441,10 @@ where
 
         Ok(EspSubscription {
             event_loop_handle: self.0.clone(),
-            handler_instance,
-            source,
+            handler_instance: SendSyncPtr::new(handler_instance),
+            source: SendSyncPtr::new(source),
             event_id,
-            _callback: callback,
+            _callback: mutex::Mutex::new(callback),
         })
     }
 

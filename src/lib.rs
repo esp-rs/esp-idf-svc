@@ -53,7 +53,7 @@ pub mod espnow;
     esp_idf_eth_use_openeth
 ))]
 pub mod eth;
-#[cfg(all(feature = "alloc", esp_idf_comp_esp_event_enabled))]
+// #[cfg(all(feature = "alloc", esp_idf_comp_esp_event_enabled))]
 pub mod eventloop;
 pub mod hal;
 pub mod handle;
