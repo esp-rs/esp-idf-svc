@@ -194,24 +194,30 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
     }
 }
 
-impl From<Newtype<wifi_sta_config_t>> for ClientConfiguration {
+impl From<Newtype<wifi_sta_config_t>> for Option<ClientConfiguration> {
     fn from(conf: Newtype<wifi_sta_config_t>) -> Self {
-        let auth_method: Option<AuthMethod> = Newtype(conf.0.threshold.authmode).into();
-
-        Self {
-            ssid: from_cstr(&conf.0.ssid).into(),
-            bssid: if conf.0.bssid_set {
-                Some(conf.0.bssid)
-            } else {
-                None
+        let auth_method_opt: Option<AuthMethod> = Newtype(conf.0.threshold.authmode).into();
+        match auth_method_opt {
+            Some(auth_method) => {
+                Some(
+                    ClientConfiguration {
+                        ssid: from_cstr(&conf.0.ssid).try_into().unwrap(),
+                        bssid: if conf.0.bssid_set {
+                            Some(conf.0.bssid)
+                        } else {
+                            None
+                        },
+                        auth_method: auth_method,
+                        password: from_cstr(&conf.0.password).try_into().unwrap(),
+                        channel: if conf.0.channel != 0 {
+                            Some(conf.0.channel)
+                        } else {
+                            None
+                        },
+                    }
+                )
             },
-            auth_method: auth_method.unwrap(),
-            password: from_cstr(&conf.0.password).try_into().unwrap(),
-            channel: if conf.0.channel != 0 {
-                Some(conf.0.channel)
-            } else {
-                None
-            },
+            None => None,
         }
     }
 }
@@ -239,26 +245,31 @@ impl TryFrom<&AccessPointConfiguration> for Newtype<wifi_ap_config_t> {
     }
 }
 
-impl From<Newtype<wifi_ap_config_t>> for AccessPointConfiguration {
+impl From<Newtype<wifi_ap_config_t>> for Option<AccessPointConfiguration> {
     fn from(conf: Newtype<wifi_ap_config_t>) -> Self {
-        Self {
-            ssid: if conf.0.ssid_len == 0 {
-                from_cstr(&conf.0.ssid).try_into().unwrap()
-            } else {
-                unsafe {
-                    core::str::from_utf8_unchecked(&conf.0.ssid[0..conf.0.ssid_len as usize])
-                        .try_into()
-                        .unwrap()
-                }
+        match Option::<AuthMethod>::from(Newtype(conf.0.authmode)) {
+            Some(auth_method) => {
+                Some(
+                    AccessPointConfiguration {
+                        ssid: if conf.0.ssid_len == 0 {
+                            from_cstr(&conf.0.ssid).try_into().unwrap()
+                        } else {
+                            unsafe {
+                                core::str::from_utf8_unchecked(&conf.0.ssid[0..conf.0.ssid_len as usize]).try_into().unwrap()
+                            }
+                        },
+                        ssid_hidden: conf.0.ssid_hidden != 0,
+                        channel: conf.0.channel,
+                        secondary_channel: None,
+                        auth_method: auth_method,
+                        protocols: EnumSet::<Protocol>::empty(), // TODO
+                        password: from_cstr(&conf.0.password).try_into().unwrap(),
+                        max_connections: conf.0.max_connection as u16,
+                    }
+                )
             },
-            ssid_hidden: conf.0.ssid_hidden != 0,
-            channel: conf.0.channel,
-            secondary_channel: None,
-            auth_method: Option::<AuthMethod>::from(Newtype(conf.0.authmode)).unwrap(),
-            protocols: EnumSet::<Protocol>::empty(), // TODO
-            password: from_cstr(&conf.0.password).try_into().unwrap(),
-            max_connections: conf.0.max_connection as u16,
-        }
+            None => None,
+        }       
     }
 }
 
@@ -1129,8 +1140,12 @@ impl<'d> WifiDriver<'d> {
         let mut wifi_config: wifi_config_t = Default::default();
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
 
-        let result: ClientConfiguration = unsafe { Newtype(wifi_config.sta).into() };
-
+        let client_config: Option<ClientConfiguration>;
+        unsafe {
+            client_config = Newtype(wifi_config.sta).into();  
+        } 
+        //unwrap should be ok here, as we only convert a value that we were able to set prior
+        let result: ClientConfiguration = client_config.unwrap();
         debug!("Providing STA configuration: {:?}", &result);
 
         Ok(result)
@@ -1160,8 +1175,12 @@ impl<'d> WifiDriver<'d> {
     fn get_ap_conf(&self) -> Result<AccessPointConfiguration, EspError> {
         let mut wifi_config: wifi_config_t = Default::default();
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
-
-        let result: AccessPointConfiguration = unsafe { Newtype(wifi_config.ap).into() };
+        let access_point_configuration: Option<AccessPointConfiguration>;
+        unsafe{
+            access_point_configuration = Newtype(wifi_config.ap).into();
+        } 
+        //unwrap should be safe here, as it should be impossible to configure a accesspoint, that cannot be represented
+        let result: AccessPointConfiguration = unsafe { access_point_configuration.unwrap() };
 
         debug!("Providing AP configuration: {:?}", &result);
 
