@@ -196,16 +196,17 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
 
 impl From<Newtype<wifi_sta_config_t>> for ClientConfiguration {
     fn from(conf: Newtype<wifi_sta_config_t>) -> Self {
-        let auth_method: Option<AuthMethod> = Newtype(conf.0.threshold.authmode).into();
-
         Self {
-            ssid: from_cstr(&conf.0.ssid).into(),
+            ssid: from_cstr(&conf.0.ssid).try_into().unwrap(),
             bssid: if conf.0.bssid_set {
                 Some(conf.0.bssid)
             } else {
                 None
             },
-            auth_method: auth_method.unwrap(),
+            auth_method: <Newtype<u32> as std::convert::Into<Option<AuthMethod>>>::into(Newtype(
+                conf.0.threshold.authmode,
+            ))
+            .unwrap(),
             password: from_cstr(&conf.0.password).try_into().unwrap(),
             channel: if conf.0.channel != 0 {
                 Some(conf.0.channel)
