@@ -3,7 +3,7 @@
 //! This example connects to a websocket server that echoes messages,
 //! sends a message, receives the same message, and closes the connection.
 
-use core::time::Duration;
+use core::{ffi::CStr, time::Duration};
 
 use embedded_svc::{
     wifi::{AuthMethod, ClientConfiguration, Configuration},
@@ -16,10 +16,10 @@ use esp_idf_svc::{
     io::EspIOError,
     log::EspLogger,
     nvs::EspDefaultNvsPartition,
+    tls::X509,
     wifi::{BlockingWifi, EspWifi},
     ws::client::{
-        EspWebSocketClient, EspWebSocketClientConfig, EspWebSocketX509Encoding, WebSocketEvent,
-        WebSocketEventType,
+        EspWebSocketClient, EspWebSocketClientConfig, WebSocketEvent, WebSocketEventType,
     },
 };
 
@@ -65,7 +65,7 @@ oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
 mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
 emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
-";
+\0";
 
 /// The relevant events for this example as it connects to the server,
 /// sends a message, receives the same message, and closes the connection.
@@ -92,7 +92,9 @@ fn main() -> anyhow::Result<()> {
 
     // Connect websocket
     let config = EspWebSocketClientConfig {
-        server_cert: Some(EspWebSocketX509Encoding::PEM(SERVER_ROOT_CERT)),
+        server_cert: Some(X509::pem(
+            CStr::from_bytes_with_nul(SERVER_ROOT_CERT.as_bytes()).unwrap(),
+        )),
         ..Default::default()
     };
     let timeout = Duration::from_secs(10);

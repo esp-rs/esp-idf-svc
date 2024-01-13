@@ -52,8 +52,8 @@ impl RawCstrs {
     }
 
     #[allow(dead_code)]
-    pub fn as_ptr(&mut self, s: impl AsRef<str>) -> Result<*const c_char, crate::sys::EspError> {
-        let cs = to_cstring_arg(s.as_ref())?;
+    pub fn as_ptr(&mut self, s: impl Into<Vec<u8>>) -> Result<*const c_char, crate::sys::EspError> {
+        let cs = to_cstring_arg(s)?;
 
         let cstr_ptr = cs.as_ptr();
 
@@ -65,7 +65,7 @@ impl RawCstrs {
     #[allow(dead_code)]
     pub fn as_nptr<S>(&mut self, s: Option<S>) -> Result<*const c_char, crate::sys::EspError>
     where
-        S: AsRef<str>,
+        S: Into<Vec<u8>>,
     {
         s.map(|s| self.as_ptr(s)).unwrap_or(Ok(core::ptr::null()))
     }
@@ -86,7 +86,10 @@ pub fn nul_to_invalid_arg(_err: alloc::ffi::NulError) -> crate::sys::EspError {
 }
 
 #[cfg(feature = "alloc")]
-pub fn to_cstring_arg(value: &str) -> Result<CString, crate::sys::EspError> {
+pub fn to_cstring_arg<S>(value: S) -> Result<CString, crate::sys::EspError>
+where
+    S: Into<Vec<u8>>,
+{
     CString::new(value).map_err(nul_to_invalid_arg)
 }
 
