@@ -294,8 +294,8 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
 /// X509 takes a CStr, which must contain a null terminator, and X509.data() returns a &[u8]
 /// including that null.
 ///
-/// But RawCstrs.as_nptr() takes an Into<Vec<u8>> and gives it to CString::new(), whose argument
-/// cannot contain a null character.
+/// But RawCstrs.as_nptr() takes an Into<alloc::vec::Vec<u8>> and gives it to CString::new(),
+/// whose argument cannot contain a null character.
 ///
 /// So this function returns the subset of the slice without the terminator.
 fn x509_data<'a>(x509: &'a X509) -> &'a [u8] {
