@@ -8,15 +8,11 @@
 //!
 //! - `std`: Enable the use of std. Enabled by default.
 //! - `experimental`: Enable the use of experimental features.
-//! - `embassy-time-driver`
-//! - `embassy-time-isr-queue`
+//! - `embassy-time-driver`: Implement an embassy time driver.
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(stable_features)]
-#![allow(unknown_lints)]
+#![allow(async_fn_in_trait)]
+//#![allow(unknown_lints)]
 #![warn(clippy::large_futures)]
-#![cfg_attr(feature = "nightly", feature(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", allow(async_fn_in_trait))]
-#![cfg_attr(feature = "nightly", feature(impl_trait_projections))]
 
 #[cfg(feature = "alloc")]
 #[allow(unused_imports)]

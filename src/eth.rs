@@ -118,10 +118,6 @@ pub enum SpiEthChipset {
     KSZ8851SNL,
 }
 
-struct RawHandleImpl(esp_eth_handle_t);
-
-unsafe impl Send for RawHandleImpl {}
-
 type RawCallback<'a> = Box<dyn FnMut(&[u8]) + Send + 'a>;
 
 struct UnsafeCallback<'a>(*mut RawCallback<'a>);
@@ -612,10 +608,10 @@ impl<'d, T> EthDriver<'d, T> {
         let status = Arc::new(mutex::Mutex::wrap(mutex::RawMutex::new(), Status::Stopped));
         let s_status = status.clone();
 
-        let handle = RawHandleImpl(handle);
+        let handle = handle as usize;
 
         let subscription = sysloop.subscribe(move |event: &EthEvent| {
-            if event.is_for_handle(handle.0) {
+            if event.is_for_handle(handle as _) {
                 let mut guard = s_status.lock();
 
                 match event {
@@ -1199,26 +1195,27 @@ where
 
     pub async fn start(&mut self) -> Result<(), EspError> {
         self.eth.start()?;
-        self.eth_wait_while(|| self.eth.is_started().map(|s| !s), None)
+        self.eth_wait_while(|this| this.eth.is_started().map(|s| !s), None)
             .await
     }
 
     pub async fn stop(&mut self) -> Result<(), EspError> {
         self.eth.stop()?;
-        self.eth_wait_while(|| self.eth.is_started(), None).await
+        self.eth_wait_while(|this| this.eth.is_started(), None)
+            .await
     }
 
-    pub async fn wait_connected(&self) -> Result<(), EspError> {
+    pub async fn wait_connected(&mut self) -> Result<(), EspError> {
         self.eth_wait_while(
-            || self.eth.is_connected().map(|s| !s),
+            |this| this.eth.is_connected().map(|s| !s),
             Some(CONNECT_TIMEOUT),
         )
         .await
     }
 
-    pub async fn eth_wait_while<F: Fn() -> Result<bool, EspError>>(
-        &self,
-        matcher: F,
+    pub async fn eth_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+        &mut self,
+        mut matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
         use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
@@ -1227,10 +1224,9 @@ where
         let event_loop = AsyncEventBus::new((), self.event_loop.clone());
         let timer_service = AsyncTimerService::new(self.timer_service.clone());
 
-        let mut wait =
-            crate::eventloop::AsyncWait::<EthEvent, _>::new(&event_loop, &timer_service)?;
+        let mut wait = crate::eventloop::AsyncWait::<EthEvent, _>::new(event_loop, timer_service)?;
 
-        wait.wait_while(matcher, timeout).await
+        wait.wait_while(|| matcher(self), timeout).await
     }
 }
 
@@ -1244,14 +1240,14 @@ where
         self.eth.is_up()
     }
 
-    pub async fn wait_netif_up(&self) -> Result<(), EspError> {
-        self.ip_wait_while(|| self.eth.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
+    pub async fn wait_netif_up(&mut self) -> Result<(), EspError> {
+        self.ip_wait_while(|this| this.eth.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
             .await
     }
 
-    pub async fn ip_wait_while<F: FnMut() -> Result<bool, EspError>>(
-        &self,
-        matcher: F,
+    pub async fn ip_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+        &mut self,
+        mut matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
         use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
@@ -1260,13 +1256,13 @@ where
         let event_loop = AsyncEventBus::new((), self.event_loop.clone());
         let timer_service = AsyncTimerService::new(self.timer_service.clone());
 
-        let mut wait = crate::eventloop::AsyncWait::<IpEvent, _>::new(&event_loop, &timer_service)?;
+        let mut wait = crate::eventloop::AsyncWait::<IpEvent, _>::new(event_loop, timer_service)?;
 
-        wait.wait_while(matcher, timeout).await
+        wait.wait_while(|| matcher(self), timeout).await
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "alloc", esp_idf_comp_esp_timer_enabled))]
+#[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 impl<T> embedded_svc::eth::asynch::Eth for AsyncEth<T>
 where
     T: Eth<Error = EspError>,
@@ -1290,7 +1286,6 @@ where
     }
 }
 
-#[cfg(feature = "nightly")]
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<'d, T> crate::netif::asynch::NetifStatus for EspEth<'d, T> {
     async fn is_up(&self) -> Result<bool, EspError> {
@@ -1298,7 +1293,7 @@ impl<'d, T> crate::netif::asynch::NetifStatus for EspEth<'d, T> {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "alloc", esp_idf_comp_esp_timer_enabled))]
+#[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<T> crate::netif::asynch::NetifStatus for AsyncEth<T>
 where
