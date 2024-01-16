@@ -52,7 +52,10 @@ impl RawCstrs {
     }
 
     #[allow(dead_code)]
-    pub fn as_ptr(&mut self, s: impl Into<alloc::vec::Vec<u8>>) -> Result<*const c_char, crate::sys::EspError> {
+    pub fn as_ptr(
+        &mut self,
+        s: impl Into<alloc::vec::Vec<u8>>,
+    ) -> Result<*const c_char, crate::sys::EspError> {
         let cs = to_cstring_arg(s)?;
 
         let cstr_ptr = cs.as_ptr();
