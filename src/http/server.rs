@@ -24,6 +24,11 @@
 //! You can find an example of handling GET/POST requests at [`json_post_handler.rs`](https://github.com/esp-rs/esp-idf-svc/blob/master/examples/json_post_handler.rs).
 //!
 //! You can find an example of HTTP+Websockets at [`examples/ws_guessing_game.js`](https://github.com/esp-rs/esp-idf-svc/blob/master/examples/ws_guessing_game.rs).
+//!
+//! By default, the ESP-IDF library allocates 512 bytes for reading and parsing
+//! HTTP headers, but desktop web browsers might send headers longer than that.
+//! If this becomes a problem, add `CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024` to your
+//! `sdkconfig.defaults` file.
 
 
 use core::cell::UnsafeCell;
