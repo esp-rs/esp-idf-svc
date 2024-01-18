@@ -1,6 +1,6 @@
 //! HTTP server
 //!
-//! Provides a HTTP(S) server in `EspHttpServer`, plus all related structs.
+//! Provides an HTTP(S) server in `EspHttpServer`, plus all related structs.
 //!
 //! Typical usage of `EspHttpServer` involves creating a function (or closure)
 //! for every URI+method that the server is meant to handle. A minimal server that
@@ -13,13 +13,16 @@
 //!
 //! server.fn_handler("/index.html", Method::Get, |request| {
 //! 	request.into_ok_response()?
-//! 		.write_all("<html><body>Hello world!</body></html>".as_bytes())?;
+//! 		.write_all("<html><body>Hello world!</body></html>".as_bytes());
 //!
 //! 	Ok(());
 //! })?;
 //! ```
 //!
-//! Note that the server is automatically started when instantiated.
+//! Note that the server is automatically started when instantiated, and stopped
+//! when dropped. If you want to keep the server running indefinitely then
+//! make sure it's not dropped - you may add an infinite loop after the server
+//! is created, use `core::mem::forget`, or keep around a reference to it somehow.
 //!
 //! You can find an example of handling GET/POST requests at [`json_post_handler.rs`](https://github.com/esp-rs/esp-idf-svc/blob/master/examples/json_post_handler.rs).
 //!
@@ -29,7 +32,6 @@
 //! HTTP headers, but desktop web browsers might send headers longer than that.
 //! If this becomes a problem, add `CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024` to your
 //! `sdkconfig.defaults` file.
-
 
 use core::cell::UnsafeCell;
 use core::fmt::Debug;
@@ -472,7 +474,7 @@ impl<'a> EspHttpServer<'a> {
 
     /// Registers a function as the handler for the given URI and HTTP method (GET, POST, etc).
     ///
-    /// The function will be called every time a HTTP client requests that URI
+    /// The function will be called every time an HTTP client requests that URI
     /// (via the appropriate HTTP method), receiving a different `Request` each
     /// call. The `Request` contains a reference to the underlying `EspHttpConnection`.
     pub fn fn_handler<E, F>(
@@ -539,7 +541,6 @@ impl<'a> EspHttpServer<'a> {
 }
 
 impl<'a> Drop for EspHttpServer<'a> {
-    /// Stops and drops the server.
     fn drop(&mut self) {
         self.stop().expect("Unable to stop the server cleanly");
     }
@@ -553,7 +554,7 @@ impl<'a> RawHandle for EspHttpServer<'a> {
     }
 }
 
-/// Wraps the given function into a `FnHandler`.
+/// Wraps the given function into an `FnHandler`.
 ///
 /// Do not confuse with `EspHttpServer::fn_handler`.
 pub fn fn_handler<F, E>(f: F) -> FnHandler<F>
@@ -660,7 +661,7 @@ pub struct EspHttpConnection<'a> {
     response_headers: Option<Vec<CString>>,
 }
 
-/// Represents the two-way connection between a HTTP request and its response.
+/// Represents the two-way connection between an HTTP request and its response.
 impl<'a> EspHttpConnection<'a> {
     fn new(raw_req: &'a mut httpd_req_t) -> Self {
         Self {
@@ -814,7 +815,7 @@ impl<'a> EspHttpConnection<'a> {
     /// Reads bytes from the body of the HTTP request.
     ///
     /// This is typically used whenever the HTTP server has to parse the body
-    /// of a HTTP POST request.
+    /// of an HTTP POST request.
     ///
     /// ```
     /// server.fn_handler("/foo", Method::Post, move |mut request| {
@@ -854,7 +855,8 @@ impl<'a> EspHttpConnection<'a> {
         Ok(buf.len())
     }
 
-    // As per `EspHttpConnection::write`.
+    // Sends bytes back to the HTTP client (as per `EspHttpConnection::write`),
+    // does *not* return the number of bytes sent.
     pub fn write_all(&mut self, buf: &[u8]) -> Result<(), EspError> {
         self.write(buf)?;
 
@@ -1204,14 +1206,12 @@ pub mod ws {
     }
 
     impl Sender for EspHttpWsConnection {
-        /// As per [`crate::http::EspHttpWsConnection::send`](EspHttpWsConnection::send)
         fn send(&mut self, frame_type: FrameType, frame_data: &[u8]) -> Result<(), Self::Error> {
             EspHttpWsConnection::send(self, frame_type, frame_data)
         }
     }
 
     impl Receiver for EspHttpWsConnection {
-        /// As per [`crate::http::EspHttpWsConnection::recv`](EspHttpWsConnection::recv)
         fn recv(&mut self, frame_data_buf: &mut [u8]) -> Result<(FrameType, usize), Self::Error> {
             EspHttpWsConnection::recv(self, frame_data_buf)
         }
@@ -1379,7 +1379,7 @@ pub mod ws {
         /// made to that URI, receiving a different `EspHttpWsConnection` each
         /// call.
         ///
-        /// Note that Websockets functionality is gated behind a SDK flag.
+        /// Note that Websockets functionality is gated behind an SDK flag.
         /// See [`crate::ws`](esp-idf-svc::ws)
         pub fn ws_handler<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, EspError>
         where
