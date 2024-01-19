@@ -12,10 +12,10 @@
 //! let mut server = EspHttpServer::new(&Configuration::default())?;
 //!
 //! server.fn_handler("/index.html", Method::Get, |request| {
-//! 	request.into_ok_response()?
-//! 		.write_all("<html><body>Hello world!</body></html>".as_bytes());
+//!     request.into_ok_response()?
+//!         .write_all("<html><body>Hello world!</body></html>".as_bytes());
 //!
-//! 	Ok(());
+//!     Ok(());
 //! })?;
 //! ```
 //!
@@ -819,12 +819,12 @@ impl<'a> EspHttpConnection<'a> {
     ///
     /// ```
     /// server.fn_handler("/foo", Method::Post, move |mut request| {
-    /// 	let (_headers, connection) = request.split();
-    /// 	let mut buffer: [u8; 1024] = [0; 1024];
-    /// 	let bytes_read = connection.read(&mut buffer)?;
+    ///     let (_headers, connection) = request.split();
+    ///     let mut buffer: [u8; 1024] = [0; 1024];
+    ///     let bytes_read = connection.read(&mut buffer)?;
     ///
-    /// 	let my_data = MyDataStruct::from_bytes(&buffer[0..bytes_read]);
-    /// 	// etc
+    ///     let my_data = MyDataStruct::from_bytes(&buffer[0..bytes_read]);
+    ///     // etc
     /// ```
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
         self.assert_request();
