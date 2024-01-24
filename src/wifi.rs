@@ -22,8 +22,7 @@ use crate::sys::*;
 
 use crate::eventloop::EspEventLoop;
 use crate::eventloop::{
-    EspSubscription, EspSystemEventLoop, EspTypedEventDeserializer, EspTypedEventSource, System,
-    Wait,
+    EspEventDeserializer, EspEventSource, EspSubscription, EspSystemEventLoop, System, Wait,
 };
 use crate::handle::RawHandle;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
@@ -422,9 +421,11 @@ pub struct WifiDriver<'d> {
     _p: PhantomData<&'d mut ()>,
 }
 
+#[derive(Clone, Debug)]
 struct WifiDriverStatus {
-    pub sta: WifiEvent,
-    pub ap: WifiEvent,
+    pub sta: WifiStaStatus,
+    pub scan: WifiScanStatus,
+    pub ap: WifiApStatus,
     pub wps: Option<WpsStatus>,
 }
 
@@ -473,32 +474,30 @@ impl<'d> WifiDriver<'d> {
         ),
         EspError,
     > {
-        let status = Arc::new(mutex::Mutex::wrap(
-            mutex::RawMutex::new(),
-            WifiDriverStatus {
-                sta: WifiEvent::StaStopped,
-                ap: WifiEvent::ApStopped,
-                wps: None,
-            },
-        ));
+        let status = Arc::new(mutex::Mutex::new(WifiDriverStatus {
+            sta: WifiStaStatus::Stopped,
+            ap: WifiApStatus::Stopped,
+            scan: WifiScanStatus::Idle,
+            wps: None,
+        }));
         let s_status = status.clone();
 
-        let subscription = sysloop.subscribe(move |event: &WifiEvent| {
+        let subscription = sysloop.subscribe::<WifiEvent, _>(move |event: WifiEvent| {
             let mut guard = s_status.lock();
 
             match event {
-                WifiEvent::ApStarted => guard.ap = WifiEvent::ApStarted,
-                WifiEvent::ApStopped => guard.ap = WifiEvent::ApStopped,
-                WifiEvent::StaStarted => guard.sta = WifiEvent::StaStarted,
-                WifiEvent::StaStopped => guard.sta = WifiEvent::StaStopped,
-                WifiEvent::StaConnected => guard.sta = WifiEvent::StaConnected,
-                WifiEvent::StaDisconnected => guard.sta = WifiEvent::StaDisconnected,
-                WifiEvent::ScanDone => guard.sta = WifiEvent::ScanDone,
+                WifiEvent::ApStarted => guard.ap = WifiApStatus::Started,
+                WifiEvent::ApStopped => guard.ap = WifiApStatus::Stopped,
+                WifiEvent::StaStarted => guard.sta = WifiStaStatus::Started,
+                WifiEvent::StaStopped => guard.sta = WifiStaStatus::Stopped,
+                WifiEvent::StaConnected => guard.sta = WifiStaStatus::Connected,
+                WifiEvent::StaDisconnected => guard.sta = WifiStaStatus::Started,
+                WifiEvent::ScanDone => guard.scan = WifiScanStatus::Done,
                 WifiEvent::StaWpsSuccess(_)
                 | WifiEvent::StaWpsFailed
                 | WifiEvent::StaWpsTimeout
                 | WifiEvent::StaWpsPin(_)
-                | WifiEvent::StaWpsPbcOverlap => guard.wps = Some(event.try_into().unwrap()),
+                | WifiEvent::StaWpsPbcOverlap => guard.wps = Some((&event).try_into().unwrap()),
                 _ => (),
             };
         })?;
@@ -648,7 +647,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     pub fn is_ap_started(&self) -> Result<bool, EspError> {
-        Ok(self.status.lock().ap == WifiEvent::ApStarted)
+        Ok(matches!(self.status.lock().ap, WifiApStatus::Started))
     }
 
     pub fn is_sta_started(&self) -> Result<bool, EspError> {
@@ -656,15 +655,12 @@ impl<'d> WifiDriver<'d> {
 
         Ok(matches!(
             guard.sta,
-            WifiEvent::StaStarted
-                | WifiEvent::StaConnected
-                | WifiEvent::ScanDone
-                | WifiEvent::StaDisconnected
+            WifiStaStatus::Started | WifiStaStatus::Connected
         ))
     }
 
     pub fn is_sta_connected(&self) -> Result<bool, EspError> {
-        Ok(self.status.lock().sta == WifiEvent::StaConnected)
+        Ok(matches!(self.status.lock().sta, WifiStaStatus::Connected))
     }
 
     pub fn is_started(&self) -> Result<bool, EspError> {
@@ -690,15 +686,15 @@ impl<'d> WifiDriver<'d> {
         } else {
             let guard = self.status.lock();
 
-            Ok((!ap_enabled || guard.ap == WifiEvent::ApStarted)
-                && (!sta_enabled || guard.sta == WifiEvent::StaConnected))
+            Ok((!ap_enabled || matches!(guard.ap, WifiApStatus::Started))
+                && (!sta_enabled || matches!(guard.sta, WifiStaStatus::Connected)))
         }
     }
 
     pub fn is_scan_done(&self) -> Result<bool, EspError> {
         let guard = self.status.lock();
 
-        Ok(guard.sta == WifiEvent::ScanDone)
+        Ok(matches!(guard.scan, WifiScanStatus::Done))
     }
 
     #[allow(non_upper_case_globals)]
@@ -854,14 +850,22 @@ impl<'d> WifiDriver<'d> {
         debug!("About to scan for access points");
 
         let scan_config: wifi_scan_config_t = scan_config.into();
-        esp!(unsafe { esp_wifi_scan_start(&scan_config as *const wifi_scan_config_t, blocking) })
+        esp!(unsafe { esp_wifi_scan_start(&scan_config as *const wifi_scan_config_t, blocking) })?;
+
+        self.status.lock().scan = WifiScanStatus::Started;
+
+        Ok(())
     }
 
     /// Stops a previous started access point scan.
     pub fn stop_scan(&mut self) -> Result<(), EspError> {
         debug!("About to stop scan for access points");
 
-        esp!(unsafe { esp_wifi_scan_stop() })
+        esp!(unsafe { esp_wifi_scan_stop() })?;
+
+        self.status.lock().scan = WifiScanStatus::Idle;
+
+        Ok(())
     }
 
     /// Get the results of an access point scan.
@@ -911,6 +915,8 @@ impl<'d> WifiDriver<'d> {
         };
 
         let fetched_count = self.fetch_scan_result(&mut ap_infos_raw)?;
+
+        self.status.lock().scan = WifiScanStatus::Idle;
 
         let result = ap_infos_raw[..fetched_count]
             .iter()
@@ -1790,14 +1796,51 @@ impl<'d> NetifStatus for EspWifi<'d> {
     }
 }
 
+//#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct WpsCredentialsRef(wifi_event_sta_wps_er_success_t__bindgen_ty_1);
+
+impl WpsCredentialsRef {
+    pub fn ssid(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.0.ssid.as_ptr() as *const _) }
+    }
+
+    pub fn passphrase(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.0.passphrase.as_ptr() as *const _) }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WpsCredentials {
     pub ssid: heapless::String<32>,
     pub passphrase: heapless::String<64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum WifiEvent {
+impl TryFrom<&WpsCredentialsRef> for WpsCredentials {
+    type Error = EspError;
+
+    fn try_from(credentials: &WpsCredentialsRef) -> Result<Self, Self::Error> {
+        let err = EspError::from_infallible::<ESP_ERR_INVALID_ARG>();
+
+        Ok(Self {
+            ssid: credentials
+                .ssid()
+                .to_str()
+                .map_err(|_| err)
+                .and_then(|credentials| credentials.try_into().map_err(|_| err))?,
+            passphrase: credentials
+                .passphrase()
+                .to_str()
+                .map_err(|_| err)
+                .and_then(|credentials| credentials.try_into().map_err(|_| err))?,
+        })
+    }
+}
+
+//#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
+pub enum WifiEvent<'a> {
     Ready,
 
     ScanDone,
@@ -1809,7 +1852,7 @@ pub enum WifiEvent {
     StaAuthmodeChanged,
     StaBssRssiLow,
     StaBeaconTimeout,
-    StaWpsSuccess(alloc::vec::Vec<WpsCredentials>),
+    StaWpsSuccess(&'a [WpsCredentialsRef]),
     StaWpsFailed,
     StaWpsTimeout,
     StaWpsPin(Option<u32>),
@@ -1827,21 +1870,20 @@ pub enum WifiEvent {
     HomeChannelChange,
 }
 
-impl EspTypedEventSource for WifiEvent {
-    fn source() -> *const ffi::c_char {
-        unsafe { WIFI_EVENT }
+unsafe impl<'a> EspEventSource for WifiEvent<'a> {
+    fn source() -> Option<&'static ffi::CStr> {
+        Some(unsafe { ffi::CStr::from_ptr(WIFI_EVENT) })
     }
 }
 
-impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
+impl<'a> EspEventDeserializer for WifiEvent<'a> {
+    type Data<'d> = WifiEvent<'d>;
+
     #[allow(non_upper_case_globals, non_snake_case)]
-    fn deserialize<R>(
-        data: &crate::eventloop::EspEventFetchData,
-        f: &mut impl for<'a> FnMut(&'a WifiEvent) -> R,
-    ) -> R {
+    fn deserialize<'d>(data: &crate::eventloop::EspEvent<'d>) -> WifiEvent<'d> {
         let event_id = data.event_id as u32;
 
-        let event = if event_id == wifi_event_t_WIFI_EVENT_WIFI_READY {
+        if event_id == wifi_event_t_WIFI_EVENT_WIFI_READY {
             WifiEvent::Ready
         } else if event_id == wifi_event_t_WIFI_EVENT_SCAN_DONE {
             WifiEvent::ScanDone
@@ -1856,40 +1898,24 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE {
             WifiEvent::StaAuthmodeChanged
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS {
-            let payload =
-                unsafe { (data.payload as *const wifi_event_sta_wps_er_success_t).as_ref() };
-            let credentials = if let Some(payload) = payload {
-                let mut credentials = alloc::vec::Vec::with_capacity(payload.ap_cred_cnt.into());
-                for i in 0..payload.ap_cred_cnt {
-                    let creds = &payload.ap_cred[i as usize];
-
-                    let Ok(ssid) = from_cstr_fallible(&creds.ssid) else {
-                        log::warn!("Received a non-UTF-8 SSID via WPS");
-                        continue;
-                    };
-
-                    let Ok(passphrase) = from_cstr_fallible(&creds.passphrase) else {
-                        log::warn!("Received a non-UTF-8 passphrase via WPS");
-                        continue;
-                    };
-
-                    let creds = WpsCredentials {
-                        ssid: ssid.try_into().unwrap(),
-                        passphrase: passphrase.try_into().unwrap(),
-                    };
-                    credentials.push(creds);
-                }
-                credentials
-            } else {
-                alloc::vec::Vec::new()
+            let payload = unsafe {
+                (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_success_t)
+                    .as_ref()
             };
-            WifiEvent::StaWpsSuccess(credentials)
+
+            let credentials = payload
+                .map(|payload| &payload.ap_cred[..payload.ap_cred_cnt as _])
+                .unwrap_or(&[]);
+
+            WifiEvent::StaWpsSuccess(unsafe { core::mem::transmute(credentials) })
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED {
             WifiEvent::StaWpsFailed
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT {
             WifiEvent::StaWpsTimeout
         } else if event_id == wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN {
-            let payload = unsafe { (data.payload as *const wifi_event_sta_wps_er_pin_t).as_ref() };
+            let payload = unsafe {
+                (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_pin_t).as_ref()
+            };
             let pin = payload
                 .and_then(|x| core::str::from_utf8(&x.pin_code).ok())
                 .and_then(|x| x.parse().ok());
@@ -1920,32 +1946,12 @@ impl EspTypedEventDeserializer<WifiEvent> for WifiEvent {
             WifiEvent::HomeChannelChange
         } else {
             panic!("Unknown event ID: {}", event_id);
-        };
-
-        f(&event)
+        }
     }
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const WPS_TIMEOUT: Duration = Duration::from_secs(120);
-
-fn matches_wifi_event(event: &WifiEvent) -> bool {
-    matches!(
-        event,
-        WifiEvent::ApStarted
-            | WifiEvent::ApStopped
-            | WifiEvent::StaStarted
-            | WifiEvent::StaStopped
-            | WifiEvent::StaConnected
-            | WifiEvent::StaDisconnected
-            | WifiEvent::StaWpsSuccess(_)
-            | WifiEvent::StaWpsFailed
-            | WifiEvent::StaWpsTimeout
-            | WifiEvent::StaWpsPin(_)
-            | WifiEvent::StaWpsPbcOverlap
-            | WifiEvent::ScanDone
-    )
-}
 
 /// Wraps a [`WifiDriver`] or [`EspWifi`], and offers strictly synchronous (blocking)
 /// function calls for their functionality.
@@ -2060,7 +2066,7 @@ where
         matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
-        let wait = Wait::<WifiEvent, _>::new(&self.event_loop, matches_wifi_event)?;
+        let wait = Wait::new::<WifiEvent>(&self.event_loop)?;
 
         wait.wait_while(matcher, timeout)
     }
@@ -2105,7 +2111,7 @@ where
         matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
-        let wait = crate::eventloop::Wait::<IpEvent, _>::new(&self.event_loop, |_| true)?;
+        let wait = crate::eventloop::Wait::new::<IpEvent>(&self.event_loop)?;
 
         wait.wait_while(matcher, timeout)
     }
@@ -2310,13 +2316,10 @@ where
         mut matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
-        use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
-        use embedded_svc::utils::asyncify::timer::AsyncTimerService;
-
-        let event_loop = AsyncEventBus::new((), self.event_loop.clone());
-        let timer_service = AsyncTimerService::new(self.timer_service.clone());
-
-        let mut wait = crate::eventloop::AsyncWait::<WifiEvent, _>::new(event_loop, timer_service)?;
+        let mut wait = crate::eventloop::AsyncWait::<WifiEvent, _>::new(
+            &self.event_loop,
+            &self.timer_service,
+        )?;
 
         wait.wait_while(|| matcher(self), timeout).await
     }
@@ -2364,13 +2367,8 @@ where
         mut matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
-        use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
-        use embedded_svc::utils::asyncify::timer::AsyncTimerService;
-
-        let event_loop = AsyncEventBus::new((), self.event_loop.clone());
-        let timer_service = AsyncTimerService::new(self.timer_service.clone());
-
-        let mut wait = crate::eventloop::AsyncWait::<IpEvent, _>::new(event_loop, timer_service)?;
+        let mut wait =
+            crate::eventloop::AsyncWait::<IpEvent, _>::new(&self.event_loop, &self.timer_service)?;
 
         wait.wait_while(|| matcher(self), timeout).await
     }
@@ -2449,6 +2447,27 @@ where
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WifiStaStatus {
+    Stopped,
+    Started,
+    Connected,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WifiApStatus {
+    Stopped,
+    Started,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WifiScanStatus {
+    Idle,
+    Started,
+    Done,
+}
+
+#[derive(Debug)]
 pub struct WpsConfig<'a> {
     pub wps_type: WpsType,
     pub factory_info: WpsFactoryInfo<'a>,
@@ -2468,6 +2487,7 @@ impl TryFrom<&WpsConfig<'_>> for Newtype<esp_wps_config_t> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct WpsFactoryInfo<'a> {
     pub manufacturer: &'a str,
     pub model_number: &'a str,
@@ -2507,6 +2527,7 @@ impl TryFrom<&WpsFactoryInfo<'_>> for Newtype<wps_factory_information_t> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum WpsType {
     Pbc,
     Pin(u32),
@@ -2539,7 +2560,7 @@ impl WpsType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum WpsStatus {
     SuccessConnected,
     SuccessMultipleAccessPoints(alloc::vec::Vec<WpsCredentials>),
@@ -2549,7 +2570,7 @@ pub enum WpsStatus {
     PbcOverlap,
 }
 
-impl TryFrom<&WifiEvent> for WpsStatus {
+impl TryFrom<&WifiEvent<'_>> for WpsStatus {
     type Error = EspError;
 
     fn try_from(event: &WifiEvent) -> Result<Self, Self::Error> {
@@ -2558,7 +2579,12 @@ impl TryFrom<&WifiEvent> for WpsStatus {
                 if credentials.is_empty() {
                     Ok(WpsStatus::SuccessConnected)
                 } else {
-                    Ok(WpsStatus::SuccessMultipleAccessPoints(credentials.clone()))
+                    Ok(WpsStatus::SuccessMultipleAccessPoints(
+                        credentials
+                            .iter()
+                            .filter_map(|c| c.try_into().ok())
+                            .collect::<alloc::vec::Vec<WpsCredentials>>(),
+                    ))
                 }
             }
             WifiEvent::StaWpsFailed => Ok(WpsStatus::Failure),

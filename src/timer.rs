@@ -9,22 +9,20 @@
 //! EspTimer is a set of APIs that provides one-shot and periodic timers,
 //! microsecond time resolution, and 52-bit range.
 
+use core::num::NonZeroU32;
 use core::result::Result;
 use core::time::Duration;
 use core::{ffi, ptr};
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::{self, ErrorType, OnceTimer, PeriodicTimer, Timer, TimerService};
+use esp_idf_hal::task::asynch::Notification;
 
 use crate::sys::*;
 
-use ::log::info;
-
-#[allow(unused_imports)]
-pub use asyncify::*;
+use ::log::debug;
 
 #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
 pub use isr::*;
@@ -122,7 +120,7 @@ impl<'a> Drop for EspTimer<'a> {
             // Timer is still running, busy-loop
         }
 
-        info!("Timer dropped");
+        debug!("Timer dropped");
     }
 }
 
@@ -134,29 +132,48 @@ impl<'a> RawHandle for EspTimer<'a> {
     }
 }
 
-impl<'a> ErrorType for EspTimer<'a> {
-    type Error = EspError;
+pub struct EspAsyncTimer {
+    timer: EspTimer<'static>,
+    notification: Arc<Notification>,
 }
 
-impl<'a> timer::Timer for EspTimer<'a> {
-    fn is_scheduled(&self) -> Result<bool, Self::Error> {
-        EspTimer::is_scheduled(self)
+impl EspAsyncTimer {
+    pub async fn after(&mut self, duration: Duration) -> Result<(), EspError> {
+        self.timer.cancel()?;
+
+        self.notification.reset();
+        self.timer.after(duration)?;
+
+        self.notification.wait().await;
+
+        Ok(())
     }
 
-    fn cancel(&mut self) -> Result<bool, Self::Error> {
-        EspTimer::cancel(self)
+    pub fn every(&mut self, duration: Duration) -> Result<&'_ mut Self, EspError> {
+        self.timer.cancel()?;
+
+        self.notification.reset();
+        self.timer.every(duration)?;
+
+        Ok(self)
+    }
+
+    pub async fn tick(&mut self) {
+        self.notification.wait().await;
     }
 }
 
-impl<'a> OnceTimer for EspTimer<'a> {
-    fn after(&mut self, duration: Duration) -> Result<(), Self::Error> {
-        EspTimer::after(self, duration)
+impl embedded_hal_async::delay::DelayNs for EspAsyncTimer {
+    async fn delay_ns(&mut self, ns: u32) {
+        EspAsyncTimer::after(self, Duration::from_micros(ns as _))
+            .await
+            .unwrap();
     }
-}
 
-impl<'a> PeriodicTimer for EspTimer<'a> {
-    fn every(&mut self, duration: Duration) -> Result<(), Self::Error> {
-        EspTimer::every(self, duration)
+    async fn delay_ms(&mut self, ms: u32) {
+        EspAsyncTimer::after(self, Duration::from_millis(ms as _))
+            .await
+            .unwrap();
     }
 }
 
@@ -190,6 +207,25 @@ where
         F: FnMut() + Send + 'static,
     {
         self.internal_timer(callback)
+    }
+
+    pub fn timer_async(&self) -> Result<EspAsyncTimer, EspError> {
+        let notification = Arc::new(Notification::new());
+
+        let timer = {
+            let notification = Arc::downgrade(&notification);
+
+            self.timer(move || {
+                if let Some(notification) = notification.upgrade() {
+                    notification.notify(NonZeroU32::new(1).unwrap());
+                }
+            })?
+        };
+
+        Ok(EspAsyncTimer {
+            timer,
+            notification,
+        })
     }
 
     /// # Safety
@@ -280,36 +316,6 @@ where
     }
 }
 
-impl<T> ErrorType for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    type Error = EspError;
-}
-
-impl<T> TimerService for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    type Timer<'a> = EspTimer<'static> where Self: 'a;
-
-    fn timer<F>(&self, callback: F) -> Result<Self::Timer<'_>, Self::Error>
-    where
-        F: FnMut() + Send + 'static,
-    {
-        EspTimerService::timer(self, callback)
-    }
-}
-
-impl<T> SystemTime for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    fn now(&self) -> Duration {
-        EspTimerService::now(self)
-    }
-}
-
 #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
 mod isr {
     use crate::sys::EspError;
@@ -331,20 +337,6 @@ mod isr {
         pub unsafe fn new() -> Result<Self, EspError> {
             Ok(Self(ISR))
         }
-    }
-}
-
-mod asyncify {
-    use embedded_svc::utils::asyncify::timer::AsyncTimerService;
-    use embedded_svc::utils::asyncify::Asyncify;
-
-    impl Asyncify for super::EspTimerService<super::Task> {
-        type AsyncWrapper<S> = AsyncTimerService<S>;
-    }
-
-    #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
-    impl Asyncify for super::EspTimerService<super::ISR> {
-        type AsyncWrapper<S> = AsyncTimerService<S>;
     }
 }
 
