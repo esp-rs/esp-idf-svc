@@ -12,11 +12,13 @@ use esp_idf_sys::EspError;
 
 use log::info;
 
-fn main() {
+fn main() -> Result<(), EspError> {
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
 
-    run().unwrap();
+    run()?;
+
+    Ok(())
 }
 
 fn run() -> Result<(), EspError> {
@@ -32,16 +34,14 @@ fn run() -> Result<(), EspError> {
 
         timer_service.timer(move || {
             let current = counter.fetch_add(1, Ordering::SeqCst);
-            sys_loop
-                .post::<CustomEvent>(
-                    &if current > 0 {
-                        CustomEvent::Tick(current)
-                    } else {
-                        CustomEvent::Start
-                    },
-                    None,
-                )
-                .unwrap();
+            sys_loop.post::<CustomEvent>(
+                &if current > 0 {
+                    CustomEvent::Tick(current)
+                } else {
+                    CustomEvent::Start
+                },
+                None,
+            )?;
         })?
     };
 
