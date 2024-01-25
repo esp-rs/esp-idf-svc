@@ -34,14 +34,16 @@ fn run() -> Result<(), EspError> {
 
         timer_service.timer(move || {
             let current = counter.fetch_add(1, Ordering::SeqCst);
-            sys_loop.post::<CustomEvent>(
-                &if current > 0 {
-                    CustomEvent::Tick(current)
-                } else {
-                    CustomEvent::Start
-                },
-                None,
-            )?;
+            sys_loop
+                .post::<CustomEvent>(
+                    &if current > 0 {
+                        CustomEvent::Tick(current)
+                    } else {
+                        CustomEvent::Start
+                    },
+                    None,
+                )
+                .unwrap();
         })?
     };
 
