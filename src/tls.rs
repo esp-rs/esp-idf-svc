@@ -329,6 +329,7 @@ mod esptls {
     {
         raw: *mut sys::esp_tls,
         socket: S,
+        server_session: bool,
     }
 
     impl EspTls<InternalSocket> {
@@ -343,6 +344,7 @@ mod esptls {
                 Ok(Self {
                     raw,
                     socket: InternalSocket(()),
+                    server_session: false,
                 })
             } else {
                 Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
@@ -395,7 +397,11 @@ mod esptls {
                     sys::esp_tls_set_conn_state(raw, sys::esp_tls_conn_state_ESP_TLS_CONNECTING)
                 })?;
 
-                Ok(Self { raw, socket })
+                Ok(Self {
+                    raw,
+                    socket,
+                    server_session: false,
+                })
             } else {
                 Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
             }
@@ -419,6 +425,37 @@ mod esptls {
             let rcfg = cfg.try_into_raw(&mut bufs)?;
 
             let res = self.internal_connect(host, 0, cfg.non_block, &rcfg);
+
+            // Make sure buffers are held long enough
+            #[allow(clippy::drop_non_drop)]
+            drop(bufs);
+
+            res
+        }
+
+        /// Establish a TLS/SSL connection using the adopted connection, acting as the server.
+        ///
+        /// # Errors
+        ///
+        /// * `ESP_ERR_INVALID_SIZE` if `cfg.alpn_protos` exceeds 9 elements or avg 10 bytes/ALPN
+        /// * `ESP_FAIL` if connection could not be established
+        /// * `ESP_TLS_ERR_SSL_WANT_READ` if the socket is in non-blocking mode and it is not ready for reading
+        /// * `ESP_TLS_ERR_SSL_WANT_WRITE` if the socket is in non-blocking mode and it is not ready for writing
+        /// * `EWOULDBLOCK` if the socket is in non-blocking mode and it is not ready either for reading or writing (a peculiarity/bug of the `esp-tls` C module)
+        #[cfg(all(
+            not(esp_idf_version_major = "4"),
+            any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0")),
+            esp_idf_esp_tls_server
+        ))]
+        pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
+            let mut bufs = RawConfigBufs::default();
+            let rcfg = cfg.try_into_raw(&mut bufs)?;
+
+            unsafe {
+                sys::esp_tls_server_session_create(&rcfg, self.socket.handle(), self.raw);
+                // TODO handle error
+            }
+            self.server_session = true;
 
             // Make sure buffers are held long enough
             #[allow(clippy::drop_non_drop)]
@@ -561,6 +598,11 @@ mod esptls {
             let _ = self.socket.release();
 
             unsafe {
+                #[cfg(esp_idf_esp_tls_server)]
+                if self.server_session {
+                    sys::esp_tls_server_session_destroy(self.raw);
+                    return;
+                }
                 sys::esp_tls_conn_destroy(self.raw);
             }
         }
