@@ -640,7 +640,11 @@ impl<'a> EspMqttClient<'a> {
 impl<'a> Drop for EspMqttClient<'a> {
     fn drop(&mut self) {
         unsafe {
-            esp_mqtt_client_unregister_event(self.raw_client, esp_mqtt_event_id_t_MQTT_EVENT_ANY, Some(Self::handle));
+            esp_mqtt_client_unregister_event(
+                self.raw_client,
+                esp_mqtt_event_id_t_MQTT_EVENT_ANY,
+                Some(Self::handle),
+            );
             esp_mqtt_client_destroy(self.raw_client as _);
         }
     }
