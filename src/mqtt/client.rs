@@ -640,6 +640,7 @@ impl<'a> Drop for EspMqttClient<'a> {
     fn drop(&mut self) {
         unsafe {
             esp_mqtt_client_destroy(self.raw_client as _);
+            log::info!("Drop for client called!");
         }
     }
 }
@@ -685,7 +686,7 @@ impl<'a> Enqueue for EspMqttClient<'a> {
 unsafe impl<'a> Send for EspMqttClient<'a> {}
 
 pub struct EspMqttConnection {
-    receiver: Receiver<EspMqttEvent<'static>>,
+    receiver: Arc<Receiver<EspMqttEvent<'static>>>,
     given: bool,
 }
 
@@ -821,7 +822,7 @@ impl EspAsyncMqttClient {
         work.result
     }
 
-    fn work(channel: Arc<Channel<AsyncWork>>, mut client: EspMqttClient) {
+    fn work(channel: Channel<AsyncWork>, mut client: EspMqttClient) {
         let mut work = AsyncWork {
             command: AsyncCommand::Unsubscribe,
             topic: alloc::vec::Vec::new(),
@@ -874,7 +875,7 @@ impl asynch::Publish for EspAsyncMqttClient {
 }
 
 pub struct EspAsyncMqttConnection {
-    receiver: Receiver<EspMqttEvent<'static>>,
+    receiver: Arc<Receiver<EspMqttEvent<'static>>>,
     given: bool,
 }
 
