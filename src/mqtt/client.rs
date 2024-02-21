@@ -640,7 +640,6 @@ impl<'a> Drop for EspMqttClient<'a> {
     fn drop(&mut self) {
         unsafe {
             esp_mqtt_client_destroy(self.raw_client as _);
-            log::info!("Drop for client called!");
         }
     }
 }
