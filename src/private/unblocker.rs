@@ -16,7 +16,7 @@ pub struct Unblocker<T>
 where
     T: Send + 'static,
 {
-    receiver: Receiver<T>,
+    receiver: Arc<Receiver<T>>,
     task: TaskHandle_t,
 }
 
@@ -32,7 +32,7 @@ where
         mut worker: F,
     ) -> Result<Self, EspError>
     where
-        F: FnOnce(Arc<Channel<T>>) + Send + 'static,
+        F: FnOnce(Channel<T>) + Send + 'static,
         T: Send + 'static,
     {
         let (channel, receiver) = Channel::new();

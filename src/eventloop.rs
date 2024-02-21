@@ -422,7 +422,7 @@ where
     D: EspEventDeserializer,
     T: EspEventLoopType,
 {
-    receiver: Receiver<EspEvent<'static>>,
+    receiver: Arc<Receiver<EspEvent<'static>>>,
     subscription: EspSubscription<'static, T>,
     given: bool,
     _deserializer: PhantomData<fn() -> D>,
