@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Resolution","SpeedMode"],"mod":["config"],"struct":["CHANNEL0","CHANNEL1","CHANNEL2","CHANNEL3","CHANNEL4","CHANNEL5","LEDC","LedcDriver","LedcTimerDriver","PwmError","TIMER0","TIMER1","TIMER2","TIMER3"],"trait":["LedcChannel","LedcTimer"]};

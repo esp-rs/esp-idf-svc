@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="\brief Set domain parameters for a key."><title>psa_set_key_domain_parameters in esp_idf_sys - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../static.files/rustdoc-e935ef01ae1c1829.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="esp_idf_sys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.78.0-nightly (3406ada96 2024-02-21)" data-channel="nightly" data-search-js="search-dd67cee4cfa65049.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../static.files/storage-4c98445ec4002617.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-c37d3936c59ababd.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../esp_idf_sys/index.html">esp_idf_sys</a><span class="version">0.34.1</span></h2></div><div class="sidebar-elems"></div></nav><div class="sidebar-resizer"></div>
+    <main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../esp_idf_sys/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Function <a href="index.html">esp_idf_sys</a>::<wbr><a class="fn" href="#">psa_set_key_domain_parameters</a><button id="copy-path" title="Copy item path to clipboard"><img src="../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="src" href="../src/esp_idf_sys/home/runner/work/esp-idf-svc/esp-idf-svc/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys-32a6f5ee3ec1de23/out/bindings.rs.html#36820-36825">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><pre class="rust item-decl"><code>pub unsafe extern &quot;C&quot; fn psa_set_key_domain_parameters(
+    attributes: *mut <a class="type" href="type.psa_key_attributes_t.html" title="type esp_idf_sys::psa_key_attributes_t">psa_key_attributes_t</a>,
+    type_: <a class="type" href="type.psa_key_type_t.html" title="type esp_idf_sys::psa_key_type_t">psa_key_type_t</a>,
+    data: *const u8,
+    data_length: usize
+) -&gt; <a class="type" href="type.psa_status_t.html" title="type esp_idf_sys::psa_status_t">psa_status_t</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>\brief Set domain parameters for a key.</p>
+<p>Some key types require additional domain parameters in addition to
+the key type identifier and the key size. Use this function instead
+of psa_set_key_type() when you need to specify domain parameters.</p>
+<p>The format for the required domain parameters varies based on the key type.</p>
+<ul>
+<li>For RSA keys (#PSA_KEY_TYPE_RSA_PUBLIC_KEY or #PSA_KEY_TYPE_RSA_KEY_PAIR),
+the domain parameter data consists of the public exponent,
+represented as a big-endian integer with no leading zeros.
+This information is used when generating an RSA key pair.
+When importing a key, the public exponent is read from the imported
+key data and the exponent recorded in the attribute structure is ignored.
+As an exception, the public exponent 65537 is represented by an empty
+byte string.</li>
+<li>For DSA keys (#PSA_KEY_TYPE_DSA_PUBLIC_KEY or #PSA_KEY_TYPE_DSA_KEY_PAIR),
+the <code>Dss-Params</code> format as defined by RFC 3279 §2.3.2.
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>Dss-Params ::= SEQUENCE  {
+   p       INTEGER,
+   q       INTEGER,
+   g       INTEGER
+}</code></pre></div>
+</li>
+<li>For Diffie-Hellman key exchange keys
+(#PSA_KEY_TYPE_DH_PUBLIC_KEY(#PSA_DH_FAMILY_CUSTOM) or
+#PSA_KEY_TYPE_DH_KEY_PAIR(#PSA_DH_FAMILY_CUSTOM)), the
+<code>DomainParameters</code> format as defined by RFC 3279 §2.3.3.
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>DomainParameters ::= SEQUENCE {
+   p               INTEGER,                    -- odd prime, p=jq +<span class="number">1
+   </span>g               INTEGER,                    -- generator, g
+   q               INTEGER,                    -- factor of p-<span class="number">1
+   </span>j               INTEGER OPTIONAL,           -- subgroup factor
+   validationParams ValidationParams OPTIONAL
+}
+ValidationParams ::= SEQUENCE {
+   seed            BIT STRING,
+   pgenCounter     INTEGER
+}</code></pre></div>
+</li>
+</ul>
+<p>\note This function may allocate memory or other resources.
+Once you have called this function on an attribute structure,
+you must call psa_reset_key_attributes() to free these resources.</p>
+<p>\note This is an experimental extension to the interface. It may change
+in future versions of the library.</p>
+<p>\param[in,out] attributes    Attribute structure where the specified domain
+parameters will be stored.
+If this function fails, the content of
+\p attributes is not modified.
+\param type                  Key type (a \c PSA_KEY_TYPE_XXX value).
+\param[in] data              Buffer containing the key domain parameters.
+The content of this buffer is interpreted
+according to \p type as described above.
+\param data_length           Size of the \p data buffer in bytes.</p>
+<p>\retval #PSA_SUCCESS \emptydescription
+\retval #PSA_ERROR_INVALID_ARGUMENT \emptydescription
+\retval #PSA_ERROR_NOT_SUPPORTED \emptydescription
+\retval #PSA_ERROR_INSUFFICIENT_MEMORY \emptydescription</p>
+</div></details></section></div></main></body></html>
