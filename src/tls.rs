@@ -373,6 +373,7 @@ mod esptls {
         }
     }
 
+    #[cfg(esp_idf_esp_tls_server)]
     impl<'a> Default for ServerConfig<'a> {
         fn default() -> Self {
             Self::new()
