@@ -425,6 +425,7 @@ mod esptls {
                 Ok(Self {
                     raw,
                     socket: InternalSocket(()),
+                    #[cfg(esp_idf_esp_tls_server)]
                     server_session: false,
                 })
             } else {
@@ -481,6 +482,7 @@ mod esptls {
                 Ok(Self {
                     raw,
                     socket,
+                    #[cfg(esp_idf_esp_tls_server)]
                     server_session: false,
                 })
             } else {
