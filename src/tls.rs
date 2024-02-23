@@ -517,11 +517,7 @@ mod esptls {
         ///
         /// # Errors
         ///
-        /// * `ESP_ERR_INVALID_SIZE` if `cfg.alpn_protos` exceeds 9 elements or avg 10 bytes/ALPN
         /// * `ESP_FAIL` if connection could not be established
-        /// * `ESP_TLS_ERR_SSL_WANT_READ` if the socket is in non-blocking mode and it is not ready for reading
-        /// * `ESP_TLS_ERR_SSL_WANT_WRITE` if the socket is in non-blocking mode and it is not ready for writing
-        /// * `EWOULDBLOCK` if the socket is in non-blocking mode and it is not ready either for reading or writing (a peculiarity/bug of the `esp-tls` C module)
         #[cfg(esp_idf_esp_tls_server)]
         pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
             let mut bufs = RawConfigBufs::default();
@@ -787,6 +783,18 @@ mod esptls {
             drop(bufs);
 
             res
+        }
+
+        /// Establish a TLS/SSL connection using the adopted connection, acting as the server.
+        ///
+        /// # Errors
+        ///
+        /// * `ESP_FAIL` if connection could not be established
+        #[cfg(esp_idf_esp_tls_server)]
+        pub async fn negotiate_server(&mut self, cfg: &ServerConfig<'_>) -> Result<(), EspError> {
+            // FIXME: this isn't actually async, but esp-idf does not expose anything else.
+            // we would have to use various hacks to call mbedtls_ssl_handshake by ourself
+            self.0.borrow_mut().negotiate_server(cfg)
         }
 
         /// Read in the supplied buffer. Returns the number of bytes read.
