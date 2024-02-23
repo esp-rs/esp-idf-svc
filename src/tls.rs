@@ -120,6 +120,7 @@ impl<'a> Debug for X509<'a> {
     any(esp_idf_esp_tls_using_mbedtls, esp_idf_esp_tls_using_wolfssl)
 ))]
 mod esptls {
+    #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
     use core::ffi::c_int;
     use core::task::{Context, Poll};
     use core::time::Duration;
@@ -324,6 +325,7 @@ mod esptls {
                 server_key: None,
                 server_key_password: None,
                 use_secure_element: false,
+                #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
                 handshake_callback: None,
             }
         }
@@ -522,14 +524,14 @@ mod esptls {
         #[cfg(esp_idf_esp_tls_server)]
         pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
             let mut bufs = RawConfigBufs::default();
-            let rcfg = cfg.try_into_raw(&mut bufs)?;
+            let mut rcfg = cfg.try_into_raw(&mut bufs)?;
 
             unsafe {
                 let error =
-                    sys::esp_tls_server_session_create(&rcfg, self.socket.handle(), self.raw);
+                    sys::esp_tls_server_session_create(&mut rcfg, self.socket.handle(), self.raw);
                 if error != 0 {
                     log::error!("failed to create tls server session (error {error})");
-                    return EspError::from_infallible::<ESP_FAIL>();
+                    return Err(EspError::from_infallible::<ESP_FAIL>());
                 }
             }
             self.server_session = true;
@@ -538,7 +540,7 @@ mod esptls {
             #[allow(clippy::drop_non_drop)]
             drop(bufs);
 
-            res
+            Ok(())
         }
 
         #[allow(clippy::unnecessary_cast)]
@@ -677,7 +679,7 @@ mod esptls {
             unsafe {
                 #[cfg(esp_idf_esp_tls_server)]
                 if self.server_session {
-                    sys::esp_tls_server_session_destroy(self.raw);
+                    sys::esp_tls_server_session_delete(self.raw);
                     return;
                 }
                 sys::esp_tls_conn_destroy(self.raw);
