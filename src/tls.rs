@@ -409,6 +409,7 @@ mod esptls {
     {
         raw: *mut sys::esp_tls,
         socket: S,
+        #[cfg(esp_idf_esp_tls_server)]
         server_session: bool,
     }
 
