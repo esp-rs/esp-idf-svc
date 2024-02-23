@@ -120,6 +120,7 @@ impl<'a> Debug for X509<'a> {
     any(esp_idf_esp_tls_using_mbedtls, esp_idf_esp_tls_using_wolfssl)
 ))]
 mod esptls {
+    use core::ffi::c_int;
     use core::task::{Context, Poll};
     use core::time::Duration;
 
@@ -300,6 +301,82 @@ mod esptls {
         pub hint: &'a CStr,
     }
 
+    #[cfg(esp_idf_esp_tls_server)]
+    pub struct ServerConfig<'a> {
+        /// up to 9 ALPNs allowed, with avg 10 bytes for each name
+        pub alpn_protos: Option<&'a [&'a str]>,
+        pub ca_cert: Option<X509<'a>>,
+        pub server_cert: Option<X509<'a>>,
+        pub server_key: Option<X509<'a>>,
+        pub server_key_password: Option<&'a str>,
+        pub use_secure_element: bool,
+        #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+        pub handshake_callback: Option<extern "C" fn(*mut sys::mbedtls_ssl_context) -> c_int>,
+    }
+
+    #[cfg(esp_idf_esp_tls_server)]
+    impl<'a> ServerConfig<'a> {
+        pub const fn new() -> Self {
+            Self {
+                alpn_protos: None,
+                ca_cert: None,
+                server_cert: None,
+                server_key: None,
+                server_key_password: None,
+                use_secure_element: false,
+                handshake_callback: None,
+            }
+        }
+
+        fn try_into_raw(
+            &self,
+            bufs: &mut RawConfigBufs,
+        ) -> Result<sys::esp_tls_cfg_server, EspError> {
+            let mut rcfg: sys::esp_tls_cfg_server = Default::default();
+
+            if let Some(ca_cert) = self.ca_cert {
+                rcfg.__bindgen_anon_1.cacert_buf = ca_cert.data().as_ptr();
+                rcfg.__bindgen_anon_2.cacert_bytes = ca_cert.data().len() as u32;
+            }
+
+            if let Some(server_cert) = self.server_cert {
+                rcfg.__bindgen_anon_3.servercert_buf = server_cert.data().as_ptr();
+                rcfg.__bindgen_anon_4.servercert_bytes = server_cert.data().len() as u32;
+            }
+
+            if let Some(server_key) = self.server_key {
+                rcfg.__bindgen_anon_5.serverkey_buf = server_key.data().as_ptr();
+                rcfg.__bindgen_anon_6.serverkey_bytes = server_key.data().len() as u32;
+            }
+
+            if let Some(ckp) = self.server_key_password {
+                rcfg.serverkey_password = ckp.as_ptr();
+                rcfg.serverkey_password_len = ckp.len() as u32;
+            }
+
+            // allow up to 9 protocols
+            if let Some(protos) = self.alpn_protos {
+                bufs.alpn_protos = cstr_arr_from_str_slice(protos, &mut bufs.alpn_protos_cbuf)?;
+                rcfg.alpn_protos = bufs.alpn_protos.as_mut_ptr();
+            }
+
+            rcfg.use_secure_element = self.use_secure_element;
+
+            #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
+            if let Some(cb) = self.handshake_callback {
+                rcfg.cert_select_cb = cb;
+            }
+
+            Ok(rcfg)
+        }
+    }
+
+    impl<'a> Default for ServerConfig<'a> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     pub trait Socket {
         fn handle(&self) -> i32;
         fn release(&mut self) -> Result<(), EspError>;
@@ -442,18 +519,18 @@ mod esptls {
         /// * `ESP_TLS_ERR_SSL_WANT_READ` if the socket is in non-blocking mode and it is not ready for reading
         /// * `ESP_TLS_ERR_SSL_WANT_WRITE` if the socket is in non-blocking mode and it is not ready for writing
         /// * `EWOULDBLOCK` if the socket is in non-blocking mode and it is not ready either for reading or writing (a peculiarity/bug of the `esp-tls` C module)
-        #[cfg(all(
-            not(esp_idf_version_major = "4"),
-            any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0")),
-            esp_idf_esp_tls_server
-        ))]
+        #[cfg(esp_idf_esp_tls_server)]
         pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
             let mut bufs = RawConfigBufs::default();
             let rcfg = cfg.try_into_raw(&mut bufs)?;
 
             unsafe {
-                sys::esp_tls_server_session_create(&rcfg, self.socket.handle(), self.raw);
-                // TODO handle error
+                let error =
+                    sys::esp_tls_server_session_create(&rcfg, self.socket.handle(), self.raw);
+                if error != 0 {
+                    log::error!("failed to create tls server session (error {error})");
+                    return EspError::from_infallible::<ESP_FAIL>();
+                }
             }
             self.server_session = true;
 
