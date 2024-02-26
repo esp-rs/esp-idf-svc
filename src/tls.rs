@@ -667,6 +667,10 @@ mod esptls {
 
             unsafe { sys::esp_tls_conn_write(self.raw, buf.as_ptr() as *const c_void, buf.len()) }
         }
+
+        pub unsafe fn context_handle(&self) -> *mut sys::esp_tls {
+            self.raw
+        }
     }
 
     impl<S> Drop for EspTls<S>
@@ -863,6 +867,10 @@ mod esptls {
             }
 
             Ok(())
+        }
+
+        pub unsafe fn context_handle(&self) -> *mut sys::esp_tls {
+            self.0.borrow().context_handle()
         }
     }
 
