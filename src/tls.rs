@@ -381,7 +381,11 @@ mod esptls {
     }
 
     pub trait Socket {
+        /// Returns the integer FD.
         fn handle(&self) -> i32;
+        /// This is called before cleaning up the the tls context and is responsible
+        /// for essentially giving up ownership of the socket such that it can safely
+        /// be closed by the ESP IDF.
         fn release(&mut self) -> Result<(), EspError>;
     }
 
@@ -668,7 +672,7 @@ mod esptls {
             unsafe { sys::esp_tls_conn_write(self.raw, buf.as_ptr() as *const c_void, buf.len()) }
         }
 
-        pub unsafe fn context_handle(&self) -> *mut sys::esp_tls {
+        pub fn context_handle(&self) -> *mut sys::esp_tls {
             self.raw
         }
     }
@@ -681,11 +685,7 @@ mod esptls {
             let _ = self.socket.release();
 
             unsafe {
-                #[cfg(esp_idf_esp_tls_server)]
-                if self.server_session {
-                    sys::esp_tls_server_session_delete(self.raw);
-                    return;
-                }
+                // use esp_tls_conn_destroy for both client and server
                 sys::esp_tls_conn_destroy(self.raw);
             }
         }
@@ -869,7 +869,7 @@ mod esptls {
             Ok(())
         }
 
-        pub unsafe fn context_handle(&self) -> *mut sys::esp_tls {
+        pub fn context_handle(&self) -> *mut sys::esp_tls {
             self.0.borrow().context_handle()
         }
     }
