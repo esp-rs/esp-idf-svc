@@ -197,8 +197,8 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
             ..Default::default()
         };
 
-        set_str(&mut result.ssid, conf.ssid.as_ref())?;
-        set_str(&mut result.password, conf.password.as_ref())?;
+        set_str_no_termination_requirement(&mut result.ssid, conf.ssid.as_ref())?;
+        set_str_no_termination_requirement(&mut result.password, conf.password.as_ref())?;
 
         Ok(Newtype(result))
     }
