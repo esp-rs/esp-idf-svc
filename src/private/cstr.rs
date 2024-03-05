@@ -41,10 +41,13 @@ pub fn from_cstr(buf: &[u8]) -> &str {
     from_cstr_fallible(buf).unwrap()
 }
 
+/// Convert buffer of characters to heapless string, allowing either
+/// the full buffer (without terminating 0) or just a part of it (terminated by 0)
 pub fn array_to_heapless_string_failible<const N: usize>(
     arr: [u8; N],
 ) -> Result<heapless::String<N>, Utf8Error> {
-    heapless::String::from_utf8(heapless::Vec::from_slice(&arr).unwrap())
+    let len = arr.iter().position(|e| *e == 0).unwrap_or(N);
+    heapless::String::from_utf8(heapless::Vec::from_slice(&arr[0..len]).unwrap())
 }
 
 pub fn array_to_heapless_string<const N: usize>(arr: [u8; N]) -> heapless::String<N> {
