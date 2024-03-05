@@ -1237,7 +1237,18 @@ where
         .await
     }
 
-    pub async fn eth_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+    pub async fn eth_wait_while<F: FnMut(&Self) -> Result<bool, EspError>>(
+        &self,
+        mut matcher: F,
+        timeout: Option<Duration>,
+    ) -> Result<(), EspError> {
+        let mut wait =
+            crate::eventloop::AsyncWait::<EthEvent, _>::new(&self.event_loop, &self.timer_service)?;
+
+        wait.wait_while(|| matcher(self), timeout).await
+    }
+
+    pub async fn eth_wait_while_mut<F: FnMut(&mut Self) -> Result<bool, EspError>>(
         &mut self,
         mut matcher: F,
         timeout: Option<Duration>,
@@ -1259,12 +1270,23 @@ where
         self.eth.is_up()
     }
 
-    pub async fn wait_netif_up(&mut self) -> Result<(), EspError> {
+    pub async fn wait_netif_up(&self) -> Result<(), EspError> {
         self.ip_wait_while(|this| this.eth.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
             .await
     }
 
-    pub async fn ip_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+    pub async fn ip_wait_while<F: FnMut(&Self) -> Result<bool, EspError>>(
+        &self,
+        mut matcher: F,
+        timeout: Option<core::time::Duration>,
+    ) -> Result<(), EspError> {
+        let mut wait =
+            crate::eventloop::AsyncWait::<IpEvent, _>::new(&self.event_loop, &self.timer_service)?;
+
+        wait.wait_while(|| matcher(self), timeout).await
+    }
+
+    pub async fn ip_wait_while_mut<F: FnMut(&mut Self) -> Result<bool, EspError>>(
         &mut self,
         mut matcher: F,
         timeout: Option<core::time::Duration>,
