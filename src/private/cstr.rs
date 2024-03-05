@@ -41,7 +41,9 @@ pub fn from_cstr(buf: &[u8]) -> &str {
     from_cstr_fallible(buf).unwrap()
 }
 
-pub fn array_to_heapless_string_failible<const N: usize>(arr: [u8; N]) -> heapless::String<N> {
+pub fn array_to_heapless_string_failible<const N: usize>(
+    arr: [u8; N],
+) -> Result<heapless::String<N>, Utf8Error> {
     heapless::String::from_utf8(heapless::Vec::from_slice(&arr).unwrap())
 }
 
