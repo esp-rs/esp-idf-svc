@@ -207,14 +207,14 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
 impl From<Newtype<wifi_sta_config_t>> for ClientConfiguration {
     fn from(conf: Newtype<wifi_sta_config_t>) -> Self {
         Self {
-            ssid: from_cstr(&conf.0.ssid).try_into().unwrap(),
+            ssid: array_to_heapless_string(conf.0.ssid),
             bssid: if conf.0.bssid_set {
                 Some(conf.0.bssid)
             } else {
                 None
             },
             auth_method: Option::<AuthMethod>::from(Newtype(conf.0.threshold.authmode)).unwrap(),
-            password: from_cstr(&conf.0.password).try_into().unwrap(),
+            password: array_to_heapless_string(conf.0.password),
             channel: if conf.0.channel != 0 {
                 Some(conf.0.channel)
             } else {
@@ -2122,30 +2122,24 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => WifiEvent::StaDisconnected,
             wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE => WifiEvent::StaAuthmodeChanged,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS => {
-                let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_success_t)
-                        .as_ref()
-                };
-
-                let credentials = payload
-                    .map(|payload| &payload.ap_cred[..payload.ap_cred_cnt as _])
+                let credentials: &[wifi_event_sta_wps_er_success_t__bindgen_ty_1] = data
+                    .payload
+                    .map(|x| x as *const _ as *const wifi_event_sta_wps_er_success_t)
+                    .and_then(|x| unsafe { x.as_ref() })
+                    .map(|x| &x.ap_cred[0..x.ap_cred_cnt as usize])
                     .unwrap_or(&[]);
+                // SAFETY: transparent representation of target type
+                let credentials: &[WpsCredentialsRef] = unsafe { std::mem::transmute(credentials) };
 
-                WifiEvent::StaWpsSuccess(unsafe {
-                    core::mem::transmute::<
-                        &[wifi_event_sta_wps_er_success_t__bindgen_ty_1],
-                        &[WpsCredentialsRef],
-                    >(credentials)
-                })
+                WifiEvent::StaWpsSuccess(credentials)
             }
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED => WifiEvent::StaWpsFailed,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT => WifiEvent::StaWpsTimeout,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN => {
-                let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_pin_t)
-                        .as_ref()
-                };
-                let pin = payload
+                let pin = data
+                    .payload
+                    .map(|x| x as *const _ as *const wifi_event_sta_wps_er_pin_t)
+                    .and_then(|x| unsafe { x.as_ref() })
                     .and_then(|x| core::str::from_utf8(&x.pin_code).ok())
                     .and_then(|x| x.parse().ok());
                 WifiEvent::StaWpsPin(pin)
