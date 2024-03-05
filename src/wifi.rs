@@ -2390,30 +2390,6 @@ where
         wait.wait_while(|| matcher(self), timeout).await
     }
 
-    /// Awaits for a certain condition provided by the user in the form of a
-    /// `matcher` callback to become false. Most often than not that condition
-    /// would be related to the state of the Wifi driver. In other words,
-    /// whether the driver is started, stopped, (dis)connected and so on.
-    ///
-    /// Note that the waiting is not done internally using busy-looping and/or
-    /// timeouts. Rather, the condition (`matcher`) is evaluated initially, and
-    /// if it returns `true`, it is re-evaluated each time the ESP IDF C Wifi
-    /// driver posts a Wifi event on the system event loop. The reasoning behind
-    /// this is that changes to the state of the Wifi driver are always
-    /// accompanied by posting Wifi events.
-    pub async fn wifi_wait_mut<F: FnMut(&mut Self) -> Result<bool, EspError>>(
-        &mut self,
-        mut matcher: F,
-        timeout: Option<Duration>,
-    ) -> Result<(), EspError> {
-        let mut wait = crate::eventloop::AsyncWait::<WifiEvent, _>::new(
-            &self.event_loop,
-            &self.timer_service,
-        )?;
-
-        wait.wait_while(|| matcher(self), timeout).await
-    }
-
     /// Start WPS and perform a wait asynchronously until it connects, fails or
     /// times out. A [`WpsStatus`] is returned that contains the success status
     /// of the WPS connection. When the credentials of only one access point are
@@ -2454,19 +2430,6 @@ where
     /// IP layer, instead of `WifiDriver` events on the data link layer.
     pub async fn ip_wait_while<F: FnMut(&Self) -> Result<bool, EspError>>(
         &self,
-        mut matcher: F,
-        timeout: Option<core::time::Duration>,
-    ) -> Result<(), EspError> {
-        let mut wait =
-            crate::eventloop::AsyncWait::<IpEvent, _>::new(&self.event_loop, &self.timer_service)?;
-
-        wait.wait_while(|| matcher(self), timeout).await
-    }
-
-    /// As [`AsyncWifi::wifi_wait()`], but for `EspWifi` events related to the
-    /// IP layer, instead of `WifiDriver` events on the data link layer.
-    pub async fn ip_wait_while_mut<F: FnMut(&Self) -> Result<bool, EspError>>(
-        &mut self,
         mut matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
