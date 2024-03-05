@@ -792,17 +792,18 @@ mod esptls {
             res
         }
 
-        /// Establish a TLS/SSL connection using the adopted connection, acting as the server.
-        ///
-        /// # Errors
-        ///
-        /// * `ESP_FAIL` if connection could not be established
-        #[cfg(esp_idf_esp_tls_server)]
-        pub async fn negotiate_server(&mut self, cfg: &ServerConfig<'_>) -> Result<(), EspError> {
-            // FIXME: this isn't actually async, but esp-idf does not expose anything else.
-            // we would have to use various hacks to call mbedtls_ssl_handshake by ourself
-            self.0.borrow_mut().negotiate_server(cfg)
-        }
+        // TODO: Create upstream support for async server negotiation
+        // Establish a TLS/SSL connection using the adopted connection, acting as the server.
+        //
+        // # Errors
+        //
+        // * `ESP_FAIL` if connection could not be established
+        // #[cfg(esp_idf_esp_tls_server)]
+        // pub async fn negotiate_server(&mut self, cfg: &ServerConfig<'_>) -> Result<(), EspError> {
+        //     // FIXME: this isn't actually async, but esp-idf does not expose anything else.
+        //     // we would have to use various hacks to call mbedtls_ssl_handshake by ourself
+        //     self.0.borrow_mut().negotiate_server(cfg)
+        // }
 
         /// Read in the supplied buffer. Returns the number of bytes read.
         pub async fn read(&self, buf: &mut [u8]) -> Result<usize, EspError> {
