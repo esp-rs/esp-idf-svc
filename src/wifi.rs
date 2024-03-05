@@ -2129,7 +2129,8 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
                     .map(|x| &x.ap_cred[0..x.ap_cred_cnt as usize])
                     .unwrap_or(&[]);
                 // SAFETY: transparent representation of target type
-                let credentials: &[WpsCredentialsRef] = unsafe { std::mem::transmute(credentials) };
+                let credentials: &[WpsCredentialsRef] =
+                    unsafe { core::mem::transmute(credentials) };
 
                 WifiEvent::StaWpsSuccess(credentials)
             }
