@@ -275,7 +275,7 @@ impl From<Newtype<wifi_ap_config_t>> for AccessPointConfiguration {
     fn from(conf: Newtype<wifi_ap_config_t>) -> Self {
         Self {
             ssid: if conf.0.ssid_len == 0 {
-                from_cstr(&conf.0.ssid).try_into().unwrap()
+                Default::default()
             } else {
                 unsafe {
                     core::str::from_utf8_unchecked(&conf.0.ssid[0..conf.0.ssid_len as usize])
@@ -288,7 +288,7 @@ impl From<Newtype<wifi_ap_config_t>> for AccessPointConfiguration {
             secondary_channel: None,
             auth_method: Option::<AuthMethod>::from(Newtype(conf.0.authmode)).unwrap(),
             protocols: EnumSet::<Protocol>::empty(), // TODO
-            password: from_cstr(&conf.0.password).try_into().unwrap(),
+            password: array_to_heapless_string(conf.0.password),
             max_connections: conf.0.max_connection as u16,
         }
     }
