@@ -12,7 +12,7 @@ use ::log::*;
 
 use enumset::*;
 
-use embedded_svc::wifi::{PmfConfiguration, ScanMethod, ScanSortMethod, Wifi};
+use embedded_svc::wifi::Wifi;
 
 use crate::hal::modem::WifiModemPeripheral;
 use crate::hal::peripheral::Peripheral;
@@ -35,7 +35,7 @@ use crate::timer::EspTaskTimerService;
 
 pub use embedded_svc::wifi::{
     AccessPointConfiguration, AccessPointInfo, AuthMethod, Capability, ClientConfiguration,
-    Configuration, Protocol, SecondaryChannel,
+    Configuration, PmfConfiguration, Protocol, ScanMethod, ScanSortMethod, SecondaryChannel,
 };
 
 pub mod config {
