@@ -1443,6 +1443,7 @@ impl<'d> Wifi for WifiDriver<'d> {
 /// ESP IDF Wifi radio.
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub struct EspWifi<'d> {
+    #[cfg(esp_idf_softap_support)]
     ap_netif: EspNetif,
     sta_netif: EspNetif,
     driver: WifiDriver<'d>,
@@ -1471,6 +1472,7 @@ impl<'d> EspWifi<'d> {
         Self::wrap_all(
             driver,
             EspNetif::new(NetifStack::Sta)?,
+            #[cfg(esp_idf_softap_support)]
             EspNetif::new(NetifStack::Ap)?,
         )
     }
@@ -1478,11 +1480,12 @@ impl<'d> EspWifi<'d> {
     pub fn wrap_all(
         driver: WifiDriver<'d>,
         sta_netif: EspNetif,
-        ap_netif: EspNetif,
+        #[cfg(esp_idf_softap_support)] ap_netif: EspNetif,
     ) -> Result<Self, EspError> {
         let mut this = Self {
             driver,
             sta_netif,
+            #[cfg(esp_idf_softap_support)]
             ap_netif,
         };
 
@@ -1491,6 +1494,7 @@ impl<'d> EspWifi<'d> {
         Ok(this)
     }
 
+    #[cfg(esp_idf_softap_support)]
     /// Replaces the network interfaces with the given ones. Returns the old ones.
     pub fn swap_netif(
         &mut self,
@@ -1519,6 +1523,7 @@ impl<'d> EspWifi<'d> {
         Ok(old)
     }
 
+    #[cfg(esp_idf_softap_support)]
     /// Replaces the AP network interface with the provided one and returns the
     /// existing network interface.
     pub fn swap_netif_ap(&mut self, ap_netif: EspNetif) -> Result<EspNetif, EspError> {
@@ -1551,11 +1556,13 @@ impl<'d> EspWifi<'d> {
         &mut self.sta_netif
     }
 
+    #[cfg(esp_idf_softap_support)]
     /// Returns the underlying [`EspNetif`] for AP mode
     pub fn ap_netif(&self) -> &EspNetif {
         &self.ap_netif
     }
 
+    #[cfg(esp_idf_softap_support)]
     /// Returns the underlying [`EspNetif`] for AP mode, as mutable
     pub fn ap_netif_mut(&mut self) -> &mut EspNetif {
         &mut self.ap_netif
@@ -1582,11 +1589,15 @@ impl<'d> EspWifi<'d> {
         if !self.driver().is_connected()? {
             Ok(false)
         } else {
-            let ap_enabled = self.driver().is_ap_enabled()?;
             let sta_enabled = self.driver().is_sta_enabled()?;
+            let ok = !sta_enabled || self.sta_netif().is_up()?;
 
-            Ok((!ap_enabled || self.ap_netif().is_up()?)
-                && (!sta_enabled || self.sta_netif().is_up()?))
+            #[cfg(esp_idf_softap_support)]
+            let ok = ok && {
+                let ap_enabled = self.driver().is_ap_enabled()?;
+                (!ap_enabled || self.ap_netif().is_up()?)
+            };
+            Ok(ok)
         }
     }
 
@@ -1691,8 +1702,11 @@ impl<'d> EspWifi<'d> {
     fn attach_netif(&mut self) -> Result<(), EspError> {
         let _ = self.driver.stop();
 
-        esp!(unsafe { esp_netif_attach_wifi_ap(self.ap_netif.handle()) })?;
-        esp!(unsafe { esp_wifi_set_default_wifi_ap_handlers() })?;
+        #[cfg(esp_idf_softap_support)]
+        {
+            esp!(unsafe { esp_netif_attach_wifi_ap(self.ap_netif.handle()) })?;
+            esp!(unsafe { esp_wifi_set_default_wifi_ap_handlers() })?;
+        }
 
         esp!(unsafe { esp_netif_attach_wifi_station(self.sta_netif.handle()) })?;
         esp!(unsafe { esp_wifi_set_default_wifi_sta_handlers() })?;
@@ -1703,6 +1717,7 @@ impl<'d> EspWifi<'d> {
     fn detach_netif(&mut self) -> Result<(), EspError> {
         let _ = self.driver.stop();
 
+        #[cfg(esp_idf_softap_support)]
         esp!(unsafe {
             esp_wifi_clear_default_wifi_driver_and_handlers(
                 self.ap_netif.handle() as *mut ffi::c_void
