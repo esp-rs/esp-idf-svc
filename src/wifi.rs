@@ -1945,15 +1945,31 @@ impl ApStaDisconnectedRef {
     pub fn is_mesh_child(&self) -> bool {
         self.0.is_mesh_child
     }
+
+    /// reason of disconnection
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+    )))]
+    pub fn reason(&self) -> u8 {
+        self.0.reason
+    }
 }
 
 impl fmt::Debug for ApStaDisconnectedRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApStaDisconnectedRef")
-            .field("mac", &self.mac())
+        let mut ds = f.debug_struct("ApStaDisconnectedRef");
+        ds.field("mac", &self.mac())
             .field("aid", &self.aid())
-            .field("is_mesh_child", &self.is_mesh_child())
-            .finish()
+            .field("is_mesh_child", &self.is_mesh_child());
+
+        #[cfg(not(any(
+            esp_idf_version_major = "4",
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+        )))]
+        ds.field("reason", &self.reason());
+
+        ds.finish()
     }
 }
 
