@@ -1272,10 +1272,7 @@ impl<'d> WifiDriver<'d> {
         len: u16,
         eb: *mut ffi::c_void,
     ) -> esp_err_t {
-        let res = RX_CALLBACK.as_mut().unwrap()(
-            device_id,
-            WifiFrame::new(buf.cast(), len, eb),
-        );
+        let res = RX_CALLBACK.as_mut().unwrap()(device_id, WifiFrame::new(buf.cast(), len, eb));
 
         match res {
             Ok(_) => ESP_OK,

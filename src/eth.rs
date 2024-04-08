@@ -757,8 +757,7 @@ impl<'d, T> EthDriver<'d, T> {
         len: u32,
         event_handler_arg: *mut ffi::c_void,
     ) -> esp_err_t {
-        UnsafeCallback::from_ptr(event_handler_arg as *mut _)
-            .call(EthFrame::new(buf, len));
+        UnsafeCallback::from_ptr(event_handler_arg as *mut _).call(EthFrame::new(buf, len));
 
         ESP_OK
     }
