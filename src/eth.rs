@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
-use core::{ffi, ptr, ops};
+use core::{ffi, ops, ptr};
 
 use ::log::*;
 
