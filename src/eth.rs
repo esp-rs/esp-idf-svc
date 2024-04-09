@@ -877,6 +877,20 @@ impl EthFrame {
     }
 }
 
+impl Deref for EthFrame {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.buf, self.len as _) }
+    }
+}
+
+impl DerefMut for EthFrame {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
+    }
+}
+
 impl Drop for EthFrame {
     fn drop(&mut self) {
         unsafe { free(self.buf.cast()) };
