@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
-use core::{ffi, ptr};
+use core::{ffi, ptr, ops};
 
 use ::log::*;
 
@@ -877,7 +877,7 @@ impl EthFrame {
     }
 }
 
-impl Deref for EthFrame {
+impl ops::Deref for EthFrame {
     type Target = [u8];
 
     fn deref(&self) -> &[u8] {
@@ -885,7 +885,7 @@ impl Deref for EthFrame {
     }
 }
 
-impl DerefMut for EthFrame {
+impl ops::DerefMut for EthFrame {
     fn deref_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
     }
