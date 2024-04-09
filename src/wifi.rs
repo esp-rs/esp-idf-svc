@@ -2,7 +2,7 @@
 use core::marker::PhantomData;
 use core::str::Utf8Error;
 use core::time::Duration;
-use core::{cmp, ffi, fmt};
+use core::{cmp, ffi, fmt, ops};
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -1409,6 +1409,20 @@ impl WifiFrame {
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
+    }
+}
+
+impl ops::Deref for WifiFrame {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.buf, self.len as _) }
+    }
+}
+
+impl ops::DerefMut for WifiFrame {
+    fn deref_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
     }
 }
