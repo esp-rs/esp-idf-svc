@@ -2,7 +2,7 @@
 use core::marker::PhantomData;
 use core::str::Utf8Error;
 use core::time::Duration;
-use core::{cmp, ffi, fmt, ops};
+use core::{cmp, ffi, fmt, ops, ptr};
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -95,22 +95,26 @@ pub mod config {
         fn from(s: &ScanConfig) -> Self {
             #[allow(clippy::needless_update)]
             Self {
-                bssid: s.bssid.map_or(core::ptr::null(), |v| v.as_ptr()) as *mut u8,
-                ssid: s.ssid.as_ref().map_or(core::ptr::null(), |v| v.as_ptr()) as *mut u8,
+                bssid: s.bssid.map_or(core::ptr::null(), |v| v.as_ptr()).cast_mut(),
+                ssid: s
+                    .ssid
+                    .as_ref()
+                    .map_or(core::ptr::null(), |v| v.as_ptr())
+                    .cast_mut(),
                 scan_time: wifi_scan_time_t {
                     active: wifi_active_scan_time_t {
                         min: match s.scan_type {
                             ScanType::Active { min, .. } => min.as_millis() as _,
-                            _ => 0,
+                            ScanType::Passive(_) => 0,
                         },
                         max: match s.scan_type {
                             ScanType::Active { max, .. } => max.as_millis() as _,
-                            _ => 0,
+                            ScanType::Passive(_) => 0,
                         },
                     },
                     passive: match s.scan_type {
                         ScanType::Passive(time) => time.as_millis() as _,
-                        _ => 0,
+                        ScanType::Active { .. } => 0,
                     },
                 },
                 channel: s.channel.unwrap_or_default(),
@@ -124,7 +128,7 @@ pub mod config {
 
 impl From<AuthMethod> for Newtype<wifi_auth_mode_t> {
     fn from(method: AuthMethod) -> Self {
-        Newtype(match method {
+        Self(match method {
             AuthMethod::None => wifi_auth_mode_t_WIFI_AUTH_OPEN,
             AuthMethod::WEP => wifi_auth_mode_t_WIFI_AUTH_WEP,
             AuthMethod::WPA => wifi_auth_mode_t_WIFI_AUTH_WPA_PSK,
@@ -160,16 +164,12 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
     type Error = EspError;
 
     fn try_from(conf: &ClientConfiguration) -> Result<Self, Self::Error> {
-        let bssid: [u8; 6] = match &conf.bssid {
-            Some(bssid_ref) => *bssid_ref,
-            None => [0; 6],
-        };
+        let bssid: [u8; 6] = conf.bssid.as_ref().map_or([0; 6], |bssid_ref| *bssid_ref);
 
         let mut result = wifi_sta_config_t {
             ssid: [0; 32],
             password: [0; 64],
             scan_method: match conf.scan_method {
-                ScanMethod::CompleteScan(_) => wifi_scan_method_t_WIFI_ALL_CHANNEL_SCAN,
                 ScanMethod::FastScan => wifi_scan_method_t_WIFI_FAST_SCAN,
                 _ => wifi_scan_method_t_WIFI_ALL_CHANNEL_SCAN,
             },
@@ -200,7 +200,7 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
         set_str(&mut result.ssid, conf.ssid.as_ref())?;
         set_str(&mut result.password, conf.password.as_ref())?;
 
-        Ok(Newtype(result))
+        Ok(Self(result))
     }
 }
 
@@ -267,7 +267,7 @@ impl TryFrom<&AccessPointConfiguration> for Newtype<wifi_ap_config_t> {
         set_str(&mut result.ssid, conf.ssid.as_ref())?;
         set_str(&mut result.password, conf.password.as_ref())?;
 
-        Ok(Newtype(result))
+        Ok(Self(result))
     }
 }
 
@@ -289,7 +289,7 @@ impl From<Newtype<wifi_ap_config_t>> for AccessPointConfiguration {
             auth_method: Option::<AuthMethod>::from(Newtype(conf.0.authmode)).unwrap(),
             protocols: EnumSet::<Protocol>::empty(), // TODO
             password: from_cstr(&conf.0.password).try_into().unwrap(),
-            max_connections: conf.0.max_connection as u16,
+            max_connections: u16::from(conf.0.max_connection),
         }
     }
 }
@@ -337,8 +337,8 @@ impl From<WifiDeviceId> for wifi_interface_t {
 impl From<wifi_interface_t> for WifiDeviceId {
     fn from(id: wifi_interface_t) -> Self {
         match id {
-            wifi_interface_t_WIFI_IF_AP => WifiDeviceId::Ap,
-            wifi_interface_t_WIFI_IF_STA => WifiDeviceId::Sta,
+            wifi_interface_t_WIFI_IF_AP => Self::Ap,
+            wifi_interface_t_WIFI_IF_STA => Self::Sta,
             _ => unreachable!(),
         }
     }
@@ -394,7 +394,7 @@ pub trait NonBlocking {
 
     fn stop_wps(&mut self) -> Result<WpsStatus, EspError>;
 
-    fn is_wps_finished(&self) -> Result<bool, EspError>;
+    fn is_wps_finished(&self) -> bool;
 }
 
 impl<T> NonBlocking for &mut T
@@ -436,7 +436,7 @@ where
         (**self).stop_wps()
     }
 
-    fn is_wps_finished(&self) -> Result<bool, EspError> {
+    fn is_wps_finished(&self) -> bool {
         (**self).is_wps_finished()
     }
 }
@@ -523,10 +523,11 @@ impl<'d> WifiDriver<'d> {
             match event {
                 WifiEvent::ApStarted => guard.ap = WifiApStatus::Started,
                 WifiEvent::ApStopped => guard.ap = WifiApStatus::Stopped,
-                WifiEvent::StaStarted => guard.sta = WifiStaStatus::Started,
+                WifiEvent::StaStarted | WifiEvent::StaDisconnected => {
+                    guard.sta = WifiStaStatus::Started;
+                }
                 WifiEvent::StaStopped => guard.sta = WifiStaStatus::Stopped,
                 WifiEvent::StaConnected => guard.sta = WifiStaStatus::Connected,
-                WifiEvent::StaDisconnected => guard.sta = WifiStaStatus::Started,
                 WifiEvent::ScanDone => guard.scan = WifiScanStatus::Done,
                 WifiEvent::StaWpsSuccess(_)
                 | WifiEvent::StaWpsFailed
@@ -545,7 +546,7 @@ impl<'d> WifiDriver<'d> {
         let cfg = wifi_init_config_t {
             #[cfg(esp_idf_version_major = "4")]
             event_handler: Some(esp_event_send_internal),
-            osi_funcs: unsafe { core::ptr::addr_of_mut!(g_wifi_osi_funcs) },
+            osi_funcs: unsafe { ptr::addr_of_mut!(g_wifi_osi_funcs) },
             wpa_crypto_funcs: unsafe { g_wifi_default_wpa_crypto_funcs },
             static_rx_buf_num: CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM as _,
             dynamic_rx_buf_num: CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM as _,
@@ -824,7 +825,7 @@ impl<'d> WifiDriver<'d> {
     pub fn scan_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
-        self.start_scan(&Default::default(), true)?;
+        self.start_scan(&config::ScanConfig::default(), true)?;
         self.get_scan_result_n()
     }
 
@@ -837,7 +838,7 @@ impl<'d> WifiDriver<'d> {
     // For backwards compatibility
     #[cfg(feature = "alloc")]
     pub fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
-        self.start_scan(&Default::default(), true)?;
+        self.start_scan(&config::ScanConfig::default(), true)?;
         self.get_scan_result()
     }
 
@@ -871,7 +872,7 @@ impl<'d> WifiDriver<'d> {
     ///     }).unwrap()
     /// };
     ///
-    /// wifi_driver.start_scan(&ScanConfig::default(), false).unwrap();
+    /// wifi_driver.start_scan(&config::ScanConfig::default(), false).unwrap();
     ///
     /// scan_finish_signal.wait().await;
     ///
@@ -885,7 +886,7 @@ impl<'d> WifiDriver<'d> {
         debug!("About to scan for access points");
 
         let scan_config: wifi_scan_config_t = scan_config.into();
-        esp!(unsafe { esp_wifi_scan_start(&scan_config as *const wifi_scan_config_t, blocking) })?;
+        esp!(unsafe { esp_wifi_scan_start(ptr::addr_of!(scan_config).cast(), blocking) })?;
 
         self.status.lock().scan = WifiScanStatus::Started;
 
@@ -924,7 +925,7 @@ impl<'d> WifiDriver<'d> {
             .map::<Result<AccessPointInfo, Utf8Error>, _>(|ap_info_raw| {
                 Newtype(ap_info_raw).try_into()
             })
-            .filter_map(|r| r.ok())
+            .filter_map(core::result::Result::ok)
             .inspect(|ap_info| debug!("Found access point {:?}", ap_info))
             .collect();
 
@@ -946,7 +947,7 @@ impl<'d> WifiDriver<'d> {
         #[allow(clippy::uninit_vec)]
         // ... because we are filling it in on the next line and only reading the initialized members
         unsafe {
-            ap_infos_raw.set_len(scanned_count)
+            ap_infos_raw.set_len(scanned_count);
         };
 
         let fetched_count = self.fetch_scan_result(&mut ap_infos_raw)?;
@@ -958,7 +959,7 @@ impl<'d> WifiDriver<'d> {
             .map::<Result<AccessPointInfo, Utf8Error>, _>(|ap_info_raw| {
                 Newtype(ap_info_raw).try_into()
             })
-            .filter_map(|r| r.ok())
+            .filter_map(core::result::Result::ok)
             .inspect(|ap_info| debug!("Found access point {:?}", ap_info))
             .collect();
 
@@ -1037,7 +1038,7 @@ impl<'d> WifiDriver<'d> {
         #[allow(clippy::type_complexity)]
         let tx_callback: Box<Box<dyn FnMut(WifiDeviceId, &[u8], bool) + Send + 'd>> =
             Box::new(Box::new(move |device_id, data, status| {
-                tx_callback(device_id, data, status)
+                tx_callback(device_id, data, status);
             }));
 
         #[allow(clippy::type_complexity)]
@@ -1072,7 +1073,11 @@ impl<'d> WifiDriver<'d> {
     /// As per [`crate::sys::esp_wifi_internal_tx`](crate::sys::esp_wifi_internal_tx)
     pub fn send(&mut self, device_id: WifiDeviceId, frame: &[u8]) -> Result<(), EspError> {
         esp!(unsafe {
-            esp_wifi_internal_tx(device_id.into(), frame.as_ptr() as *mut _, frame.len() as _)
+            esp_wifi_internal_tx(
+                device_id.into(),
+                frame.as_ptr().cast_mut().cast(),
+                frame.len() as _,
+            )
         })
     }
 
@@ -1133,7 +1138,7 @@ impl<'d> WifiDriver<'d> {
     pub fn get_mac(&self, interface: WifiDeviceId) -> Result<[u8; 6], EspError> {
         let mut mac = [0u8; 6];
 
-        esp!(unsafe { esp_wifi_get_mac(interface.into(), mac.as_mut_ptr() as *mut _) })?;
+        esp!(unsafe { esp_wifi_get_mac(interface.into(), mac.as_mut_ptr().cast()) })?;
 
         Ok(mac)
     }
@@ -1141,7 +1146,7 @@ impl<'d> WifiDriver<'d> {
     /// Seta the MAC address of the interface, as per
     /// [`crate::sys::esp_wifi_set_mac`](crate::sys::esp_wifi_set_mac)
     pub fn set_mac(&mut self, interface: WifiDeviceId, mac: [u8; 6]) -> Result<(), EspError> {
-        esp!(unsafe { esp_wifi_set_mac(interface.into(), mac.as_ptr() as *mut _) })
+        esp!(unsafe { esp_wifi_set_mac(interface.into(), mac.as_ptr().cast()) })
     }
 
     /// Enable and start WPS
@@ -1151,12 +1156,12 @@ impl<'d> WifiDriver<'d> {
         match self.get_configuration()? {
             Configuration::None => esp!(unsafe { esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA) })?,
             Configuration::AccessPoint(_) => {
-                esp!(unsafe { esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA) })?
+                esp!(unsafe { esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA) })?;
             }
             _ => (),
         }
 
-        esp!(unsafe { esp_wifi_wps_enable(&config.0 as *const _) })?;
+        esp!(unsafe { esp_wifi_wps_enable(ptr::addr_of!(config.0)) })?;
         esp!(unsafe { esp_wifi_wps_start(0) })?;
 
         self.status.lock().wps = None;
@@ -1175,12 +1180,12 @@ impl<'d> WifiDriver<'d> {
         }
     }
 
-    fn is_wps_finished(&self) -> Result<bool, EspError> {
-        Ok(self.status.lock().wps.is_some())
+    fn is_wps_finished(&self) -> bool {
+        self.status.lock().wps.is_some()
     }
 
     fn get_sta_conf(&self) -> Result<ClientConfiguration, EspError> {
-        let mut wifi_config: wifi_config_t = Default::default();
+        let mut wifi_config = wifi_config_t::default();
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
 
         let result: ClientConfiguration = unsafe { Newtype(wifi_config.sta).into() };
@@ -1194,7 +1199,9 @@ impl<'d> WifiDriver<'d> {
         debug!("Checking current STA configuration");
         let current_config = self.get_sta_conf()?;
 
-        if current_config != *conf {
+        if current_config == *conf {
+            debug!("Same STA configuration already present");
+        } else {
             debug!("Setting STA configuration: {:?}", conf);
 
             let mut wifi_config = wifi_config_t {
@@ -1202,8 +1209,6 @@ impl<'d> WifiDriver<'d> {
             };
 
             esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wifi_config) })?;
-        } else {
-            debug!("Same STA configuration already present");
         }
 
         debug!("STA configuration done");
@@ -1212,7 +1217,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     fn get_ap_conf(&self) -> Result<AccessPointConfiguration, EspError> {
-        let mut wifi_config: wifi_config_t = Default::default();
+        let mut wifi_config = wifi_config_t::default();
         esp!(unsafe { esp_wifi_get_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
 
         let result: AccessPointConfiguration = unsafe { Newtype(wifi_config.ap).into() };
@@ -1226,7 +1231,9 @@ impl<'d> WifiDriver<'d> {
         debug!("Checking current AP configuration");
         let current_config = self.get_ap_conf()?;
 
-        if current_config != *conf {
+        if current_config == *conf {
+            debug!("Same AP configuration already present");
+        } else {
             debug!("Setting AP configuration: {:?}", conf);
 
             let mut wifi_config = wifi_config_t {
@@ -1234,8 +1241,6 @@ impl<'d> WifiDriver<'d> {
             };
 
             esp!(unsafe { esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut wifi_config) })?;
-        } else {
-            debug!("Same AP configuration already present");
         }
 
         debug!("AP configuration done");
@@ -1264,7 +1269,7 @@ impl<'d> WifiDriver<'d> {
 
     fn get_scan_count(&mut self) -> Result<usize, EspError> {
         let mut found_ap: u16 = 0;
-        esp!(unsafe { esp_wifi_scan_get_ap_num(&mut found_ap as *mut _) })?;
+        esp!(unsafe { esp_wifi_scan_get_ap_num(ptr::addr_of_mut!(found_ap)) })?;
 
         debug!("Found {} access points", found_ap);
 
@@ -1311,15 +1316,15 @@ impl<'d> WifiDriver<'d> {
         let res = RX_CALLBACK.as_mut().unwrap()(device_id, WifiFrame::new(buf.cast(), len, eb));
 
         match res {
-            Ok(_) => ESP_OK,
+            Ok(()) => ESP_OK,
             Err(e) => e.code(),
         }
     }
 
     unsafe extern "C" fn handle_tx(ifidx: u8, data: *mut u8, len: *mut u16, tx_status: bool) {
         TX_CALLBACK.as_mut().unwrap()(
-            (ifidx as wifi_interface_t).into(),
-            core::slice::from_raw_parts(data as *const _, len as usize),
+            wifi_interface_t::from(ifidx).into(),
+            core::slice::from_raw_parts(data.cast(), len as usize),
             tx_status,
         );
     }
@@ -1363,7 +1368,7 @@ impl<'d> NonBlocking for WifiDriver<'d> {
         WifiDriver::stop_wps(self)
     }
 
-    fn is_wps_finished(&self) -> Result<bool, EspError> {
+    fn is_wps_finished(&self) -> bool {
         WifiDriver::is_wps_finished(self)
     }
 }
@@ -1518,9 +1523,9 @@ impl<'d> EspWifi<'d> {
         ap_netif: EspNetif,
     ) -> Result<Self, EspError> {
         let mut this = Self {
-            driver,
-            sta_netif,
             ap_netif,
+            sta_netif,
+            driver,
         };
 
         this.attach_netif()?;
@@ -1569,7 +1574,7 @@ impl<'d> EspWifi<'d> {
     }
 
     /// Returns the underlying [`WifiDriver`]
-    pub fn driver(&self) -> &WifiDriver<'d> {
+    pub const fn driver(&self) -> &WifiDriver<'d> {
         &self.driver
     }
 
@@ -1579,7 +1584,7 @@ impl<'d> EspWifi<'d> {
     }
 
     /// Returns the underlying [`EspNetif`] for client mode
-    pub fn sta_netif(&self) -> &EspNetif {
+    pub const fn sta_netif(&self) -> &EspNetif {
         &self.sta_netif
     }
 
@@ -1589,7 +1594,7 @@ impl<'d> EspWifi<'d> {
     }
 
     /// Returns the underlying [`EspNetif`] for AP mode
-    pub fn ap_netif(&self) -> &EspNetif {
+    pub const fn ap_netif(&self) -> &EspNetif {
         &self.ap_netif
     }
 
@@ -1616,14 +1621,14 @@ impl<'d> EspWifi<'d> {
     /// Returns `true` when the driver has a connection, it has enabled either
     /// client or AP mode, and either the client or AP network interface is up.
     pub fn is_up(&self) -> Result<bool, EspError> {
-        if !self.driver().is_connected()? {
-            Ok(false)
-        } else {
+        if self.driver().is_connected()? {
             let ap_enabled = self.driver().is_ap_enabled()?;
             let sta_enabled = self.driver().is_sta_enabled()?;
 
             Ok((!ap_enabled || self.ap_netif().is_up()?)
                 && (!sta_enabled || self.sta_netif().is_up()?))
+        } else {
+            Ok(false)
         }
     }
 
@@ -1711,7 +1716,7 @@ impl<'d> EspWifi<'d> {
         self.driver_mut().stop_wps()
     }
 
-    pub fn is_wps_finished(&self) -> Result<bool, EspError> {
+    pub fn is_wps_finished(&self) -> bool {
         self.driver().is_wps_finished()
     }
 
@@ -1741,15 +1746,11 @@ impl<'d> EspWifi<'d> {
         let _ = self.driver.stop();
 
         esp!(unsafe {
-            esp_wifi_clear_default_wifi_driver_and_handlers(
-                self.ap_netif.handle() as *mut ffi::c_void
-            )
+            esp_wifi_clear_default_wifi_driver_and_handlers(self.ap_netif.handle().cast())
         })?;
 
         esp!(unsafe {
-            esp_wifi_clear_default_wifi_driver_and_handlers(
-                self.sta_netif.handle() as *mut ffi::c_void
-            )
+            esp_wifi_clear_default_wifi_driver_and_handlers(self.sta_netif.handle().cast())
         })?;
 
         Ok(())
@@ -1805,7 +1806,7 @@ impl<'d> NonBlocking for EspWifi<'d> {
         EspWifi::stop_wps(self)
     }
 
-    fn is_wps_finished(&self) -> Result<bool, EspError> {
+    fn is_wps_finished(&self) -> bool {
         EspWifi::is_wps_finished(self)
     }
 }
@@ -1933,11 +1934,11 @@ impl TryFrom<u32> for WifiSecondChan {
 
 impl WpsCredentialsRef {
     pub fn ssid(&self) -> &CStr {
-        unsafe { CStr::from_ptr(self.0.ssid.as_ptr() as *const _) }
+        unsafe { CStr::from_ptr(self.0.ssid.as_ptr().cast()) }
     }
 
     pub fn passphrase(&self) -> &CStr {
-        unsafe { CStr::from_ptr(self.0.passphrase.as_ptr() as *const _) }
+        unsafe { CStr::from_ptr(self.0.passphrase.as_ptr().cast()) }
     }
 }
 
@@ -1966,29 +1967,29 @@ impl TryFrom<&WpsCredentialsRef> for WpsCredentials {
                 .ssid()
                 .to_str()
                 .map_err(|_| err)
-                .and_then(|credentials| credentials.try_into().map_err(|_| err))?,
+                .and_then(|credentials| credentials.try_into().map_err(|()| err))?,
             passphrase: credentials
                 .passphrase()
                 .to_str()
                 .map_err(|_| err)
-                .and_then(|credentials| credentials.try_into().map_err(|_| err))?,
+                .and_then(|credentials| credentials.try_into().map_err(|()| err))?,
         })
     }
 }
 
 impl ApStaConnectedRef {
     /// MAC address of the station connected to ESP32 soft-AP
-    pub fn mac(&self) -> [u8; 6] {
+    pub const fn mac(&self) -> [u8; 6] {
         self.0.mac
     }
 
     /// the aid that ESP32 soft-AP gives to the station connected to
-    pub fn aid(&self) -> u8 {
+    pub const fn aid(&self) -> u8 {
         self.0.aid
     }
 
     /// flag to identify mesh child
-    pub fn is_mesh_child(&self) -> bool {
+    pub const fn is_mesh_child(&self) -> bool {
         self.0.is_mesh_child
     }
 }
@@ -2005,17 +2006,17 @@ impl fmt::Debug for ApStaConnectedRef {
 
 impl ApStaDisconnectedRef {
     /// MAC address of the station disconnects to ESP32 soft-AP
-    pub fn mac(&self) -> [u8; 6] {
+    pub const fn mac(&self) -> [u8; 6] {
         self.0.mac
     }
 
     /// the aid that ESP32 soft-AP gave to the station disconnects to
-    pub fn aid(&self) -> u8 {
+    pub const fn aid(&self) -> u8 {
         self.0.aid
     }
 
     /// flag to identify mesh child
-    pub fn is_mesh_child(&self) -> bool {
+    pub const fn is_mesh_child(&self) -> bool {
         self.0.is_mesh_child
     }
 
@@ -2024,7 +2025,7 @@ impl ApStaDisconnectedRef {
         esp_idf_version_major = "4",
         all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
     )))]
-    pub fn reason(&self) -> u8 {
+    pub const fn reason(&self) -> u8 {
         self.0.reason
     }
 }
@@ -2108,10 +2109,12 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE => WifiEvent::StaAuthmodeChanged,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS => {
                 let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_success_t)
-                        .as_ref()
+                    (ptr::addr_of!(*data.payload.unwrap())
+                        .cast::<wifi_event_sta_wps_er_success_t>())
+                    .as_ref()
                 };
 
+                #[allow(clippy::map_unwrap_or)]
                 let credentials = payload
                     .map(|payload| &payload.ap_cred[..payload.ap_cred_cnt as _])
                     .unwrap_or(&[]);
@@ -2122,7 +2125,7 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT => WifiEvent::StaWpsTimeout,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_PIN => {
                 let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_wps_er_pin_t)
+                    (ptr::addr_of!(*data.payload.unwrap()).cast::<wifi_event_sta_wps_er_pin_t>())
                         .as_ref()
                 };
                 let pin = payload
@@ -2135,15 +2138,16 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_AP_STOP => WifiEvent::ApStopped,
             wifi_event_t_WIFI_EVENT_AP_STACONNECTED => {
                 let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_ap_staconnected_t)
+                    (ptr::addr_of!(*data.payload.unwrap()).cast::<wifi_event_ap_staconnected_t>())
                         .as_ref()
                 };
                 WifiEvent::ApStaConnected(unsafe { core::mem::transmute(payload.unwrap()) })
             }
             wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED => {
                 let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_ap_stadisconnected_t)
-                        .as_ref()
+                    (ptr::addr_of!(*data.payload.unwrap())
+                        .cast::<wifi_event_ap_stadisconnected_t>())
+                    .as_ref()
                 };
                 WifiEvent::ApStaDisconnected(unsafe { core::mem::transmute(payload.unwrap()) })
             }
@@ -2162,8 +2166,9 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             )))]
             wifi_event_t_WIFI_EVENT_HOME_CHANNEL_CHANGE => {
                 let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_home_channel_change_t)
-                        .as_ref()
+                    (ptr::addr_of!(*data.payload.unwrap())
+                        .cast::<wifi_event_home_channel_change_t>())
+                    .as_ref()
                 }
                 .unwrap();
 
@@ -2174,7 +2179,7 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
                     new_snd: payload.new_snd.try_into().unwrap(),
                 })
             }
-            _ => panic!("unknown event ID: {}", event_id),
+            _ => panic!("unknown event ID: {event_id}"),
         }
     }
 }
@@ -2195,12 +2200,12 @@ impl<T> BlockingWifi<T>
 where
     T: Wifi<Error = EspError> + NonBlocking,
 {
-    pub fn wrap(wifi: T, event_loop: EspSystemEventLoop) -> Result<Self, EspError> {
+    pub const fn wrap(wifi: T, event_loop: EspSystemEventLoop) -> Result<Self, EspError> {
         Ok(Self { wifi, event_loop })
     }
 
     /// Returns the underlying [`WifiDriver`] or [`EspWifi`]
-    pub fn wifi(&self) -> &T {
+    pub const fn wifi(&self) -> &T {
         &self.wifi
     }
 
@@ -2310,10 +2315,7 @@ where
     /// configuration manually.
     pub fn start_wps(&mut self, config: &WpsConfig) -> Result<WpsStatus, EspError> {
         self.wifi.start_wps(config)?;
-        self.wifi_wait_while(
-            || self.wifi.is_wps_finished().map(|x| !x),
-            Some(WPS_TIMEOUT),
-        )?;
+        self.wifi_wait_while(|| Ok(!self.wifi.is_wps_finished()), Some(WPS_TIMEOUT))?;
         Ok(self.wifi.stop_wps().unwrap_or(WpsStatus::Timeout))
     }
 }
@@ -2353,50 +2355,50 @@ where
     type Error = EspError;
 
     fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
-        BlockingWifi::get_capabilities(self)
+        Self::get_capabilities(self)
     }
 
     fn get_configuration(&self) -> Result<Configuration, Self::Error> {
-        BlockingWifi::get_configuration(self)
+        Self::get_configuration(self)
     }
 
     fn set_configuration(&mut self, conf: &Configuration) -> Result<(), Self::Error> {
-        BlockingWifi::set_configuration(self, conf)
+        Self::set_configuration(self, conf)
     }
 
     fn is_started(&self) -> Result<bool, Self::Error> {
-        BlockingWifi::is_started(self)
+        Self::is_started(self)
     }
 
     fn is_connected(&self) -> Result<bool, Self::Error> {
-        BlockingWifi::is_connected(self)
+        Self::is_connected(self)
     }
 
     fn start(&mut self) -> Result<(), Self::Error> {
-        BlockingWifi::start(self)
+        Self::start(self)
     }
 
     fn stop(&mut self) -> Result<(), Self::Error> {
-        BlockingWifi::stop(self)
+        Self::stop(self)
     }
 
     fn connect(&mut self) -> Result<(), Self::Error> {
-        BlockingWifi::connect(self)
+        Self::connect(self)
     }
 
     fn disconnect(&mut self) -> Result<(), Self::Error> {
-        BlockingWifi::disconnect(self)
+        Self::disconnect(self)
     }
 
     fn scan_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        BlockingWifi::scan_n(self)
+        Self::scan_n(self)
     }
 
     #[cfg(feature = "alloc")]
     fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
-        BlockingWifi::scan(self)
+        Self::scan(self)
     }
 }
 
@@ -2406,7 +2408,7 @@ where
     T: NetifStatus,
 {
     fn is_up(&self) -> Result<bool, EspError> {
-        BlockingWifi::is_up(self)
+        Self::is_up(self)
     }
 }
 
@@ -2424,7 +2426,7 @@ impl<T> AsyncWifi<T>
 where
     T: Wifi<Error = EspError> + NonBlocking,
 {
-    pub fn wrap(
+    pub const fn wrap(
         wifi: T,
         event_loop: EspSystemEventLoop,
         timer_service: EspTaskTimerService,
@@ -2437,7 +2439,7 @@ where
     }
 
     /// Returns the underlying [`WifiDriver`] or [`EspWifi`]
-    pub fn wifi(&self) -> &T {
+    pub const fn wifi(&self) -> &T {
         &self.wifi
     }
 
@@ -2509,7 +2511,8 @@ where
     pub async fn scan_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), EspError> {
-        self.wifi.start_scan(&Default::default(), false)?;
+        self.wifi
+            .start_scan(&config::ScanConfig::default(), false)?;
 
         self.wifi_wait(|this| this.wifi.is_scan_done().map(|s| !s), None)
             .await?;
@@ -2521,7 +2524,8 @@ where
     /// as an async call that awaits until the scan is complete.
     #[cfg(feature = "alloc")]
     pub async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, EspError> {
-        self.wifi.start_scan(&Default::default(), false)?;
+        self.wifi
+            .start_scan(&config::ScanConfig::default(), false)?;
 
         self.wifi_wait(|this| this.wifi.is_scan_done().map(|s| !s), None)
             .await?;
@@ -2563,11 +2567,8 @@ where
     /// configuration manually.
     pub async fn start_wps(&mut self, config: &WpsConfig<'_>) -> Result<WpsStatus, EspError> {
         self.wifi.start_wps(config)?;
-        self.wifi_wait(
-            |this| this.wifi.is_wps_finished().map(|x| !x),
-            Some(WPS_TIMEOUT),
-        )
-        .await?;
+        self.wifi_wait(|this| Ok(!this.wifi.is_wps_finished()), Some(WPS_TIMEOUT))
+            .await?;
         Ok(self.wifi.stop_wps().unwrap_or(WpsStatus::Timeout))
     }
 }
@@ -2611,50 +2612,50 @@ where
     type Error = T::Error;
 
     async fn get_capabilities(&self) -> Result<EnumSet<Capability>, Self::Error> {
-        AsyncWifi::get_capabilities(self)
+        Self::get_capabilities(self)
     }
 
     async fn get_configuration(&self) -> Result<Configuration, Self::Error> {
-        AsyncWifi::get_configuration(self)
+        Self::get_configuration(self)
     }
 
     async fn set_configuration(&mut self, conf: &Configuration) -> Result<(), Self::Error> {
-        AsyncWifi::set_configuration(self, conf)
+        Self::set_configuration(self, conf)
     }
 
     async fn start(&mut self) -> Result<(), Self::Error> {
-        AsyncWifi::start(self).await
+        Self::start(self).await
     }
 
     async fn stop(&mut self) -> Result<(), Self::Error> {
-        AsyncWifi::stop(self).await
+        Self::stop(self).await
     }
 
     async fn connect(&mut self) -> Result<(), Self::Error> {
-        AsyncWifi::connect(self).await
+        Self::connect(self).await
     }
 
     async fn disconnect(&mut self) -> Result<(), Self::Error> {
-        AsyncWifi::disconnect(self).await
+        Self::disconnect(self).await
     }
 
     async fn is_started(&self) -> Result<bool, Self::Error> {
-        AsyncWifi::is_started(self)
+        Self::is_started(self)
     }
 
     async fn is_connected(&self) -> Result<bool, Self::Error> {
-        AsyncWifi::is_connected(self)
+        Self::is_connected(self)
     }
 
     async fn scan_n<const N: usize>(
         &mut self,
     ) -> Result<(heapless::Vec<AccessPointInfo, N>, usize), Self::Error> {
-        AsyncWifi::scan_n(self).await
+        Self::scan_n(self).await
     }
 
     #[cfg(feature = "alloc")]
     async fn scan(&mut self) -> Result<alloc::vec::Vec<AccessPointInfo>, Self::Error> {
-        AsyncWifi::scan(self).await
+        Self::scan(self).await
     }
 }
 
@@ -2672,7 +2673,7 @@ where
     T: NetifStatus,
 {
     async fn is_up(&self) -> Result<bool, EspError> {
-        AsyncWifi::is_up(self)
+        Self::is_up(self)
     }
 }
 
@@ -2707,7 +2708,7 @@ impl TryFrom<&WpsConfig<'_>> for Newtype<esp_wps_config_t> {
 
     fn try_from(config: &WpsConfig<'_>) -> Result<Self, Self::Error> {
         let factory_info = Newtype::<wps_factory_information_t>::try_from(&config.factory_info)?.0;
-        Ok(Newtype(esp_wps_config_t {
+        Ok(Self(esp_wps_config_t {
             wps_type: config.wps_type.as_raw_type(),
             factory_info,
             #[cfg(not(esp_idf_version_major = "4"))]
@@ -2728,7 +2729,7 @@ impl TryFrom<&WpsFactoryInfo<'_>> for Newtype<wps_factory_information_t> {
     type Error = EspError;
 
     fn try_from(info: &WpsFactoryInfo<'_>) -> Result<Self, Self::Error> {
-        let mut result = Newtype(wps_factory_information_t {
+        let mut result = Self(wps_factory_information_t {
             manufacturer: [0; 65],
             model_number: [0; 33],
             model_name: [0; 33],
@@ -2763,18 +2764,18 @@ pub enum WpsType {
 }
 
 impl WpsType {
-    fn as_raw_type(&self) -> wps_type_t {
+    const fn as_raw_type(&self) -> wps_type_t {
         match self {
-            WpsType::Pbc => wps_type_WPS_TYPE_PBC,
-            WpsType::Pin(_) => wps_type_WPS_TYPE_PIN,
+            Self::Pbc => wps_type_WPS_TYPE_PBC,
+            Self::Pin(_) => wps_type_WPS_TYPE_PIN,
         }
     }
 
     #[cfg(not(esp_idf_version_major = "4"))]
     fn as_pin(&self) -> [ffi::c_char; 9] {
         match self {
-            WpsType::Pbc => [0; 9],
-            WpsType::Pin(pin) => {
+            Self::Pbc => [0; 9],
+            Self::Pin(pin) => {
                 let mut result = [0; 9];
                 let mut pin = *pin;
                 let mut rem: u32;
@@ -2806,9 +2807,9 @@ impl TryFrom<&WifiEvent<'_>> for WpsStatus {
         match event {
             WifiEvent::StaWpsSuccess(credentials) => {
                 if credentials.is_empty() {
-                    Ok(WpsStatus::SuccessConnected)
+                    Ok(Self::SuccessConnected)
                 } else {
-                    Ok(WpsStatus::SuccessMultipleAccessPoints(
+                    Ok(Self::SuccessMultipleAccessPoints(
                         credentials
                             .iter()
                             .filter_map(|c| c.try_into().ok())
@@ -2816,10 +2817,10 @@ impl TryFrom<&WifiEvent<'_>> for WpsStatus {
                     ))
                 }
             }
-            WifiEvent::StaWpsFailed => Ok(WpsStatus::Failure),
-            WifiEvent::StaWpsTimeout => Ok(WpsStatus::Timeout),
-            WifiEvent::StaWpsPin(pin) => Ok(WpsStatus::Pin(*pin)),
-            WifiEvent::StaWpsPbcOverlap => Ok(WpsStatus::PbcOverlap),
+            WifiEvent::StaWpsFailed => Ok(Self::Failure),
+            WifiEvent::StaWpsTimeout => Ok(Self::Timeout),
+            WifiEvent::StaWpsPin(pin) => Ok(Self::Pin(*pin)),
+            WifiEvent::StaWpsPbcOverlap => Ok(Self::PbcOverlap),
             _ => Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>()),
         }
     }

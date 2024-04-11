@@ -21,7 +21,7 @@ pub fn set_str(buf: &mut [u8], s: &str) -> Result<(), EspError> {
 }
 
 pub fn c_char_to_u8_slice_mut(s: &mut [c_char]) -> &mut [u8] {
-    let s_ptr = unsafe { s.as_mut_ptr() as *mut u8 };
+    let s_ptr = unsafe { s.as_mut_ptr().cast() };
     unsafe { core::slice::from_raw_parts_mut(s_ptr, s.len()) }
 }
 
@@ -47,7 +47,7 @@ pub struct RawCstrs(alloc::vec::Vec<CString>);
 #[cfg(feature = "alloc")]
 impl RawCstrs {
     #[allow(dead_code)]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(alloc::vec::Vec::new())
     }
 
@@ -67,14 +67,14 @@ impl RawCstrs {
     where
         S: AsRef<str>,
     {
-        s.map(|s| self.as_ptr(s)).unwrap_or(Ok(core::ptr::null()))
+        s.map_or(Ok(core::ptr::null()), |s| self.as_ptr(s))
     }
 }
 
 #[cfg(feature = "alloc")]
 impl Default for RawCstrs {
     fn default() -> Self {
-        RawCstrs::new()
+        Self::new()
     }
 }
 
@@ -103,7 +103,7 @@ pub fn cstr_from_str_truncating<'a>(rust_str: &str, buf: &'a mut [u8]) -> &'a CS
     buf[..truncated_str.len()].copy_from_slice(truncated_str.as_bytes());
     buf[truncated_str.len()] = b'\0';
 
-    CStr::from_bytes_with_nul(&buf[..truncated_str.len() + 1]).unwrap()
+    CStr::from_bytes_with_nul(&buf[..=truncated_str.len()]).unwrap()
 }
 
 /// Convert slice of rust strs to NULL-terminated fixed size array of c string pointers
@@ -133,7 +133,7 @@ pub fn cstr_arr_from_str_slice<const N: usize>(
         }
         cbuf[..s.len()].copy_from_slice(s.as_bytes());
         cbuf[s.len()] = b'\0';
-        let cstr = CStr::from_bytes_with_nul(&cbuf[..s.len() + 1]).unwrap();
+        let cstr = CStr::from_bytes_with_nul(&cbuf[..=s.len()]).unwrap();
         cstrs[i] = cstr.as_ptr();
 
         cbuf = &mut cbuf[s.len() + 1..];

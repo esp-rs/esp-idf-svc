@@ -72,7 +72,7 @@ impl<'a> TryFrom<&'a Psk<'a>> for TlsPsk {
 pub struct X509<'a>(&'a [u8]);
 
 impl<'a> X509<'a> {
-    pub fn pem(cstr: &'a CStr) -> Self {
+    pub const fn pem(cstr: &'a CStr) -> Self {
         Self(cstr.to_bytes_with_nul())
     }
 
@@ -94,17 +94,17 @@ impl<'a> X509<'a> {
         Self(bytes)
     }
 
-    pub fn data(&self) -> &[u8] {
+    pub const fn data(&self) -> &[u8] {
         self.0
     }
 
     #[allow(unused)]
-    pub(crate) fn as_esp_idf_raw_ptr(&self) -> *const c_char {
+    pub(crate) const fn as_esp_idf_raw_ptr(&self) -> *const c_char {
         self.data().as_ptr().cast()
     }
 
     #[allow(unused)]
-    pub(crate) fn as_esp_idf_raw_len(&self) -> usize {
+    pub(crate) const fn as_esp_idf_raw_len(&self) -> usize {
         self.data().len()
     }
 }
@@ -186,7 +186,7 @@ mod esptls {
         }
 
         fn try_into_raw(&self, bufs: &mut RawConfigBufs) -> Result<sys::esp_tls_cfg, EspError> {
-            let mut rcfg: sys::esp_tls_cfg = Default::default();
+            let mut rcfg = sys::esp_tls_cfg::default();
 
             if let Some(ca_cert) = self.ca_cert {
                 rcfg.__bindgen_anon_1.cacert_buf = ca_cert.data().as_ptr();
@@ -234,7 +234,7 @@ mod esptls {
                     keep_alive_interval: kac.interval.as_secs() as i32,
                     keep_alive_count: kac.count as i32,
                 };
-                rcfg.keep_alive_cfg = &mut raw_kac as *mut _;
+                rcfg.keep_alive_cfg = core::ptr::addr_of_mut!(raw_kac);
             }
 
             let mut raw_psk: sys::psk_key_hint;
@@ -244,7 +244,7 @@ mod esptls {
                     key_size: psk.key.len(),
                     hint: psk.hint.as_ptr(),
                 };
-                rcfg.psk_hint_key = &mut raw_psk as *mut _;
+                rcfg.psk_hint_key = core::ptr::addr_of_mut!(raw_psk);
             }
 
             #[cfg(esp_idf_mbedtls_certificate_bundle)]
@@ -277,7 +277,7 @@ mod esptls {
 
     impl Default for RawConfigBufs {
         fn default() -> Self {
-            RawConfigBufs {
+            Self {
                 alpn_protos: [core::ptr::null(); 10],
                 alpn_protos_cbuf: [0; 99],
                 common_name_buf: [0; MAX_COMMON_NAME_LENGTH + 1],
@@ -425,15 +425,15 @@ mod esptls {
         /// * `ESP_ERR_NO_MEM` if not enough memory to create the TLS connection
         pub fn new() -> Result<Self, EspError> {
             let raw = unsafe { sys::esp_tls_init() };
-            if !raw.is_null() {
+            if raw.is_null() {
+                Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
+            } else {
                 Ok(Self {
                     raw,
                     socket: InternalSocket(()),
                     #[cfg(esp_idf_esp_tls_server)]
                     server_session: false,
                 })
-            } else {
-                Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
             }
         }
 
@@ -476,7 +476,9 @@ mod esptls {
         ))]
         pub fn adopt(socket: S) -> Result<Self, EspError> {
             let raw = unsafe { sys::esp_tls_init() };
-            if !raw.is_null() {
+            if raw.is_null() {
+                Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
+            } else {
                 sys::esp!(unsafe { sys::esp_tls_set_conn_sockfd(raw, socket.handle()) })?;
 
                 sys::esp!(unsafe {
@@ -489,8 +491,6 @@ mod esptls {
                     #[cfg(esp_idf_esp_tls_server)]
                     server_session: false,
                 })
-            } else {
-                Err(EspError::from_infallible::<ESP_ERR_NO_MEM>())
             }
         }
 
@@ -558,17 +558,17 @@ mod esptls {
             let ret = unsafe {
                 if asynch {
                     sys::esp_tls_conn_new_async(
-                        host.as_bytes().as_ptr() as *const i8,
+                        host.as_bytes().as_ptr().cast(),
                         host.len() as i32,
-                        port as i32,
+                        i32::from(port),
                         cfg,
                         self.raw,
                     )
                 } else {
                     sys::esp_tls_conn_new_sync(
-                        host.as_bytes().as_ptr() as *const i8,
+                        host.as_bytes().as_ptr().cast(),
                         host.len() as i32,
-                        port as i32,
+                        i32::from(port),
                         cfg,
                         self.raw,
                     )
@@ -614,14 +614,12 @@ mod esptls {
             // cannot call esp_tls_conn_read bc it's inline in v4
             let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
             let read_func = esp_tls.read.unwrap();
-            unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) }
+            unsafe { read_func(self.raw, buf.as_mut_ptr().cast(), buf.len()) }
         }
 
         #[cfg(not(esp_idf_version_major = "4"))]
         fn read_raw(&mut self, buf: &mut [u8]) -> isize {
-            use core::ffi::c_void;
-
-            unsafe { sys::esp_tls_conn_read(self.raw, buf.as_mut_ptr() as *mut c_void, buf.len()) }
+            unsafe { sys::esp_tls_conn_read(self.raw, buf.as_mut_ptr().cast(), buf.len()) }
         }
 
         /// Write the supplied buffer. Returns the number of bytes written.
@@ -662,17 +660,15 @@ mod esptls {
             // cannot call esp_tls_conn_write bc it's inline
             let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
             let write_func = esp_tls.write.unwrap();
-            unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) }
+            unsafe { write_func(self.raw, buf.as_ptr().cast(), buf.len()) }
         }
 
         #[cfg(not(esp_idf_version_major = "4"))]
         fn write_raw(&mut self, buf: &[u8]) -> isize {
-            use core::ffi::c_void;
-
-            unsafe { sys::esp_tls_conn_write(self.raw, buf.as_ptr() as *const c_void, buf.len()) }
+            unsafe { sys::esp_tls_conn_write(self.raw, buf.as_ptr().cast(), buf.len()) }
         }
 
-        pub fn context_handle(&self) -> *mut sys::esp_tls {
+        pub const fn context_handle(&self) -> *mut sys::esp_tls {
             self.raw
         }
     }
@@ -703,7 +699,7 @@ mod esptls {
         S: Socket,
     {
         fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspIOError> {
-            EspTls::read(self, buf).map_err(EspIOError)
+            Self::read(self, buf).map_err(EspIOError)
         }
     }
 
@@ -712,7 +708,7 @@ mod esptls {
         S: Socket,
     {
         fn write(&mut self, buf: &[u8]) -> Result<usize, EspIOError> {
-            EspTls::write(self, buf).map_err(EspIOError)
+            Self::write(self, buf).map_err(EspIOError)
         }
 
         fn flush(&mut self) -> Result<(), EspIOError> {
@@ -858,11 +854,11 @@ mod esptls {
                 }
                 ESP_TLS_ERR_SSL_WANT_READ => {
                     core::future::poll_fn(|ctx| self.0.borrow_mut().socket.poll_readable(ctx))
-                        .await?
+                        .await?;
                 }
                 ESP_TLS_ERR_SSL_WANT_WRITE => {
                     core::future::poll_fn(|ctx| self.0.borrow_mut().socket.poll_writable(ctx))
-                        .await?
+                        .await?;
                 }
                 _ => Err(error)?,
             }
@@ -895,7 +891,7 @@ mod esptls {
         S: PollableSocket,
     {
         async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-            EspAsyncTls::read(self, buf).await.map_err(EspIOError)
+            Self::read(self, buf).await.map_err(EspIOError)
         }
     }
 
@@ -908,7 +904,7 @@ mod esptls {
         S: PollableSocket,
     {
         async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-            EspAsyncTls::write(self, buf).await.map_err(EspIOError)
+            Self::write(self, buf).await.map_err(EspIOError)
         }
 
         async fn flush(&mut self) -> Result<(), Self::Error> {

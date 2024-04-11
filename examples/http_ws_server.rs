@@ -112,10 +112,10 @@ fn nth(n: u32) -> Cow<'static, str> {
             _ => unreachable!(),
         }),
         larger => Cow::Owned(match larger % 10 {
-            1 => format!("{}st", larger),
-            2 => format!("{}nd", larger),
-            3 => format!("{}rd", larger),
-            _ => format!("{}th", larger),
+            1 => format!("{larger}st"),
+            2 => format!("{larger}nd"),
+            3 => format!("{larger}rd"),
+            _ => format!("{larger}th"),
         }),
     }
 }
@@ -127,9 +127,7 @@ fn main() -> anyhow::Result<()> {
     let mut server = create_server()?;
 
     server.fn_handler("/", Method::Get, |req| {
-        req.into_ok_response()?
-            .write_all(INDEX_HTML.as_bytes())
-            .map(|_| ())
+        req.into_ok_response()?.write_all(INDEX_HTML.as_bytes())
     })?;
 
     let guessing_games = Mutex::new(BTreeMap::<i32, GuessingGame>::new());

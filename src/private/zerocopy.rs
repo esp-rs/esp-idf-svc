@@ -22,7 +22,7 @@ where
     T: Send + 'static,
 {
     pub fn get_shared(&mut self) -> Option<&mut T> {
-        if let Some(channel) = Weak::upgrade(&self.0) {
+        Weak::upgrade(&self.0).and_then(|channel| {
             let mut guard = channel.state.lock();
 
             loop {
@@ -32,9 +32,7 @@ where
                     State::Data(data) => break unsafe { data.as_mut() },
                 }
             }
-        } else {
-            None
-        }
+        })
     }
 
     pub async fn get_shared_async(&mut self) -> Option<&mut T> {

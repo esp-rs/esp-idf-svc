@@ -36,11 +36,11 @@ impl<'a> UnsafeCallback<'a> {
     }
 
     unsafe fn from_ptr(ptr: *mut ffi::c_void) -> Self {
-        Self(ptr as *mut _)
+        Self(ptr.cast())
     }
 
     fn as_ptr(&self) -> *mut ffi::c_void {
-        self.0 as *mut _
+        self.0.cast()
     }
 
     unsafe fn call(&self) {
@@ -166,13 +166,13 @@ impl EspAsyncTimer {
 
 impl embedded_hal_async::delay::DelayNs for EspAsyncTimer {
     async fn delay_ns(&mut self, ns: u32) {
-        EspAsyncTimer::after(self, Duration::from_micros(ns as _))
+        Self::after(self, Duration::from_micros(u64::from(ns)))
             .await
             .unwrap();
     }
 
     async fn delay_ms(&mut self, ms: u32) {
-        EspAsyncTimer::after(self, Duration::from_millis(ms as _))
+        Self::after(self, Duration::from_millis(u64::from(ms)))
             .await
             .unwrap();
     }
@@ -284,12 +284,12 @@ where
             esp_timer_create(
                 &esp_timer_create_args_t {
                     callback: Some(EspTimer::handle),
-                    name: b"rust\0" as *const _ as *const _, // TODO
+                    name: b"rust\0".as_ptr().cast(), // TODO
                     arg: unsafe_callback.as_ptr(),
                     dispatch_method,
                     skip_unhandled_events: false, // TODO
                 },
-                &mut handle as *mut _,
+                ptr::addr_of_mut!(handle),
             )
         })?;
 
@@ -303,7 +303,7 @@ where
 pub type EspTaskTimerService = EspTimerService<Task>;
 
 impl EspTimerService<Task> {
-    pub fn new() -> Result<Self, EspError> {
+    pub const fn new() -> Result<Self, EspError> {
         Ok(Self(Task))
     }
 }

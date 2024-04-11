@@ -30,13 +30,13 @@ impl From<Newtype<&esp_app_desc_t>> for FirmwareInfo {
         let app_desc = app_desc.0;
 
         let mut result = Self {
-            version: unsafe { from_cstr_ptr(&app_desc.version as *const _) }
+            version: unsafe { from_cstr_ptr(ptr::addr_of!(app_desc.version).cast()) }
                 .try_into()
                 .unwrap(),
             signature: Some(heapless::Vec::from_slice(&app_desc.app_elf_sha256).unwrap()),
             released: "".try_into().unwrap(),
             description: Some(
-                unsafe { from_cstr_ptr(&app_desc.project_name as *const _) }
+                unsafe { from_cstr_ptr(ptr::addr_of!(app_desc.project_name).cast()) }
                     .try_into()
                     .unwrap(),
             ),
@@ -46,8 +46,8 @@ impl From<Newtype<&esp_app_desc_t>> for FirmwareInfo {
         write!(
             &mut result.released,
             "{} {}",
-            unsafe { from_cstr_ptr(&app_desc.date as *const _) },
-            unsafe { from_cstr_ptr(&app_desc.time as *const _) }
+            unsafe { from_cstr_ptr(ptr::addr_of!(app_desc.date).cast()) },
+            unsafe { from_cstr_ptr(ptr::addr_of!(app_desc.time).cast()) }
         )
         .unwrap();
 
@@ -95,7 +95,7 @@ impl EspFirmwareInfoLoader {
                     + mem::size_of::<esp_app_desc_t>()];
 
             let app_desc = unsafe {
-                (app_desc_slice.as_ptr() as *const esp_app_desc_t)
+                (app_desc_slice.as_ptr().cast::<esp_app_desc_t>())
                     .as_ref()
                     .unwrap()
             };
@@ -118,15 +118,15 @@ impl io::ErrorType for EspFirmwareInfoLoader {
 
 impl FirmwareInfoLoader for EspFirmwareInfoLoader {
     fn load(&mut self, buf: &[u8]) -> Result<LoadResult, Self::Error> {
-        Ok(EspFirmwareInfoLoader::load(self, buf)?)
+        Ok(Self::load(self, buf)?)
     }
 
     fn is_loaded(&self) -> bool {
-        EspFirmwareInfoLoader::is_loaded(self)
+        Self::is_loaded(self)
     }
 
     fn get_info(&self) -> Result<FirmwareInfo, Self::Error> {
-        Ok(EspFirmwareInfoLoader::get_info(self)?)
+        Ok(Self::get_info(self)?)
     }
 }
 
@@ -142,7 +142,9 @@ impl<'a> EspOtaUpdate<'a> {
         self.check_write()?;
 
         if !buf.is_empty() {
-            esp!(unsafe { esp_ota_write(self.update_handle, buf.as_ptr() as _, buf.len() as _) })?;
+            esp!(unsafe {
+                esp_ota_write(self.update_handle, buf.as_ptr().cast(), buf.len() as _)
+            })?;
         }
 
         Ok(())
@@ -189,10 +191,10 @@ impl<'a> EspOtaUpdate<'a> {
     }
 
     fn check_write(&self) -> Result<(), EspError> {
-        if !self.update_partition.is_null() {
-            Ok(())
-        } else {
+        if self.update_partition.is_null() {
             Err(EspError::from_infallible::<ESP_FAIL>())
+        } else {
+            Ok(())
         }
     }
 }
@@ -240,28 +242,24 @@ impl EspOta {
     }
 
     pub fn get_boot_slot(&self) -> Result<Slot, EspError> {
-        if let Some(partition) = unsafe { esp_ota_get_boot_partition().as_ref() } {
-            self.get_slot(partition)
-        } else {
-            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
-        }
+        unsafe { esp_ota_get_boot_partition().as_ref() }.map_or_else(
+            || Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>()),
+            |partition| self.get_slot(partition),
+        )
     }
 
     pub fn get_running_slot(&self) -> Result<Slot, EspError> {
-        if let Some(partition) = unsafe { esp_ota_get_running_partition().as_ref() } {
-            self.get_slot(partition)
-        } else {
-            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
-        }
+        unsafe { esp_ota_get_running_partition().as_ref() }.map_or_else(
+            || Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>()),
+            |partition| self.get_slot(partition),
+        )
     }
 
     pub fn get_update_slot(&self) -> Result<Slot, EspError> {
-        if let Some(partition) = unsafe { esp_ota_get_next_update_partition(ptr::null()).as_ref() }
-        {
-            self.get_slot(partition)
-        } else {
-            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
-        }
+        unsafe { esp_ota_get_next_update_partition(ptr::null()).as_ref() }.map_or_else(
+            || Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>()),
+            |partition| self.get_slot(partition),
+        )
     }
 
     pub fn get_last_invalid_slot(&self) -> Result<Option<Slot>, EspError> {
@@ -319,7 +317,7 @@ impl EspOta {
             esp_partition_find(
                 esp_partition_type_t_ESP_PARTITION_TYPE_APP,
                 esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_APP_FACTORY,
-                b"factory\0" as *const _ as *const _,
+                b"factory\0".as_ptr().cast(),
             )
         };
 
@@ -336,7 +334,7 @@ impl EspOta {
 
     fn get_slot(&self, partition: &esp_partition_t) -> Result<Slot, EspError> {
         Ok(Slot {
-            label: unsafe { from_cstr_ptr(&partition.label as *const _ as *const _) }
+            label: unsafe { from_cstr_ptr(ptr::addr_of!(partition.label).cast()) }
                 .try_into()
                 .unwrap(),
             state: self.get_state(partition)?,
@@ -347,8 +345,9 @@ impl EspOta {
     fn get_state(&self, partition: &esp_partition_t) -> Result<SlotState, EspError> {
         let mut state: esp_ota_img_states_t = Default::default();
 
-        let err =
-            unsafe { esp_ota_get_state_partition(partition as *const _, &mut state as *mut _) };
+        let err = unsafe {
+            esp_ota_get_state_partition(ptr::addr_of!(*partition).cast(), ptr::addr_of_mut!(state))
+        };
 
         Ok(if err == ESP_ERR_NOT_FOUND {
             SlotState::Unknown
@@ -364,7 +363,6 @@ impl EspOta {
                 esp_ota_img_states_t_ESP_OTA_IMG_VALID => SlotState::Valid,
                 esp_ota_img_states_t_ESP_OTA_IMG_INVALID
                 | esp_ota_img_states_t_ESP_OTA_IMG_ABORTED => SlotState::Invalid,
-                esp_ota_img_states_t_ESP_OTA_IMG_UNDEFINED => SlotState::Unknown,
                 _ => SlotState::Unknown,
             }
         })
@@ -374,10 +372,11 @@ impl EspOta {
         &self,
         partition: &esp_partition_t,
     ) -> Result<Option<FirmwareInfo>, EspError> {
-        let mut app_desc: esp_app_desc_t = Default::default();
+        let mut app_desc = esp_app_desc_t::default();
 
-        let err =
-            unsafe { esp_ota_get_partition_description(partition as *const _, &mut app_desc) };
+        let err = unsafe {
+            esp_ota_get_partition_description(ptr::addr_of!(partition).cast(), &mut app_desc)
+        };
 
         Ok(if err == ESP_ERR_NOT_FOUND {
             None
@@ -405,35 +404,35 @@ impl Ota for EspOta {
     type Update<'a> = EspOtaUpdate<'a> where Self: 'a;
 
     fn get_boot_slot(&self) -> Result<Slot, Self::Error> {
-        EspOta::get_boot_slot(self).map_err(EspIOError)
+        Self::get_boot_slot(self).map_err(EspIOError)
     }
 
     fn get_running_slot(&self) -> Result<Slot, Self::Error> {
-        EspOta::get_running_slot(self).map_err(EspIOError)
+        Self::get_running_slot(self).map_err(EspIOError)
     }
 
     fn get_update_slot(&self) -> Result<Slot, Self::Error> {
-        EspOta::get_update_slot(self).map_err(EspIOError)
+        Self::get_update_slot(self).map_err(EspIOError)
     }
 
     fn is_factory_reset_supported(&self) -> Result<bool, Self::Error> {
-        EspOta::is_factory_reset_supported(self).map_err(EspIOError)
+        Self::is_factory_reset_supported(self).map_err(EspIOError)
     }
 
     fn factory_reset(&mut self) -> Result<(), Self::Error> {
-        EspOta::factory_reset(self).map_err(EspIOError)
+        Self::factory_reset(self).map_err(EspIOError)
     }
 
     fn initiate_update(&mut self) -> Result<Self::Update<'_>, Self::Error> {
-        EspOta::initiate_update(self).map_err(EspIOError)
+        Self::initiate_update(self).map_err(EspIOError)
     }
 
     fn mark_running_slot_valid(&mut self) -> Result<(), Self::Error> {
-        EspOta::mark_running_slot_valid(self).map_err(EspIOError)
+        Self::mark_running_slot_valid(self).map_err(EspIOError)
     }
 
     fn mark_running_slot_invalid_and_reboot(&mut self) -> Self::Error {
-        EspIOError(EspOta::mark_running_slot_invalid_and_reboot(self))
+        EspIOError(Self::mark_running_slot_invalid_and_reboot(self))
     }
 }
 

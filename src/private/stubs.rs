@@ -1,3 +1,5 @@
+#![allow(clippy::missing_const_for_fn)]
+
 use core::ffi;
 
 // TODO: Figure out which library references this

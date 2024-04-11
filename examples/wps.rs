@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
 
     match wifi.get_configuration()? {
         Configuration::Client(config) => {
-            info!("Successfully connected to {} using WPS", config.ssid)
+            info!("Successfully connected to {} using WPS", config.ssid);
         }
         _ => anyhow::bail!("Not in station mode"),
     };

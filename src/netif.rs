@@ -54,7 +54,7 @@ impl NetifStack {
     fn default_mac(&self) -> Result<Option<[u8; 6]>, EspError> {
         if let Some(mac_type) = self.default_mac_raw_type() {
             let mut mac = [0; 6];
-            esp!(unsafe { esp_read_mac(mac.as_mut_ptr() as *mut _, mac_type) })?;
+            esp!(unsafe { esp_read_mac(mac.as_mut_ptr().cast(), mac_type) })?;
 
             Ok(Some(mac))
         } else {
@@ -62,7 +62,8 @@ impl NetifStack {
         }
     }
 
-    fn default_mac_raw_type(&self) -> Option<esp_mac_type_t> {
+    #[allow(clippy::unnecessary_wraps)]
+    const fn default_mac_raw_type(&self) -> Option<esp_mac_type_t> {
         match self {
             Self::Sta => Some(esp_mac_type_t_ESP_MAC_WIFI_STA),
             Self::Ap => Some(esp_mac_type_t_ESP_MAC_WIFI_SOFTAP),
@@ -103,7 +104,7 @@ impl NetifConfiguration {
             key: "ETH_CL_DEF".try_into().unwrap(),
             description: "eth".try_into().unwrap(),
             route_priority: 60,
-            ip_configuration: ipv4::Configuration::Client(Default::default()),
+            ip_configuration: ipv4::Configuration::Client(ipv4::ClientConfiguration::default()),
             stack: NetifStack::Eth,
             custom_mac: None,
         }
@@ -114,7 +115,7 @@ impl NetifConfiguration {
             key: "ETH_RT_DEF".try_into().unwrap(),
             description: "ethrt".try_into().unwrap(),
             route_priority: 50,
-            ip_configuration: ipv4::Configuration::Router(Default::default()),
+            ip_configuration: ipv4::Configuration::Router(ipv4::RouterConfiguration::default()),
             stack: NetifStack::Eth,
             custom_mac: None,
         }
@@ -125,7 +126,7 @@ impl NetifConfiguration {
             key: "WIFI_STA_DEF".try_into().unwrap(),
             description: "sta".try_into().unwrap(),
             route_priority: 100,
-            ip_configuration: ipv4::Configuration::Client(Default::default()),
+            ip_configuration: ipv4::Configuration::Client(ipv4::ClientConfiguration::default()),
             stack: NetifStack::Sta,
             custom_mac: None,
         }
@@ -136,7 +137,7 @@ impl NetifConfiguration {
             key: "WIFI_AP_DEF".try_into().unwrap(),
             description: "ap".try_into().unwrap(),
             route_priority: 10,
-            ip_configuration: ipv4::Configuration::Router(Default::default()),
+            ip_configuration: ipv4::Configuration::Router(ipv4::RouterConfiguration::default()),
             stack: NetifStack::Ap,
             custom_mac: None,
         }
@@ -262,8 +263,8 @@ impl EspNetif {
                         }
                         ipv4::ClientConfiguration::Fixed(_) => 0,
                     },
-                    if_key: c_if_key.as_c_str().as_ptr() as _,
-                    if_desc: c_if_description.as_c_str().as_ptr() as _,
+                    if_key: c_if_key.as_c_str().as_ptr().cast(),
+                    if_desc: c_if_description.as_c_str().as_ptr().cast(),
                     route_prio: conf.route_priority as _,
                     #[cfg(not(esp_idf_version_major = "4"))]
                     bridge_info: ptr::null_mut(),
@@ -301,8 +302,8 @@ impl EspNetif {
                     ip_info: ptr::null(),
                     get_ip_event: 0,
                     lost_ip_event: 0,
-                    if_key: c_if_key.as_c_str().as_ptr() as _,
-                    if_desc: c_if_description.as_c_str().as_ptr() as _,
+                    if_key: c_if_key.as_c_str().as_ptr().cast(),
+                    if_desc: c_if_description.as_c_str().as_ptr().cast(),
                     route_prio: conf.route_priority as _,
                     #[cfg(not(esp_idf_version_major = "4"))]
                     bridge_info: ptr::null_mut(),
@@ -350,7 +351,7 @@ impl EspNetif {
                         handle.0,
                         esp_netif_dhcp_option_mode_t_ESP_NETIF_OP_SET,
                         esp_netif_dhcp_option_id_t_ESP_NETIF_DOMAIN_NAME_SERVER,
-                        &mut dhcps_dns_value as *mut _ as *mut _,
+                        core::ptr::addr_of_mut!(dhcps_dns_value).cast(),
                         core::mem::size_of_val(&dhcps_dns_value) as u32,
                     )
                 })?;
@@ -369,18 +370,18 @@ impl EspNetif {
     }
 
     pub fn is_up(&self) -> Result<bool, EspError> {
-        if !unsafe { esp_netif_is_netif_up(self.0) } {
-            Ok(false)
-        } else {
-            let mut ip_info = Default::default();
+        if unsafe { esp_netif_is_netif_up(self.0) } {
+            let mut ip_info = esp_netif_ip_info_t::default();
             unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
 
             Ok(ipv4::IpInfo::from(Newtype(ip_info)).ip != ipv4::Ipv4Addr::new(0, 0, 0, 0))
+        } else {
+            Ok(false)
         }
     }
 
     pub fn get_ip_info(&self) -> Result<ipv4::IpInfo, EspError> {
-        let mut ip_info = Default::default();
+        let mut ip_info = esp_netif_ip_info_t::default();
         unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
 
         Ok(ipv4::IpInfo {
@@ -404,7 +405,7 @@ impl EspNetif {
     pub fn get_name(&self) -> heapless::String<6> {
         let mut netif_name = [0u8; 7];
 
-        esp!(unsafe { esp_netif_get_netif_impl_name(self.0, netif_name.as_mut_ptr() as *mut _) })
+        esp!(unsafe { esp_netif_get_netif_impl_name(self.0, netif_name.as_mut_ptr().cast()) })
             .unwrap();
 
         from_cstr(&netif_name).try_into().unwrap()
@@ -413,17 +414,17 @@ impl EspNetif {
     pub fn get_mac(&self) -> Result<[u8; 6], EspError> {
         let mut mac = [0u8; 6];
 
-        esp!(unsafe { esp_netif_get_mac(self.0, mac.as_mut_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_get_mac(self.0, mac.as_mut_ptr().cast()) })?;
         Ok(mac)
     }
 
     pub fn set_mac(&mut self, mac: &[u8; 6]) -> Result<(), EspError> {
-        esp!(unsafe { esp_netif_set_mac(self.0, mac.as_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_set_mac(self.0, mac.as_ptr().cast_mut()) })?;
         Ok(())
     }
 
     pub fn get_dns(&self) -> ipv4::Ipv4Addr {
-        let mut dns_info = Default::default();
+        let mut dns_info = esp_netif_dns_info_t::default();
 
         unsafe {
             esp!(esp_netif_get_dns_info(
@@ -438,7 +439,7 @@ impl EspNetif {
     }
 
     fn set_dns(&mut self, dns: ipv4::Ipv4Addr) {
-        let mut dns_info: esp_netif_dns_info_t = Default::default();
+        let mut dns_info = esp_netif_dns_info_t::default();
 
         unsafe {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(dns).0;
@@ -453,7 +454,7 @@ impl EspNetif {
     }
 
     pub fn get_secondary_dns(&self) -> ipv4::Ipv4Addr {
-        let mut dns_info = Default::default();
+        let mut dns_info = esp_netif_dns_info_t::default();
 
         unsafe {
             esp!(esp_netif_get_dns_info(
@@ -468,7 +469,7 @@ impl EspNetif {
     }
 
     fn set_secondary_dns(&mut self, secondary_dns: ipv4::Ipv4Addr) {
-        let mut dns_info: esp_netif_dns_info_t = Default::default();
+        let mut dns_info = esp_netif_dns_info_t::default();
 
         unsafe {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(secondary_dns).0;
@@ -492,7 +493,7 @@ impl EspNetif {
     fn set_hostname(&mut self, hostname: &str) -> Result<(), EspError> {
         let hostname = to_cstring_arg(hostname)?;
 
-        esp!(unsafe { esp_netif_set_hostname(self.0, hostname.as_ptr() as *const _) })?;
+        esp!(unsafe { esp_netif_set_hostname(self.0, hostname.as_ptr().cast()) })?;
 
         Ok(())
     }
@@ -535,7 +536,7 @@ impl ApStaIpAssignment<'_> {
     }
 
     #[cfg(not(esp_idf_version_major = "4"))]
-    pub fn mac(&self) -> [u8; 6] {
+    pub const fn mac(&self) -> [u8; 6] {
         self.0.mac
     }
 }
@@ -561,7 +562,7 @@ impl fmt::Debug for ApStaIpAssignment<'_> {
 pub struct DhcpIpAssignment<'a>(&'a ip_event_got_ip_t);
 
 impl<'a> DhcpIpAssignment<'a> {
-    pub fn netif_handle(&self) -> *mut esp_netif_t {
+    pub const fn netif_handle(&self) -> *mut esp_netif_t {
         self.0.esp_netif
     }
 
@@ -589,7 +590,7 @@ impl<'a> DhcpIpAssignment<'a> {
         }
     }
 
-    pub fn is_ip_changed(&self) -> bool {
+    pub const fn is_ip_changed(&self) -> bool {
         self.0.ip_changed
     }
 }
@@ -610,19 +611,19 @@ impl<'a> fmt::Debug for DhcpIpAssignment<'a> {
 pub struct DhcpIp6Assignment<'a>(&'a ip_event_got_ip6_t);
 
 impl<'a> DhcpIp6Assignment<'a> {
-    pub fn netif_handle(&self) -> *mut esp_netif_t {
+    pub const fn netif_handle(&self) -> *mut esp_netif_t {
         self.0.esp_netif
     }
 
-    pub fn ip(&self) -> [u32; 4] {
+    pub const fn ip(&self) -> [u32; 4] {
         self.0.ip6_info.ip.addr
     }
 
-    pub fn ip_zone(&self) -> u8 {
+    pub const fn ip_zone(&self) -> u8 {
         self.0.ip6_info.ip.zone
     }
 
-    pub fn ip_index(&self) -> u32 {
+    pub const fn ip_index(&self) -> u32 {
         self.0.ip_index as _
     }
 }
@@ -655,11 +656,10 @@ impl<'a> IpEvent<'a> {
 
     pub fn is_for_handle(&self, handle: *mut esp_netif_t) -> bool {
         self.handle()
-            .map(|event_handle| event_handle == handle)
-            .unwrap_or(false)
+            .is_some_and(|event_handle| event_handle == handle)
     }
 
-    pub fn handle(&self) -> Option<*mut esp_netif_t> {
+    pub const fn handle(&self) -> Option<*mut esp_netif_t> {
         match self {
             Self::ApStaIpAssigned(_) => None,
             Self::DhcpIpAssigned(assignment) => Some(assignment.netif_handle()),
@@ -684,7 +684,7 @@ impl<'a> EspEventDeserializer for IpEvent<'a> {
 
         if event_id == ip_event_t_IP_EVENT_AP_STAIPASSIGNED {
             let event = unsafe {
-                (data.payload.unwrap() as *const _ as *const ip_event_ap_staipassigned_t)
+                (ptr::addr_of!(*data.payload.unwrap()).cast::<ip_event_ap_staipassigned_t>())
                     .as_ref()
                     .unwrap()
             };
@@ -695,7 +695,7 @@ impl<'a> EspEventDeserializer for IpEvent<'a> {
             || event_id == ip_event_t_IP_EVENT_PPP_GOT_IP
         {
             let event = unsafe {
-                (data.payload.unwrap() as *const _ as *const ip_event_got_ip_t)
+                (ptr::addr_of!(*data.payload.unwrap()).cast::<ip_event_got_ip_t>())
                     .as_ref()
                     .unwrap()
             };
@@ -703,7 +703,7 @@ impl<'a> EspEventDeserializer for IpEvent<'a> {
             IpEvent::DhcpIpAssigned(DhcpIpAssignment(event))
         } else if event_id == ip_event_t_IP_EVENT_GOT_IP6 {
             let event = unsafe {
-                (data.payload.unwrap() as *const _ as *const ip_event_got_ip6_t)
+                (ptr::addr_of!(*data.payload.unwrap()).cast::<ip_event_got_ip6_t>())
                     .as_ref()
                     .unwrap()
             };
@@ -713,14 +713,14 @@ impl<'a> EspEventDeserializer for IpEvent<'a> {
             || event_id == ip_event_t_IP_EVENT_PPP_LOST_IP
         {
             let netif_handle_mut = unsafe {
-                (data.payload.unwrap() as *const _ as *mut esp_netif_t)
+                (ptr::addr_of!(*data.payload.unwrap()).cast_mut())
                     .as_mut()
                     .unwrap()
             };
 
-            IpEvent::DhcpIpDeassigned(netif_handle_mut as *mut _)
+            IpEvent::DhcpIpDeassigned(ptr::addr_of!(netif_handle_mut) as *mut _)
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {event_id}");
         }
     }
 }
@@ -749,7 +749,7 @@ where
 
 impl NetifStatus for EspNetif {
     fn is_up(&self) -> Result<bool, EspError> {
-        EspNetif::is_up(self)
+        Self::is_up(self)
     }
 }
 
@@ -764,7 +764,7 @@ impl<T> BlockingNetif<T>
 where
     T: NetifStatus,
 {
-    pub fn wrap(netif: T, event_loop: crate::eventloop::EspSystemEventLoop) -> Self {
+    pub const fn wrap(netif: T, event_loop: crate::eventloop::EspSystemEventLoop) -> Self {
         Self { netif, event_loop }
     }
 
@@ -792,7 +792,7 @@ where
     T: NetifStatus,
 {
     fn is_up(&self) -> Result<bool, EspError> {
-        BlockingNetif::is_up(self)
+        Self::is_up(self)
     }
 }
 
@@ -808,7 +808,7 @@ impl<T> AsyncNetif<T>
 where
     T: NetifStatus,
 {
-    pub fn wrap(
+    pub const fn wrap(
         netif: T,
         event_loop: crate::eventloop::EspSystemEventLoop,
         timer_service: crate::timer::EspTaskTimerService,
@@ -868,7 +868,7 @@ pub mod asynch {
 
     impl NetifStatus for super::EspNetif {
         async fn is_up(&self) -> Result<bool, EspError> {
-            super::EspNetif::is_up(self)
+            Self::is_up(self)
         }
     }
 
@@ -878,7 +878,7 @@ pub mod asynch {
         T: super::NetifStatus,
     {
         async fn is_up(&self) -> Result<bool, EspError> {
-            super::AsyncNetif::is_up(self)
+            Self::is_up(self)
         }
     }
 }

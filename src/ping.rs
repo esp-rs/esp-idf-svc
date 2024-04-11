@@ -19,7 +19,7 @@ pub struct Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        Configuration {
+        Self {
             count: 5,
             interval: Duration::from_secs(1),
             timeout: Duration::from_secs(1),
@@ -58,7 +58,7 @@ unsafe impl Send for EspPing {}
 unsafe impl Sync for EspPing {}
 
 impl EspPing {
-    pub fn new(interface_index: u32) -> Self {
+    pub const fn new(interface_index: u32) -> Self {
         Self(interface_index)
     }
 
@@ -121,17 +121,17 @@ impl EspPing {
         };
 
         let callbacks = esp_ping_callbacks_t {
-            on_ping_success: Some(EspPing::on_ping_success::<F>),
-            on_ping_timeout: Some(EspPing::on_ping_timeout::<F>),
-            on_ping_end: Some(EspPing::on_ping_end::<F>),
-            cb_args: tracker as *mut Tracker<F> as *mut ffi::c_void,
+            on_ping_success: Some(Self::on_ping_success::<F>),
+            on_ping_timeout: Some(Self::on_ping_timeout::<F>),
+            on_ping_end: Some(Self::on_ping_end::<F>),
+            cb_args: ptr::addr_of_mut!(*tracker).cast(),
         };
 
         let mut handle: esp_ping_handle_t = ptr::null_mut();
         let handle_ref = &mut handle;
 
         esp!(unsafe {
-            esp_ping_new_session(&config, &callbacks, handle_ref as *mut *mut ffi::c_void)
+            esp_ping_new_session(&config, &callbacks, ptr::addr_of_mut!(*handle_ref).cast())
         })?;
 
         if handle.is_null() {
@@ -168,14 +168,14 @@ impl EspPing {
     ) {
         info!("Ping success callback invoked");
 
-        let tracker_ptr: *mut Tracker<F> = args as _;
+        let tracker_ptr = args.cast::<Tracker<F>>();
         let tracker = tracker_ptr.as_mut().unwrap();
 
         let mut seqno: ffi::c_ushort = 0;
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_SEQNO,
-            &mut seqno as *mut ffi::c_ushort as *mut ffi::c_void,
+            ptr::addr_of_mut!(seqno).cast(),
             mem::size_of_val(&seqno) as u32,
         );
 
@@ -183,7 +183,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_TTL,
-            &mut ttl as *mut ffi::c_uchar as *mut ffi::c_void,
+            ptr::addr_of_mut!(ttl).cast(),
             mem::size_of_val(&ttl) as u32,
         );
 
@@ -193,7 +193,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_IPADDR,
-            target_addr as *mut ip_addr_t as *mut ffi::c_void,
+            ptr::addr_of!(*target_addr) as *mut _,
             mem::size_of::<ip_addr_t>() as _,
         );
 
@@ -201,7 +201,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_TIMEGAP,
-            &mut elapsed_time as *mut ffi::c_uint as *mut ffi::c_void,
+            ptr::addr_of_mut!(elapsed_time).cast(),
             mem::size_of_val(&elapsed_time) as u32,
         );
 
@@ -209,7 +209,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_SIZE,
-            &mut recv_len as *mut ffi::c_uint as *mut ffi::c_void,
+            ptr::addr_of_mut!(recv_len).cast(),
             mem::size_of_val(&recv_len) as u32,
         );
 
@@ -227,10 +227,10 @@ impl EspPing {
                 &tracker.summary,
                 &Reply::Success(Info {
                     addr,
-                    seqno: seqno as u32,
+                    seqno: u32::from(seqno),
                     ttl,
                     recv_len,
-                    elapsed_time: Duration::from_millis(elapsed_time as u64),
+                    elapsed_time: Duration::from_millis(u64::from(elapsed_time)),
                 }),
             );
         }
@@ -242,14 +242,14 @@ impl EspPing {
     ) {
         info!("Ping timeout callback invoked");
 
-        let tracker_ptr: *mut Tracker<F> = args as _;
+        let tracker_ptr = args.cast::<Tracker<F>>();
         let tracker = tracker_ptr.as_mut().unwrap();
 
         let mut seqno: ffi::c_ushort = 0;
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_SEQNO,
-            &mut seqno as *mut ffi::c_ushort as *mut ffi::c_void,
+            ptr::addr_of_mut!(seqno).cast(),
             mem::size_of_val(&seqno) as u32,
         );
 
@@ -259,7 +259,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_IPADDR,
-            target_addr as *mut ip_addr_t as *mut ffi::c_void,
+            ptr::addr_of!(*target_addr) as *mut _,
             mem::size_of::<ip_addr_t>() as _,
         );
 
@@ -279,7 +279,7 @@ impl EspPing {
     ) {
         info!("Ping end callback invoked");
 
-        let tracker_ptr: *mut Tracker<F> = args as _;
+        let tracker_ptr = args.cast::<Tracker<F>>();
         let tracker = tracker_ptr.as_mut().unwrap();
 
         Self::update_summary(handle, &mut tracker.summary);
@@ -302,7 +302,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_REQUEST,
-            &mut transmitted as *mut ffi::c_uint as *mut ffi::c_void,
+            ptr::addr_of_mut!(transmitted).cast(),
             mem::size_of_val(&transmitted) as u32,
         );
 
@@ -310,7 +310,7 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_REPLY,
-            &mut received as *mut ffi::c_uint as *mut ffi::c_void,
+            ptr::addr_of_mut!(received).cast(),
             mem::size_of_val(&received) as u32,
         );
 
@@ -318,13 +318,13 @@ impl EspPing {
         esp_ping_get_profile(
             handle,
             esp_ping_profile_t_ESP_PING_PROF_DURATION,
-            &mut total_time as *mut ffi::c_uint as *mut ffi::c_void,
+            ptr::addr_of_mut!(total_time).cast(),
             mem::size_of_val(&total_time) as u32,
         );
 
         summary.transmitted = transmitted;
         summary.received = received;
-        summary.time = Duration::from_millis(total_time as u64);
+        summary.time = Duration::from_millis(u64::from(total_time));
     }
 }
 
@@ -338,11 +338,11 @@ impl<F: FnMut(&Summary, &Reply) + Send> Tracker<F> {
     #[allow(clippy::mutex_atomic)]
     pub fn new(reply_callback: Option<F>) -> Self {
         Self {
-            summary: Default::default(),
+            summary: Summary::default(),
             waitable: Waitable::new(false),
             reply_callback,
         }
     }
 }
 
-fn nop_callback(_summary: &Summary, _reply: &Reply) {}
+const fn nop_callback(_summary: &Summary, _reply: &Reply) {}

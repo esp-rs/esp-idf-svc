@@ -22,8 +22,8 @@ mod esp_sntp {
         #[allow(non_upper_case_globals)]
         fn from(from: esp_sntp_operatingmode_t) -> Self {
             match from {
-                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL => OperatingMode::Poll,
-                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_LISTENONLY => OperatingMode::ListenOnly,
+                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_POLL => Self::Poll,
+                esp_sntp_operatingmode_t_ESP_SNTP_OPMODE_LISTENONLY => Self::ListenOnly,
                 _ => unreachable!(),
             }
         }
@@ -99,8 +99,8 @@ impl From<sntp_sync_mode_t> for SyncMode {
     #[allow(non_upper_case_globals)]
     fn from(from: sntp_sync_mode_t) -> Self {
         match from {
-            sntp_sync_mode_t_SNTP_SYNC_MODE_SMOOTH => SyncMode::Smooth,
-            sntp_sync_mode_t_SNTP_SYNC_MODE_IMMED => SyncMode::Immediate,
+            sntp_sync_mode_t_SNTP_SYNC_MODE_SMOOTH => Self::Smooth,
+            sntp_sync_mode_t_SNTP_SYNC_MODE_IMMED => Self::Immediate,
             _ => unreachable!(),
         }
     }
@@ -127,9 +127,9 @@ impl From<sntp_sync_status_t> for SyncStatus {
     #[allow(non_upper_case_globals)]
     fn from(from: sntp_sync_status_t) -> Self {
         match from {
-            sntp_sync_status_t_SNTP_SYNC_STATUS_RESET => SyncStatus::Reset,
-            sntp_sync_status_t_SNTP_SYNC_STATUS_COMPLETED => SyncStatus::Completed,
-            sntp_sync_status_t_SNTP_SYNC_STATUS_IN_PROGRESS => SyncStatus::InProgress,
+            sntp_sync_status_t_SNTP_SYNC_STATUS_RESET => Self::Reset,
+            sntp_sync_status_t_SNTP_SYNC_STATUS_COMPLETED => Self::Completed,
+            sntp_sync_status_t_SNTP_SYNC_STATUS_IN_PROGRESS => Self::InProgress,
             _ => unreachable!(),
         }
     }
@@ -170,7 +170,7 @@ pub struct EspSntp<'a> {
 
 impl EspSntp<'static> {
     pub fn new_default() -> Result<Self, EspError> {
-        Self::new(&Default::default())
+        Self::new(&SntpConf::default())
     }
 
     pub fn new(conf: &SntpConf) -> Result<Self, EspError> {
