@@ -12,12 +12,12 @@ pub struct EspSystemTime;
 impl EspSystemTime {
     /// Return the current system time
     pub fn now(&self) -> Duration {
-        let mut tv_now: timeval = Default::default();
+        let mut tv_now = timeval::default();
 
         unsafe {
-            gettimeofday(&mut tv_now as *mut _, core::ptr::null_mut());
+            gettimeofday(core::ptr::addr_of_mut!(tv_now), core::ptr::null_mut());
         }
 
-        Duration::from_micros(tv_now.tv_sec as u64 * 1000000_u64 + tv_now.tv_usec as u64)
+        Duration::from_micros(tv_now.tv_sec as u64 * 1_000_000_u64 + tv_now.tv_usec as u64)
     }
 }

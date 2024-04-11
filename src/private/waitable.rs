@@ -48,7 +48,7 @@ where
         condition: F,
     ) -> Result<bool, EspError> {
         self.wait_timeout_while_and_get(dur, condition, |_| ())
-            .map(|(timeout, _)| timeout)
+            .map(|(timeout, ())| timeout)
     }
 
     pub fn wait_while_and_get<F: FnMut(&T) -> Result<bool, EspError>, G: FnMut(&T) -> Q, Q>(

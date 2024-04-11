@@ -9,12 +9,12 @@ impl From<ipv4::Ipv4Addr> for Newtype<esp_ip4_addr_t> {
     fn from(ip: ipv4::Ipv4Addr) -> Self {
         let octets = ip.octets();
 
-        let addr = ((octets[0] as u32 & 0xff) << 24)
-            | ((octets[1] as u32 & 0xff) << 16)
-            | ((octets[2] as u32 & 0xff) << 8)
-            | (octets[3] as u32 & 0xff);
+        let addr = ((u32::from(octets[0]) & 0xff) << 24)
+            | ((u32::from(octets[1]) & 0xff) << 16)
+            | ((u32::from(octets[2]) & 0xff) << 8)
+            | (u32::from(octets[3]) & 0xff);
 
-        Newtype(esp_ip4_addr_t {
+        Self(esp_ip4_addr_t {
             addr: u32::from_be(addr),
         })
     }
@@ -31,7 +31,7 @@ impl From<Newtype<esp_ip4_addr_t>> for ipv4::Ipv4Addr {
             (addr & 0xff) as u8,
         );
 
-        ipv4::Ipv4Addr::new(a, b, c, d)
+        Self::new(a, b, c, d)
     }
 }
 
@@ -39,7 +39,7 @@ impl From<ipv4::Ipv4Addr> for Newtype<ip4_addr_t> {
     fn from(ip: ipv4::Ipv4Addr) -> Self {
         let result: Newtype<esp_ip4_addr_t> = ip.into();
 
-        Newtype(ip4_addr_t {
+        Self(ip4_addr_t {
             addr: result.0.addr,
         })
     }
@@ -66,7 +66,7 @@ impl TryFrom<Newtype<esp_ip4_addr_t>> for Mask {
         let ip: ipv4::Ipv4Addr = esp_ip.into();
 
         ip.try_into()
-            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_ARG>())
+            .map_err(|()| EspError::from_infallible::<ESP_ERR_INVALID_ARG>())
     }
 }
 
@@ -85,13 +85,13 @@ impl TryFrom<Newtype<ip4_addr_t>> for Mask {
         let ip: ipv4::Ipv4Addr = esp_ip.into();
 
         ip.try_into()
-            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_ARG>())
+            .map_err(|()| EspError::from_infallible::<ESP_ERR_INVALID_ARG>())
     }
 }
 
 impl From<ipv4::IpInfo> for Newtype<esp_netif_ip_info_t> {
     fn from(ip_info: ipv4::IpInfo) -> Self {
-        Newtype(esp_netif_ip_info_t {
+        Self(esp_netif_ip_info_t {
             ip: Newtype::<esp_ip4_addr_t>::from(ip_info.ip).0,
             netmask: Newtype::<esp_ip4_addr_t>::from(ip_info.subnet.mask).0,
             gw: Newtype::<esp_ip4_addr_t>::from(ip_info.subnet.gateway).0,
@@ -101,7 +101,7 @@ impl From<ipv4::IpInfo> for Newtype<esp_netif_ip_info_t> {
 
 impl From<Newtype<esp_netif_ip_info_t>> for ipv4::IpInfo {
     fn from(ip_info: Newtype<esp_netif_ip_info_t>) -> Self {
-        ipv4::IpInfo {
+        Self {
             ip: ipv4::Ipv4Addr::from(Newtype(ip_info.0.ip)),
             subnet: ipv4::Subnet {
                 gateway: ipv4::Ipv4Addr::from(Newtype(ip_info.0.gw)),

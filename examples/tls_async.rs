@@ -177,11 +177,11 @@ pub mod example {
 
     impl esp_idf_svc::tls::Socket for EspTlsSocket {
         fn handle(&self) -> i32 {
-            EspTlsSocket::handle(self)
+            Self::handle(self)
         }
 
         fn release(&mut self) -> Result<(), esp_idf_svc::sys::EspError> {
-            EspTlsSocket::release(self)
+            Self::release(self)
         }
     }
 
@@ -190,14 +190,14 @@ pub mod example {
             &self,
             ctx: &mut core::task::Context,
         ) -> core::task::Poll<Result<(), esp_idf_svc::sys::EspError>> {
-            EspTlsSocket::poll_readable(self, ctx)
+            Self::poll_readable(self, ctx)
         }
 
         fn poll_writable(
             &self,
             ctx: &mut core::task::Context,
         ) -> core::task::Poll<Result<(), esp_idf_svc::sys::EspError>> {
-            EspTlsSocket::poll_writeable(self, ctx)
+            Self::poll_writeable(self, ctx)
         }
     }
 }

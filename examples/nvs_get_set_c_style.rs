@@ -25,13 +25,13 @@ fn main() -> anyhow::Result<()> {
             info!("Got namespace {:?} from default partition", test_namespace);
             nvs
         }
-        Err(e) => panic!("Could't get namespace {:?}", e),
+        Err(e) => panic!("Could't get namespace {e:?}"),
     };
 
     let tag_u8 = "test_u8";
 
     match nvs.set_u8(tag_u8, 42) {
-        Ok(_) => info!("Tag updated"),
+        Ok(()) => info!("Tag updated"),
         // You can find the meaning of the error codes in the output of the error branch in:
         // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/error-codes.html
         Err(e) => info!("Tag not updated {:?}", e),
@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     match nvs.set_str(tag_test_str, "Hello from the NVS!") {
-        Ok(_) => info!("{:?} updated", tag_test_str),
+        Ok(()) => info!("{:?} updated", tag_test_str),
         Err(e) => info!("{:?} not updated {:?}", tag_test_str, e),
     };
 

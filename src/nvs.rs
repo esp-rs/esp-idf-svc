@@ -174,18 +174,19 @@ impl NvsEncrypted {
         }
 
         let mut config = nvs_sec_cfg_t::default();
-        match unsafe { nvs_flash_read_security_cfg(keys_partition_ptr, &mut config as *mut _) } {
+        match unsafe { nvs_flash_read_security_cfg(keys_partition_ptr, ptr::addr_of_mut!(config)) }
+        {
             ESP_ERR_NVS_KEYS_NOT_INITIALIZED | ESP_ERR_NVS_CORRUPT_KEY_PART => {
                 info!("Partition not initialized, generating keys");
                 esp!(unsafe {
-                    nvs_flash_generate_keys(keys_partition_ptr, &mut config as *mut _)
+                    nvs_flash_generate_keys(keys_partition_ptr, ptr::addr_of_mut!(config))
                 })?;
             }
             other => esp!(other)?,
         }
 
         esp!(unsafe {
-            nvs_flash_secure_init_partition(c_partition.as_ptr(), &mut config as *mut _)
+            nvs_flash_secure_init_partition(c_partition.as_ptr(), ptr::addr_of_mut!(config))
         })?;
 
         registrations.insert(c_partition.clone());
@@ -251,7 +252,7 @@ impl RawHandle for EspNvsPartition<NvsCustom> {
     type Handle = *const u8;
 
     fn handle(&self) -> Self::Handle {
-        self.0.name().as_ptr() as *const _
+        self.0.name().as_ptr().cast()
     }
 }
 
@@ -259,7 +260,7 @@ impl RawHandle for EspNvsPartition<NvsEncrypted> {
     type Handle = *const u8;
 
     fn handle(&self) -> Self::Handle {
-        self.0.name().as_ptr() as *const _
+        self.0.name().as_ptr().cast()
     }
 }
 
@@ -289,7 +290,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
                     } else {
                         nvs_open_mode_t_NVS_READONLY
                     },
-                    &mut handle as *mut _,
+                    ptr::addr_of_mut!(handle),
                 )
             })?;
         } else {
@@ -302,7 +303,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
                     } else {
                         nvs_open_mode_t_NVS_READONLY
                     },
-                    &mut handle as *mut _,
+                    ptr::addr_of_mut!(handle),
                 )
             })?;
         }
@@ -336,12 +337,17 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let mut value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut value as *mut _) } {
+        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), ptr::addr_of_mut!(value)) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
-                    nvs_get_blob(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _)
+                    nvs_get_blob(
+                        self.1,
+                        c_key.as_ptr(),
+                        ptr::null_mut(),
+                        ptr::addr_of_mut!(len),
+                    )
                 } {
                     ESP_ERR_NVS_NOT_FOUND => Ok(None),
                     err => {
@@ -370,12 +376,17 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let mut u64value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut u64value as *mut _) } {
+        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), ptr::addr_of_mut!(u64value)) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
-                    nvs_get_blob(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _)
+                    nvs_get_blob(
+                        self.1,
+                        c_key.as_ptr(),
+                        ptr::null_mut(),
+                        ptr::addr_of_mut!(len),
+                    )
                 } {
                     ESP_ERR_NVS_NOT_FOUND => Ok(None),
                     err => {
@@ -389,8 +400,8 @@ impl<T: NvsPartitionId> EspNvs<T> {
                             nvs_get_blob(
                                 self.1,
                                 c_key.as_ptr(),
-                                buf.as_mut_ptr() as *mut _,
-                                &mut len as *mut _,
+                                buf.as_mut_ptr().cast(),
+                                ptr::addr_of_mut!(len),
                             )
                         })?;
 
@@ -439,7 +450,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         if buf.len() < 8 {
             for v in buf.iter().rev() {
                 u64value <<= 8;
-                u64value |= *v as u_int64_t;
+                u64value |= u64::from(*v);
             }
 
             u64value <<= 8;
@@ -461,7 +472,14 @@ impl<T: NvsPartitionId> EspNvs<T> {
         #[allow(unused_assignments)]
         let mut len = 0;
 
-        match unsafe { nvs_get_blob(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _) } {
+        match unsafe {
+            nvs_get_blob(
+                self.1,
+                c_key.as_ptr(),
+                ptr::null_mut(),
+                ptr::addr_of_mut!(len),
+            )
+        } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -484,8 +502,8 @@ impl<T: NvsPartitionId> EspNvs<T> {
             nvs_get_blob(
                 self.1,
                 c_key.as_ptr(),
-                buf.as_mut_ptr() as *mut _,
-                &mut len as *mut _,
+                buf.as_mut_ptr().cast(),
+                ptr::addr_of_mut!(len),
             )
         } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
@@ -517,7 +535,14 @@ impl<T: NvsPartitionId> EspNvs<T> {
         #[allow(unused_assignments)]
         let mut len = 0;
 
-        match unsafe { nvs_get_str(self.1, c_key.as_ptr(), ptr::null_mut(), &mut len as *mut _) } {
+        match unsafe {
+            nvs_get_str(
+                self.1,
+                c_key.as_ptr(),
+                ptr::null_mut(),
+                ptr::addr_of_mut!(len),
+            )
+        } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -536,8 +561,8 @@ impl<T: NvsPartitionId> EspNvs<T> {
             nvs_get_str(
                 self.1,
                 c_key.as_ptr(),
-                buf.as_mut_ptr() as *mut _,
-                &mut len as *mut _,
+                buf.as_mut_ptr().cast(),
+                ptr::addr_of_mut!(len),
             )
         } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
@@ -570,7 +595,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [u8; 1] = [0; 1];
 
-        match unsafe { nvs_get_u8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_u8(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -595,7 +620,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [i8; 1] = [0; 1];
 
-        match unsafe { nvs_get_i8(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_i8(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -620,7 +645,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [u16; 1] = [0; 1];
 
-        match unsafe { nvs_get_u16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_u16(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -645,7 +670,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [i16; 1] = [0; 1];
 
-        match unsafe { nvs_get_i16(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_i16(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -670,7 +695,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [u32; 1] = [0; 1];
 
-        match unsafe { nvs_get_u32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_u32(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -695,7 +720,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [i32; 1] = [0; 1];
 
-        match unsafe { nvs_get_i32(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_i32(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -720,7 +745,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [u64; 1] = [0; 1];
 
-        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_u64(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -745,7 +770,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut result: [i64; 1] = [0; 1];
 
-        match unsafe { nvs_get_i64(self.1, c_key.as_ptr(), &mut result[0] as *mut _) } {
+        match unsafe { nvs_get_i64(self.1, c_key.as_ptr(), ptr::addr_of_mut!(result[0])) } {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 // bail on error
@@ -798,24 +823,24 @@ impl<T: NvsPartitionId> StorageBase for EspNvs<T> {
     type Error = EspError;
 
     fn contains(&self, name: &str) -> Result<bool, Self::Error> {
-        EspNvs::contains(self, name)
+        Self::contains(self, name)
     }
 
     fn remove(&mut self, name: &str) -> Result<bool, Self::Error> {
-        EspNvs::remove(self, name)
+        Self::remove(self, name)
     }
 }
 
 impl<T: NvsPartitionId> RawStorage for EspNvs<T> {
     fn len(&self, name: &str) -> Result<Option<usize>, Self::Error> {
-        EspNvs::len(self, name)
+        Self::len(self, name)
     }
 
     fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Self::Error> {
-        EspNvs::get_raw(self, name, buf)
+        Self::get_raw(self, name, buf)
     }
 
     fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
-        EspNvs::set_raw(self, name, buf)
+        Self::set_raw(self, name, buf)
     }
 }

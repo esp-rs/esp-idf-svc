@@ -50,7 +50,7 @@ impl RawCondvar {
     pub fn new() -> Self {
         let mut cond: pthread_cond_t = Default::default();
 
-        let r = unsafe { pthread_cond_init(&mut cond as *mut _, ptr::null()) };
+        let r = unsafe { pthread_cond_init(ptr::addr_of_mut!(cond), ptr::null()) };
         debug_assert_eq!(r, 0);
 
         Self(UnsafeCell::new(cond))
@@ -72,7 +72,7 @@ impl RawCondvar {
             tv_nsec: (now.tv_usec * 1000) + duration.subsec_nanos() as i32,
         };
 
-        let r = pthread_cond_timedwait(self.0.get(), mutex.0.get(), &abstime as *const _);
+        let r = pthread_cond_timedwait(self.0.get(), mutex.0.get(), ptr::addr_of!(abstime));
         debug_assert!(r == ERR_ETIMEDOUT || r == 0);
 
         r == ERR_ETIMEDOUT

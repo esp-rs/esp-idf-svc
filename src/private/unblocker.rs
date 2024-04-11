@@ -48,7 +48,7 @@ where
                 Self::work,
                 task_name,
                 stack_size,
-                worker as *mut _,
+                worker.cast(),
                 priority.unwrap_or(6),
                 pin_to_core,
             )
@@ -73,8 +73,7 @@ where
     }
 
     extern "C" fn work(arg: *mut core::ffi::c_void) {
-        let worker: Box<Box<dyn FnOnce() + Send + 'static>> =
-            unsafe { Box::from_raw(arg as *mut _) };
+        let worker: Box<Box<dyn FnOnce() + Send + 'static>> = unsafe { Box::from_raw(arg.cast()) };
 
         worker();
     }

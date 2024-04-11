@@ -70,7 +70,7 @@ impl<'a> TryFrom<&BackgroundLoopConfiguration<'a>> for (esp_event_loop_args_t, R
         let ela = esp_event_loop_args_t {
             queue_size: conf.queue_size as _,
             task_name: rcs.as_ptr(conf.task_name)?,
-            task_priority: conf.task_priority as _,
+            task_priority: u32::from(conf.task_priority),
             task_stack_size: conf.task_stack_size as _,
             task_core_id: conf.task_pin_to_core as _,
         };
@@ -92,7 +92,7 @@ impl Default for ExplicitLoopConfiguration {
 
 impl From<&ExplicitLoopConfiguration> for esp_event_loop_args_t {
     fn from(conf: &ExplicitLoopConfiguration) -> Self {
-        esp_event_loop_args_t {
+        Self {
             queue_size: conf.queue_size as _,
             ..Default::default()
         }
@@ -187,7 +187,7 @@ impl<'a> EspEventPostData<'a> {
             source,
             event_id: event_id.unwrap_or(0),
             payload: unsafe {
-                (payload as *const _ as *const ffi::c_void)
+                (ptr::addr_of!(*payload).cast::<ffi::c_void>())
                     .as_ref()
                     .unwrap()
             },
@@ -207,11 +207,7 @@ impl<'a> EspEventPostData<'a> {
         Self {
             source,
             event_id: event_id.unwrap_or(0),
-            payload: unsafe {
-                (payload.as_ptr() as *const _ as *const ffi::c_void)
-                    .as_ref()
-                    .unwrap()
-            },
+            payload: unsafe { (payload.as_ptr().cast::<ffi::c_void>()).as_ref().unwrap() },
             payload_len: payload.len(),
         }
     }
@@ -246,10 +242,12 @@ impl<'a> EspEvent<'a> {
     ///
     /// Care should be taken to only call this function on fetch data that one is certain to be
     /// of type `P`
+    #[allow(clippy::ptr_cast_constness)]
     pub unsafe fn as_payload<P: Copy + Send + 'static>(&self) -> &P {
         let payload: &P = if mem::size_of::<P>() > 0 {
-            self.payload.unwrap() as *const _ as *const P
+            ptr::addr_of!(*self.payload.unwrap()).cast::<P>()
         } else {
+            // no way to indicate NonNull<P> here, afaik
             ptr::NonNull::dangling().as_ptr() as *const P
         }
         .as_ref()
@@ -264,7 +262,7 @@ impl<'a> EspEvent<'a> {
     /// of length `len`
     pub unsafe fn as_raw_payload(&self, len: usize) -> Option<&[u8]> {
         self.payload
-            .map(|payload| slice::from_raw_parts(payload as *const _ as *const _, len))
+            .map(|payload| slice::from_raw_parts(ptr::addr_of!(*payload).cast(), len))
     }
 }
 
@@ -291,11 +289,11 @@ impl<'a> UnsafeCallback<'a> {
     }
 
     unsafe fn from_ptr(ptr: *mut ffi::c_void) -> Self {
-        Self(ptr as *mut _)
+        Self(ptr.cast())
     }
 
     fn as_ptr(&self) -> *mut ffi::c_void {
-        self.0 as *mut _
+        self.0.cast()
     }
 
     unsafe fn call(&self, data: EspEvent) {
@@ -319,7 +317,7 @@ where
 {
     fn make_weak(&mut self) {
         if matches!(self, Self::Strong(_)) {
-            *self = Self::Weak(Arc::downgrade(&self.upgrade().unwrap()))
+            *self = Self::Weak(Arc::downgrade(&self.upgrade().unwrap()));
         }
     }
 
@@ -360,7 +358,7 @@ where
         let data = EspEvent {
             source: unsafe { ffi::CStr::from_ptr(event_base) },
             event_id,
-            payload: unsafe { (event_data as *const ffi::c_void).as_ref() },
+            payload: unsafe { ptr::addr_of!(*event_data).as_ref() },
         };
 
         unsafe {
@@ -380,7 +378,7 @@ where
             if T::is_system() {
                 unsafe {
                     esp!(esp_event_handler_instance_unregister(
-                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.source.map_or(ptr::null(), ffi::CStr::as_ptr),
                         self.event_id,
                         self.handler_instance
                     ))
@@ -393,7 +391,7 @@ where
 
                     esp!(esp_event_handler_instance_unregister_with(
                         user.0,
-                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.source.map_or(ptr::null(), ffi::CStr::as_ptr),
                         self.event_id,
                         self.handler_instance
                     ))
@@ -478,7 +476,7 @@ where
     type Data<'a> = D::Data<'a>;
 
     async fn recv(&mut self) -> Result<Self::Data<'_>, Self::Error> {
-        EspAsyncSubscription::recv(self).await
+        Self::recv(self).await
     }
 }
 
@@ -671,11 +669,11 @@ where
         if T::is_system() {
             esp!(unsafe {
                 esp_event_handler_instance_register(
-                    S::source().map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                    S::source().map_or(ptr::null(), ffi::CStr::as_ptr),
                     S::event_id().unwrap_or(ESP_EVENT_ANY_ID),
                     Some(EspSubscription::<System>::handle),
                     unsafe_callback.as_ptr(),
-                    &mut handler_instance as *mut _,
+                    ptr::addr_of_mut!(handler_instance),
                 )
             })?;
         } else {
@@ -685,11 +683,11 @@ where
 
                 esp_event_handler_instance_register_with(
                     user.0,
-                    S::source().map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                    S::source().map_or(ptr::null(), ffi::CStr::as_ptr),
                     S::event_id().unwrap_or(ESP_EVENT_ANY_ID),
                     Some(EspSubscription::<User<T>>::handle),
                     unsafe_callback.as_ptr(),
-                    &mut handler_instance as *mut _,
+                    ptr::addr_of_mut!(handler_instance),
                 )
             })?;
         }
@@ -709,7 +707,7 @@ where
                 esp_event_post(
                     data.source.as_ptr(),
                     data.event_id,
-                    data.payload as *const _ as *mut _,
+                    ptr::addr_of!(*data.payload).cast_mut(),
                     data.payload_len as _,
                     timeout,
                 )
@@ -723,7 +721,7 @@ where
                     user.0,
                     data.source.as_ptr(),
                     data.event_id,
-                    data.payload as *const _ as *mut _,
+                    ptr::addr_of!(*data.payload).cast_mut(),
                     data.payload_len as _,
                     timeout,
                 )
@@ -746,9 +744,9 @@ where
                 esp_event_isr_post(
                     data.source.as_ptr(),
                     data.event_id,
-                    data.payload as *const _ as *mut _,
+                    ptr::addr_of!(*data.payload).cast_mut(),
                     data.payload_len as _,
-                    &mut higher_prio_task_woken as *mut _,
+                    ptr::addr_of_mut!(higher_prio_task_woken),
                 )
             }
         } else {
@@ -760,9 +758,9 @@ where
                     user.0,
                     data.source.as_ptr(),
                     data.event_id,
-                    data.payload as *const _ as *mut _,
+                    ptr::addr_of!(*data.payload).cast_mut(),
                     data.payload_len as _,
-                    &mut higher_prio_task_woken as *mut _,
+                    ptr::addr_of_mut!(higher_prio_task_woken),
                 )
             }
         };
@@ -866,21 +864,21 @@ where
         if let Some(duration) = duration {
             debug!("About to wait for duration {:?}", duration);
 
-            let (timeout, _) =
+            let (timeout, ()) =
                 self.waitable
-                    .wait_timeout_while_and_get(duration, |_| matcher(), |_| ())?;
+                    .wait_timeout_while_and_get(duration, |()| matcher(), |()| ())?;
 
-            if !timeout {
-                debug!("Waiting done - success");
-                Ok(())
-            } else {
+            if timeout {
                 debug!("Timeout while waiting");
                 esp!(ESP_ERR_TIMEOUT)
+            } else {
+                debug!("Waiting done - success");
+                Ok(())
             }
         } else {
             debug!("About to wait");
 
-            self.waitable.wait_while(|_| matcher())?;
+            self.waitable.wait_while(|()| matcher())?;
 
             debug!("Waiting done - success");
 

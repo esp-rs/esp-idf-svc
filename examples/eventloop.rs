@@ -91,7 +91,7 @@ unsafe impl EspEventSource for CustomEvent {
 }
 
 impl EspEventSerializer for CustomEvent {
-    type Data<'a> = CustomEvent;
+    type Data<'a> = Self;
 
     fn serialize<F, R>(event: &Self::Data<'_>, f: F) -> R
     where
@@ -103,10 +103,10 @@ impl EspEventSerializer for CustomEvent {
 }
 
 impl EspEventDeserializer for CustomEvent {
-    type Data<'a> = CustomEvent;
+    type Data<'a> = Self;
 
     fn deserialize<'a>(data: &EspEvent<'a>) -> Self::Data<'a> {
         // Just as easy as serializing
-        *unsafe { data.as_payload::<CustomEvent>() }
+        *unsafe { data.as_payload::<Self>() }
     }
 }

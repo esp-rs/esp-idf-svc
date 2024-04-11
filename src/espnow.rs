@@ -7,6 +7,7 @@
 //! protect the action frame for security. ESP-NOW is widely used in smart
 //! light, remote controlling, sensor, etc.
 use core::marker::PhantomData;
+use core::ptr;
 
 use ::log::info;
 
@@ -36,8 +37,8 @@ pub enum SendStatus {
 impl From<u32> for SendStatus {
     fn from(val: u32) -> Self {
         match val {
-            0 => SendStatus::SUCCESS,
-            1 => SendStatus::FAIL,
+            0 => Self::SUCCESS,
+            1 => Self::FAIL,
             _ => panic!("Wrong status code"),
         }
     }
@@ -114,7 +115,7 @@ impl<'a> EspNow<'a> {
     }
 
     pub fn del_peer(&self, peer_addr: [u8; 6]) -> Result<(), EspError> {
-        esp!(unsafe { esp_now_del_peer(&peer_addr as *const u8) })?;
+        esp!(unsafe { esp_now_del_peer(ptr::addr_of!(peer_addr).cast()) })?;
 
         Ok(())
     }
@@ -129,8 +130,8 @@ impl<'a> EspNow<'a> {
         let mut peer_info = PeerInfo::default();
         esp!(unsafe {
             esp_now_get_peer(
-                &peer_addr as *const u8,
-                &mut peer_info as *mut esp_now_peer_info_t,
+                ptr::addr_of!(peer_addr).cast(),
+                ptr::addr_of_mut!(peer_info).cast(),
             )
         })?;
 
@@ -138,18 +139,18 @@ impl<'a> EspNow<'a> {
     }
 
     pub fn peer_exists(&self, peer_addr: [u8; 6]) -> Result<bool, EspError> {
-        Ok(unsafe { esp_now_is_peer_exist(&peer_addr as *const u8) })
+        Ok(unsafe { esp_now_is_peer_exist(ptr::addr_of!(peer_addr).cast()) })
     }
 
     pub fn get_peers_number(&self) -> Result<(usize, usize), EspError> {
         let mut num = esp_now_peer_num_t::default();
-        esp!(unsafe { esp_now_get_peer_num(&mut num as *mut esp_now_peer_num_t) })?;
+        esp!(unsafe { esp_now_get_peer_num(ptr::addr_of_mut!(num).cast()) })?;
         Ok((num.total_num as usize, num.encrypt_num as usize))
     }
 
     pub fn fetch_peer(&self, from_head: bool) -> Result<PeerInfo, EspError> {
         let mut peer_info = PeerInfo::default();
-        esp!(unsafe { esp_now_fetch_peer(from_head, &mut peer_info as *mut esp_now_peer_info_t) })?;
+        esp!(unsafe { esp_now_fetch_peer(from_head, core::ptr::addr_of_mut!(peer_info)) })?;
 
         Ok(peer_info)
     }
@@ -162,7 +163,7 @@ impl<'a> EspNow<'a> {
 
     pub fn get_version(&self) -> Result<u32, EspError> {
         let mut version: u32 = 0;
-        esp!(unsafe { esp_now_get_version(&mut version as *mut u32) })?;
+        esp!(unsafe { esp_now_get_version(core::ptr::addr_of_mut!(version)) })?;
         Ok(version)
     }
 
@@ -216,7 +217,7 @@ impl<'a> EspNow<'a> {
         let c_mac = unsafe { core::slice::from_raw_parts(mac_addr, 6usize) };
 
         if let Some(ref mut callback) = *SEND_CALLBACK.lock() {
-            callback(c_mac, status.into())
+            callback(c_mac, status.into());
         } else {
             panic!("EspNow callback not available");
         }
@@ -234,7 +235,7 @@ impl<'a> EspNow<'a> {
         let c_data = unsafe { core::slice::from_raw_parts(data, data_len as usize) };
 
         if let Some(ref mut callback) = *RECV_CALLBACK.lock() {
-            callback(c_mac, c_data)
+            callback(c_mac, c_data);
         } else {
             panic!("EspNow callback not available");
         }

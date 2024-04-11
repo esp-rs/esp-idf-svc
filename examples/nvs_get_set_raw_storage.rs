@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
             info!("Got namespace {:?} from default partition", test_namespace);
             nvs
         }
-        Err(e) => panic!("Could't get namespace {:?}", e),
+        Err(e) => panic!("Could't get namespace {e:?}"),
     };
 
     let key_raw_u8 = "test_raw_u8";
@@ -115,7 +115,7 @@ fn main() -> anyhow::Result<()> {
                         "{:?} = {:?}",
                         key_raw_str,
                         from_bytes::<StructToBeStored>(the_struct)
-                    )
+                    );
                 }
             }
             Err(e) => info!("Couldn't get key {} because {:?}", key_raw_str, e),

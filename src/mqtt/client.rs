@@ -117,7 +117,7 @@ impl<'a> Default for MqttClientConfiguration<'a> {
             skip_cert_common_name_check: false,
 
             #[cfg(not(esp_idf_version = "4.3"))]
-            crt_bundle_attach: Default::default(),
+            crt_bundle_attach: Option::default(),
 
             server_certificate: None,
 
@@ -250,11 +250,10 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
                 ..Default::default()
             },
             session: esp_mqtt_client_config_t_session_t {
-                protocol_ver: if let Some(protocol_version) = conf.protocol_version {
-                    protocol_version.into()
-                } else {
-                    esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_UNDEFINED
-                },
+                protocol_ver: conf.protocol_version.map_or(
+                    esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_UNDEFINED,
+                    core::convert::Into::into,
+                ),
                 disable_clean_session: conf.disable_clean_session as _,
                 ..Default::default()
             },
@@ -264,7 +263,7 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
                 ..Default::default()
             },
             task: esp_mqtt_client_config_t_task_t {
-                priority: conf.task_prio as _,
+                priority: i32::from(conf.task_prio),
                 stack_size: conf.task_stack as _,
                 ..Default::default()
             },
@@ -293,28 +292,28 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
         if let Some(lwt) = conf.lwt.as_ref() {
             c_conf.session.last_will = esp_mqtt_client_config_t_session_t_last_will_t {
                 topic: cstrs.as_ptr(lwt.topic)?,
-                msg: lwt.payload.as_ptr() as _,
+                msg: lwt.payload.as_ptr().cast(),
                 msg_len: lwt.payload.len() as _,
                 qos: lwt.qos as _,
-                retain: lwt.retain as _,
+                retain: i32::from(lwt.retain),
                 ..Default::default()
             };
         }
 
         if let Some(cert) = conf.server_certificate {
-            c_conf.broker.verification.certificate = cert.as_esp_idf_raw_ptr() as _;
+            c_conf.broker.verification.certificate = cert.as_esp_idf_raw_ptr().cast();
             c_conf.broker.verification.certificate_len = cert.as_esp_idf_raw_len();
         }
 
         if let (Some(cert), Some(private_key)) = (conf.client_certificate, conf.private_key) {
-            c_conf.credentials.authentication.certificate = cert.as_esp_idf_raw_ptr() as _;
+            c_conf.credentials.authentication.certificate = cert.as_esp_idf_raw_ptr().cast();
             c_conf.credentials.authentication.certificate_len = cert.as_esp_idf_raw_len();
 
-            c_conf.credentials.authentication.key = private_key.as_esp_idf_raw_ptr() as _;
+            c_conf.credentials.authentication.key = private_key.as_esp_idf_raw_ptr().cast();
             c_conf.credentials.authentication.key_len = private_key.as_esp_idf_raw_len();
 
             if let Some(pass) = conf.private_key_password {
-                c_conf.credentials.authentication.key_password = pass.as_ptr() as _;
+                c_conf.credentials.authentication.key_password = pass.as_ptr().cast();
                 c_conf.credentials.authentication.key_password_len = pass.len() as _;
             }
         }
@@ -336,11 +335,11 @@ impl<'a> UnsafeCallback<'a> {
     }
 
     unsafe fn from_ptr(ptr: *mut c_void) -> Self {
-        Self(ptr as *mut _)
+        Self(ptr.cast())
     }
 
     fn as_ptr(&self) -> *mut c_void {
-        self.0 as *mut _
+        self.0.cast()
     }
 
     unsafe fn call(&self, data: esp_mqtt_event_handle_t) {
@@ -480,7 +479,7 @@ impl<'a> EspMqttClient<'a> {
             }
         }
 
-        let raw_client = unsafe { esp_mqtt_client_init(&c_conf as *const _) };
+        let raw_client = unsafe { esp_mqtt_client_init(core::ptr::addr_of!(c_conf)) };
         if raw_client.is_null() {
             return Err(EspError::from_infallible::<ESP_FAIL>());
         }
@@ -587,10 +586,10 @@ impl<'a> EspMqttClient<'a> {
             esp_mqtt_client_publish(
                 self.raw_client,
                 topic.as_ptr(),
-                payload_ptr as _,
+                payload_ptr.cast(),
                 payload.len() as _,
                 qos as _,
-                retain as _,
+                i32::from(retain),
             )
         })
     }
@@ -611,10 +610,10 @@ impl<'a> EspMqttClient<'a> {
             esp_mqtt_client_enqueue(
                 self.raw_client,
                 topic.as_ptr(),
-                payload_ptr as _,
+                payload_ptr.cast(),
                 payload.len() as _,
                 qos as _,
-                retain as _,
+                i32::from(retain),
                 true,
             )
         })
@@ -627,11 +626,11 @@ impl<'a> EspMqttClient<'a> {
         event_data: *mut c_void,
     ) {
         unsafe {
-            UnsafeCallback::from_ptr(event_handler_arg).call(event_data as _);
+            UnsafeCallback::from_ptr(event_handler_arg).call(event_data.cast());
         }
     }
 
-    fn check(result: i32) -> Result<MessageId, EspError> {
+    const fn check(result: i32) -> Result<MessageId, EspError> {
         match EspError::from(result) {
             Some(err) if result < 0 => Err(err),
             _ => Ok(result as _),
@@ -642,7 +641,7 @@ impl<'a> EspMqttClient<'a> {
 impl<'a> Drop for EspMqttClient<'a> {
     fn drop(&mut self) {
         unsafe {
-            esp_mqtt_client_destroy(self.raw_client as _);
+            esp_mqtt_client_destroy(self.raw_client.cast());
         }
     }
 }
@@ -719,7 +718,7 @@ impl Connection for EspMqttConnection {
     type Event<'a> = &'a EspMqttEvent<'a>;
 
     fn next(&mut self) -> Result<Self::Event<'_>, Self::Error> {
-        EspMqttConnection::next(self)
+        Self::next(self)
     }
 }
 
@@ -856,11 +855,11 @@ impl ErrorType for EspAsyncMqttClient {
 
 impl asynch::Client for EspAsyncMqttClient {
     async fn subscribe(&mut self, topic: &str, qos: QoS) -> Result<MessageId, Self::Error> {
-        EspAsyncMqttClient::subscribe(self, topic, qos).await
+        Self::subscribe(self, topic, qos).await
     }
 
     async fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, Self::Error> {
-        EspAsyncMqttClient::unsubscribe(self, topic).await
+        Self::unsubscribe(self, topic).await
     }
 }
 
@@ -872,7 +871,7 @@ impl asynch::Publish for EspAsyncMqttClient {
         retain: bool,
         payload: &[u8],
     ) -> Result<MessageId, Self::Error> {
-        EspAsyncMqttClient::publish(self, topic, qos, retain, payload).await
+        Self::publish(self, topic, qos, retain, payload).await
     }
 }
 
@@ -907,7 +906,7 @@ impl asynch::Connection for EspAsyncMqttConnection {
     type Event<'a> = &'a EspMqttEvent<'a>;
 
     async fn next(&mut self) -> Result<Self::Event<'_>, Self::Error> {
-        EspAsyncMqttConnection::next(self).await
+        Self::next(self).await
     }
 }
 
@@ -982,7 +981,7 @@ impl<'a> EspMqttEvent<'a> {
                 },
             },
             esp_mqtt_event_id_t_MQTT_EVENT_DELETED => EventPayload::Deleted(self.0.msg_id as _),
-            other => panic!("Unknown message type: {}", other),
+            other => panic!("Unknown message type: {other}"),
         }
     }
 }

@@ -54,7 +54,7 @@ impl From<Method> for Newtype<(esp_http_client_method_t, ())> {
                 Method::Subscribe => esp_http_client_method_t_HTTP_METHOD_SUBSCRIBE,
                 Method::Unsubscribe => esp_http_client_method_t_HTTP_METHOD_UNSUBSCRIBE,
                 Method::Patch => esp_http_client_method_t_HTTP_METHOD_PATCH,
-                method => panic!("Method {:?} is not supported", method),
+                method => panic!("Method {method:?} is not supported"),
             },
             (),
         ))
@@ -116,9 +116,9 @@ impl EspHttpConnection {
         let mut native_config = esp_http_client_config_t {
             // The ESP-IDF HTTP client is really picky on being initialized with a valid URL
             // So we set something here, which will be changed later anyway, in the request() method
-            url: b"http://127.0.0.1\0".as_ptr() as *const _,
+            url: b"http://127.0.0.1\0".as_ptr().cast(),
             event_handler: Some(Self::on_events),
-            user_data: &*event_handler as *const _ as *mut core::ffi::c_void,
+            user_data: core::ptr::addr_of!(*event_handler) as *mut core::ffi::c_void,
 
             use_global_ca_store: configuration.use_global_ca_store,
             #[cfg(not(esp_idf_version = "4.3"))]
@@ -142,10 +142,10 @@ impl EspHttpConnection {
         if let (Some(cert), Some(private_key)) =
             (configuration.client_certificate, configuration.private_key)
         {
-            native_config.client_cert_pem = cert.as_esp_idf_raw_ptr() as _;
+            native_config.client_cert_pem = cert.as_esp_idf_raw_ptr().cast();
             native_config.client_cert_len = cert.as_esp_idf_raw_len();
 
-            native_config.client_key_pem = private_key.as_esp_idf_raw_ptr() as _;
+            native_config.client_key_pem = private_key.as_esp_idf_raw_ptr().cast();
             native_config.client_key_len = private_key.as_esp_idf_raw_len();
         }
 
@@ -181,24 +181,27 @@ impl EspHttpConnection {
         self.assert_response();
 
         if name.eq_ignore_ascii_case("Content-Length") {
-            if let Some(content_len_opt) =
-                unsafe { self.content_len_header.get().as_mut().unwrap() }.as_ref()
-            {
-                content_len_opt.as_ref().map(|s| s.as_str())
-            } else {
-                let content_len = unsafe { esp_http_client_get_content_length(self.raw_client) };
-                *unsafe { self.content_len_header.get().as_mut().unwrap() } = if content_len >= 0 {
-                    Some(Some(content_len.to_string()))
-                } else {
-                    None
-                };
+            unsafe { self.content_len_header.get().as_mut().unwrap() }
+                .as_ref()
+                .map_or_else(
+                    || {
+                        let content_len =
+                            unsafe { esp_http_client_get_content_length(self.raw_client) };
+                        *unsafe { self.content_len_header.get().as_mut().unwrap() } =
+                            if content_len >= 0 {
+                                Some(Some(content_len.to_string()))
+                            } else {
+                                None
+                            };
 
-                unsafe { self.content_len_header.get().as_mut().unwrap() }
-                    .as_ref()
-                    .and_then(|s| s.as_ref().map(|s| s.as_ref()))
-            }
+                        unsafe { self.content_len_header.get().as_mut().unwrap() }
+                            .as_ref()
+                            .and_then(|s| s.as_ref().map(core::convert::AsRef::as_ref))
+                    },
+                    |content_len_opt| content_len_opt.as_ref().map(String::as_str),
+                )
         } else {
-            self.headers.get(UncasedStr::new(name)).map(|s| s.as_str())
+            self.headers.get(UncasedStr::new(name)).map(String::as_str)
         }
     }
 
@@ -217,7 +220,7 @@ impl EspHttpConnection {
 
         let c_uri = to_cstring_arg(uri)?;
 
-        esp!(unsafe { esp_http_client_set_url(self.raw_client, c_uri.as_ptr() as _) })?;
+        esp!(unsafe { esp_http_client_set_url(self.raw_client, c_uri.as_ptr().cast()) })?;
         esp!(unsafe {
             esp_http_client_set_method(
                 self.raw_client,
@@ -241,8 +244,8 @@ impl EspHttpConnection {
                 esp!(unsafe {
                     esp_http_client_set_header(
                         self.raw_client,
-                        c_name.as_ptr() as _,
-                        c_value.as_ptr() as _,
+                        c_name.as_ptr().cast(),
+                        c_value.as_ptr().cast(),
                     )
                 })?;
             }
@@ -251,7 +254,7 @@ impl EspHttpConnection {
         self.follow_redirects = match self.follow_redirects_policy {
             FollowRedirectsPolicy::FollowAll => true,
             FollowRedirectsPolicy::FollowGetHead => method == Method::Get || method == Method::Head,
-            _ => false,
+            FollowRedirectsPolicy::FollowNone => false,
         };
 
         // No Content-Length for POST requests means chunked encoding
@@ -286,10 +289,10 @@ impl EspHttpConnection {
         self.state == State::Response
     }
 
-    pub fn split(&mut self) -> (&EspHttpConnection, &mut Self) {
+    pub fn split(&mut self) -> (&Self, &mut Self) {
         self.assert_response();
 
-        let headers_ptr: *const EspHttpConnection = self as *const _;
+        let headers_ptr: *const Self = self as *const _;
 
         let headers = unsafe { headers_ptr.as_ref().unwrap() };
 
@@ -300,7 +303,7 @@ impl EspHttpConnection {
         self.assert_response();
 
         let result = Self::check(unsafe {
-            esp_http_client_read(self.raw_client, buf.as_mut_ptr() as _, buf.len() as _)
+            esp_http_client_read(self.raw_client, buf.as_mut_ptr().cast(), buf.len() as _)
         });
 
         // workaround since esp_http_client_read does not yet return EAGAIN error in ESP-IDF v4.
@@ -371,7 +374,7 @@ impl EspHttpConnection {
         self.assert_request();
 
         Self::check(unsafe {
-            esp_http_client_write(self.raw_client, buf.as_ptr() as _, buf.len() as _)
+            esp_http_client_write(self.raw_client, buf.as_ptr().cast(), buf.len() as _)
         })
     }
 
@@ -385,7 +388,7 @@ impl EspHttpConnection {
         Ok(())
     }
 
-    fn check(result: i32) -> Result<usize, EspError> {
+    const fn check(result: i32) -> Result<usize, EspError> {
         match EspError::from(result) {
             Some(err) if result < 0 => Err(err),
             _ => Ok(result as _),
@@ -415,7 +418,7 @@ impl EspHttpConnection {
 
         loop {
             // TODO: Implement a mechanism where the client can declare in which header it is interested
-            let headers_ptr = &mut self.headers as *mut BTreeMap<Uncased, String>;
+            let headers_ptr = core::ptr::addr_of_mut!(self.headers);
 
             let handler = move |event: &esp_http_client_event_t| {
                 if event.event_id == esp_http_client_event_id_t_HTTP_EVENT_ON_HEADER {
@@ -485,21 +488,24 @@ impl EspHttpConnection {
     }
 
     fn assert_initial(&self) {
-        if self.state != State::New && self.state != State::Response {
-            panic!("connection is not in initial phase");
-        }
+        assert!(
+            self.state == State::New || self.state == State::Response,
+            "connection is not in initial phase"
+        );
     }
 
     fn assert_request(&self) {
-        if self.state != State::Request {
-            panic!("connection is not in request phase");
-        }
+        assert!(
+            self.state == State::Request,
+            "connection is not in request phase"
+        );
     }
 
     fn assert_response(&self) {
-        if self.state != State::Response {
-            panic!("connection is not in response phase");
-        }
+        assert!(
+            self.state == State::Response,
+            "connection is not in response phase"
+        );
     }
 }
 
@@ -520,17 +526,17 @@ impl RawHandle for EspHttpConnection {
 
 impl Status for EspHttpConnection {
     fn status(&self) -> u16 {
-        EspHttpConnection::status(self)
+        Self::status(self)
     }
 
     fn status_message(&self) -> Option<&str> {
-        EspHttpConnection::status_message(self)
+        Self::status_message(self)
     }
 }
 
 impl embedded_svc::http::Headers for EspHttpConnection {
     fn header(&self, name: &str) -> Option<&str> {
-        EspHttpConnection::header(self, name)
+        Self::header(self, name)
     }
 }
 
@@ -540,7 +546,7 @@ impl ErrorType for EspHttpConnection {
 
 impl Read for EspHttpConnection {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let size = EspHttpConnection::read(self, buf)?;
+        let size = Self::read(self, buf)?;
 
         Ok(size)
     }
@@ -548,7 +554,7 @@ impl Read for EspHttpConnection {
 
 impl Write for EspHttpConnection {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let size = EspHttpConnection::write(self, buf)?;
+        let size = Self::write(self, buf)?;
 
         Ok(size)
     }
@@ -575,23 +581,23 @@ impl Connection for EspHttpConnection {
         uri: &'a str,
         headers: &'a [(&'a str, &'a str)],
     ) -> Result<(), Self::Error> {
-        EspHttpConnection::initiate_request(self, method, uri, headers).map_err(EspIOError)
+        Self::initiate_request(self, method, uri, headers).map_err(EspIOError)
     }
 
     fn is_request_initiated(&self) -> bool {
-        EspHttpConnection::is_request_initiated(self)
+        Self::is_request_initiated(self)
     }
 
     fn initiate_response(&mut self) -> Result<(), Self::Error> {
-        EspHttpConnection::initiate_response(self).map_err(EspIOError)
+        Self::initiate_response(self).map_err(EspIOError)
     }
 
     fn is_response_initiated(&self) -> bool {
-        EspHttpConnection::is_response_initiated(self)
+        Self::is_response_initiated(self)
     }
 
     fn split(&mut self) -> (&Self::Headers, &mut Self::Read) {
-        EspHttpConnection::split(self)
+        Self::split(self)
     }
 
     fn raw_connection(&mut self) -> Result<&mut Self::RawConnection, Self::Error> {

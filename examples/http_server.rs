@@ -48,9 +48,7 @@ fn main() -> anyhow::Result<()> {
     let mut server = create_server()?;
 
     server.fn_handler("/", Method::Get, |req| {
-        req.into_ok_response()?
-            .write_all(INDEX_HTML.as_bytes())
-            .map(|_| ())
+        req.into_ok_response()?.write_all(INDEX_HTML.as_bytes())
     })?;
 
     server.fn_handler::<anyhow::Error, _>("/post", Method::Post, |mut req| {

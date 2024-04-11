@@ -53,7 +53,7 @@ impl core::fmt::Write for EspStdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let slice = s.as_bytes();
         unsafe {
-            fwrite(slice.as_ptr() as *const _, 1, slice.len() as u32, self.0);
+            fwrite(slice.as_ptr().cast(), 1, slice.len() as u32, self.0);
         }
 
         Ok(())
@@ -64,20 +64,19 @@ impl core::fmt::Write for EspStdout {
 impl From<Newtype<esp_log_level_t>> for LevelFilter {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
-            esp_log_level_t_ESP_LOG_NONE => LevelFilter::Off,
-            esp_log_level_t_ESP_LOG_ERROR => LevelFilter::Error,
-            esp_log_level_t_ESP_LOG_WARN => LevelFilter::Warn,
-            esp_log_level_t_ESP_LOG_INFO => LevelFilter::Info,
-            esp_log_level_t_ESP_LOG_DEBUG => LevelFilter::Debug,
-            esp_log_level_t_ESP_LOG_VERBOSE => LevelFilter::Trace,
-            _ => LevelFilter::Trace,
+            esp_log_level_t_ESP_LOG_NONE => Self::Off,
+            esp_log_level_t_ESP_LOG_ERROR => Self::Error,
+            esp_log_level_t_ESP_LOG_WARN => Self::Warn,
+            esp_log_level_t_ESP_LOG_INFO => Self::Info,
+            esp_log_level_t_ESP_LOG_DEBUG => Self::Debug,
+            _ => Self::Trace,
         }
     }
 }
 
 impl From<LevelFilter> for Newtype<esp_log_level_t> {
     fn from(level: LevelFilter) -> Self {
-        Newtype(match level {
+        Self(match level {
             LevelFilter::Off => esp_log_level_t_ESP_LOG_NONE,
             LevelFilter::Error => esp_log_level_t_ESP_LOG_ERROR,
             LevelFilter::Warn => esp_log_level_t_ESP_LOG_WARN,
@@ -92,19 +91,18 @@ impl From<LevelFilter> for Newtype<esp_log_level_t> {
 impl From<Newtype<esp_log_level_t>> for Level {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
-            esp_log_level_t_ESP_LOG_ERROR => Level::Error,
-            esp_log_level_t_ESP_LOG_WARN => Level::Warn,
-            esp_log_level_t_ESP_LOG_INFO => Level::Info,
-            esp_log_level_t_ESP_LOG_DEBUG => Level::Debug,
-            esp_log_level_t_ESP_LOG_VERBOSE => Level::Trace,
-            _ => Level::Trace,
+            esp_log_level_t_ESP_LOG_ERROR => Self::Error,
+            esp_log_level_t_ESP_LOG_WARN => Self::Warn,
+            esp_log_level_t_ESP_LOG_INFO => Self::Info,
+            esp_log_level_t_ESP_LOG_DEBUG => Self::Debug,
+            _ => Self::Trace,
         }
     }
 }
 
 impl From<Level> for Newtype<esp_log_level_t> {
     fn from(level: Level) -> Self {
-        Newtype(match level {
+        Self(match level {
             Level::Error => esp_log_level_t_ESP_LOG_ERROR,
             Level::Warn => esp_log_level_t_ESP_LOG_WARN,
             Level::Info => esp_log_level_t_ESP_LOG_INFO,
@@ -153,7 +151,7 @@ impl EspLogger {
         Ok(())
     }
 
-    fn get_marker(level: Level) -> &'static str {
+    const fn get_marker(level: Level) -> &'static str {
         match level {
             Level::Error => "E",
             Level::Warn => "W",
@@ -163,7 +161,7 @@ impl EspLogger {
         }
     }
 
-    fn get_color(level: Level) -> Option<u8> {
+    const fn get_color(level: Level) -> Option<u8> {
         #[cfg(esp_idf_log_colors)]
         {
             match level {
@@ -238,12 +236,11 @@ impl ::log::Log for EspLogger {
             if let Some(color) = color {
                 writeln!(
                     stdout,
-                    "\x1b[0;{}m{} ({}) {}: {}\x1b[0m",
-                    color, marker, timestamp, target, args
+                    "\x1b[0;{color}m{marker} ({timestamp}) {target}: {args}\x1b[0m"
                 )
                 .unwrap();
             } else {
-                writeln!(stdout, "{} ({}) {}: {}", marker, timestamp, target, args).unwrap();
+                writeln!(stdout, "{marker} ({timestamp}) {target}: {args}").unwrap();
             }
         }
     }
