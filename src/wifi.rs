@@ -2119,7 +2119,12 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
                     .map(|payload| &payload.ap_cred[..payload.ap_cred_cnt as _])
                     .unwrap_or(&[]);
 
-                WifiEvent::StaWpsSuccess(unsafe { core::mem::transmute(credentials) })
+                WifiEvent::StaWpsSuccess(unsafe {
+                    core::mem::transmute::<
+                        &[wifi_event_sta_wps_er_success_t__bindgen_ty_1],
+                        &[WpsCredentialsRef],
+                    >(credentials)
+                })
             }
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_FAILED => WifiEvent::StaWpsFailed,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_TIMEOUT => WifiEvent::StaWpsTimeout,
@@ -2141,7 +2146,11 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
                     (ptr::addr_of!(*data.payload.unwrap()).cast::<wifi_event_ap_staconnected_t>())
                         .as_ref()
                 };
-                WifiEvent::ApStaConnected(unsafe { core::mem::transmute(payload.unwrap()) })
+                WifiEvent::ApStaConnected(unsafe {
+                    core::mem::transmute::<&wifi_event_ap_staconnected_t, &ApStaConnectedRef>(
+                        payload.unwrap(),
+                    )
+                })
             }
             wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED => {
                 let payload = unsafe {
@@ -2149,7 +2158,11 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
                         .cast::<wifi_event_ap_stadisconnected_t>())
                     .as_ref()
                 };
-                WifiEvent::ApStaDisconnected(unsafe { core::mem::transmute(payload.unwrap()) })
+                WifiEvent::ApStaDisconnected(unsafe {
+                    core::mem::transmute::<&wifi_event_ap_stadisconnected_t, &ApStaDisconnectedRef>(
+                        payload.unwrap(),
+                    )
+                })
             }
             wifi_event_t_WIFI_EVENT_AP_PROBEREQRECVED => WifiEvent::ApProbeRequestReceived,
             wifi_event_t_WIFI_EVENT_FTM_REPORT => WifiEvent::FtmReport,
