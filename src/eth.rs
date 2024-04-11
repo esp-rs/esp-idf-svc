@@ -451,7 +451,7 @@ where
 
                 #[cfg(esp_idf_version_major = "4")]
                 let dm9051_cfg = eth_dm9051_config_t {
-                    spi_hdl: spi_handle.unwrap().cast_mut(),
+                    spi_hdl: spi_handle.unwrap().cast(),
                     int_gpio_num: int,
                 };
 
@@ -487,7 +487,7 @@ where
 
                 #[cfg(esp_idf_version_major = "4")]
                 let w5500_cfg = eth_w5500_config_t {
-                    spi_hdl: spi_handle.unwrap().cast_mut(),
+                    spi_hdl: spi_handle.unwrap().cast(),
                     int_gpio_num: int,
                 };
 
@@ -523,7 +523,7 @@ where
 
                 #[cfg(esp_idf_version_major = "4")]
                 let ksz8851snl_cfg = eth_ksz8851snl_config_t {
-                    spi_hdl: spi_handle.unwrap().cast_mut(),
+                    spi_hdl: spi_handle.unwrap().cast(),
                     int_gpio_num: int,
                 };
 
