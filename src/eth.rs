@@ -685,11 +685,11 @@ impl<'d, T> EthDriver<'d, T> {
         Ok(())
     }
 
-    pub fn set_rx_callback<F>(&mut self, callback: F)
+    pub fn set_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
         F: FnMut(EthFrame) + Send + 'static,
     {
-        self.internal_set_rx_callback(callback);
+        self.internal_set_rx_callback(callback)
     }
 
     /// # Safety
@@ -715,14 +715,14 @@ impl<'d, T> EthDriver<'d, T> {
     ///
     /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
-    pub unsafe fn set_nonstatic_rx_callback<F>(&mut self, callback: F)
+    pub unsafe fn set_nonstatic_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
         F: FnMut(EthFrame) + Send + 'd,
     {
-        self.internal_set_rx_callback(callback);
+        self.internal_set_rx_callback(callback)
     }
 
-    fn internal_set_rx_callback<F>(&mut self, callback: F)
+    fn internal_set_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
         F: FnMut(EthFrame) + Send + 'd,
     {
@@ -737,6 +737,8 @@ impl<'d, T> EthDriver<'d, T> {
         }
 
         self.callback = Some(callback);
+
+        Ok(())
     }
 
     pub fn send(&mut self, frame: &[u8]) -> Result<(), EspError> {
