@@ -330,6 +330,14 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
+    pub fn erase_partition(&self, name: &str) -> Result<(), EspError> {
+        let c_key = to_cstring_arg(name)?;
+        match unsafe { nvs_flash_erase_partition(c_key.as_ptr()) } {
+            ESP_OK => Ok(()),
+            err => Err(EspError::from(err).unwrap()),
+        }
+    }
+
     fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
         let c_key = to_cstring_arg(name)?;
 
