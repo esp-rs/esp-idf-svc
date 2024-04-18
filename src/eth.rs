@@ -470,6 +470,11 @@ where
                         ),
                     )))]
                     custom_spi_driver: eth_spi_custom_driver_config_t::default(),
+                    #[cfg(all(
+                        esp_idf_version_major = "5",
+                        not(any(esp_idf_version_minor = "0", esp_idf_version_major = "1"))
+                    ))]
+                    poll_period_ms: 0,
                 };
 
                 let mac = unsafe { esp_eth_mac_new_dm9051(&dm9051_cfg, &mac_cfg) };
@@ -506,6 +511,11 @@ where
                         ),
                     )))]
                     custom_spi_driver: eth_spi_custom_driver_config_t::default(),
+                    #[cfg(all(
+                        esp_idf_version_major = "5",
+                        not(any(esp_idf_version_minor = "0", esp_idf_version_major = "1"))
+                    ))]
+                    poll_period_ms: 0,
                 };
 
                 let mac = unsafe { esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg) };
@@ -542,6 +552,11 @@ where
                         ),
                     )))]
                     custom_spi_driver: eth_spi_custom_driver_config_t::default(),
+                    #[cfg(all(
+                        esp_idf_version_major = "5",
+                        not(any(esp_idf_version_minor = "0", esp_idf_version_major = "1"))
+                    ))]
+                    poll_period_ms: 0,
                 };
 
                 let mac = unsafe { esp_eth_mac_new_ksz8851snl(&ksz8851snl_cfg, &mac_cfg) };
