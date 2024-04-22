@@ -99,6 +99,7 @@ impl EspPing {
         conf: &Configuration,
         tracker: &mut Tracker<F>,
     ) -> Result<(), EspError> {
+        #[cfg(not(esp_idf_lwip_ipv6))]
         let ta = ip4_addr_t {
             addr: u32::from_be_bytes(ip.octets()),
         };
