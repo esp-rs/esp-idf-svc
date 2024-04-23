@@ -5,6 +5,9 @@ use crate::sys::*;
 
 pub mod server;
 
+pub type GattInterface = u8;
+pub type Handle = u16;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
 pub enum GattStatus {
@@ -210,42 +213,6 @@ pub enum ServiceUuid {
     PublicBroadcastAnnouncement,
 }
 
-pub struct AttributeValue<const S: usize> {
-    len: usize,
-    value: [u8; S],
-}
-
-impl<const S: usize> From<&AttributeValue<S>> for esp_attr_value_t {
-    fn from(val: &AttributeValue<S>) -> Self {
-        Self {
-            attr_max_len: S as _,
-            attr_len: val.len as _,
-            attr_value: val.value.as_ptr() as _,
-        }
-    }
-}
-
-impl<const S: usize> Default for AttributeValue<S> {
-    fn default() -> Self {
-        Self {
-            len: S,
-            value: [0; S],
-        }
-    }
-}
-
-impl<const S: usize> AttributeValue<S> {
-    pub fn new_with_value(value: &[u8]) -> Self {
-        let actual_len = core::cmp::min(value.len(), S);
-        let mut val = Self {
-            len: S,
-            value: [0; S],
-        };
-        val.value[0..actual_len].copy_from_slice(&value[0..actual_len]);
-        val
-    }
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 pub enum AutoResponse {
@@ -253,32 +220,34 @@ pub enum AutoResponse {
     ByGatt = ESP_GATT_AUTO_RSP as _,
 }
 
-pub struct GattCharacteristic<const S: usize> {
+#[derive(Debug)]
+pub struct GattCharacteristic {
     pub(crate) uuid: BtUuid,
     pub(crate) permissions: esp_gatt_perm_t,
     pub(crate) properties: esp_gatt_char_prop_t,
-    pub(crate) value: AttributeValue<S>,
+    pub(crate) max_len: usize,
     pub(crate) auto_rsp: AutoResponse,
 }
 
-impl<const S: usize> GattCharacteristic<S> {
+impl GattCharacteristic {
     pub fn new(
         uuid: BtUuid,
         permissions: esp_gatt_perm_t,
         properties: esp_gatt_char_prop_t,
-        value: AttributeValue<S>,
+        max_len: usize,
         auto_rsp: AutoResponse,
     ) -> Self {
         Self {
             uuid,
             permissions,
             properties,
-            value,
+            max_len,
             auto_rsp,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct GattDescriptor {
     pub(crate) uuid: BtUuid,
     pub(crate) permissions: esp_gatt_perm_t,

@@ -8,8 +8,13 @@ use crate::bt::{BdAddr, BleEnabled, BtCallback, BtDriver, BtUuid};
 use crate::sys::*;
 
 use super::{
-    GattCharacteristic, GattConnParams, GattConnReason, GattDescriptor, GattServiceId, GattStatus,
+    GattCharacteristic, GattConnParams, GattConnReason, GattDescriptor, GattInterface,
+    GattServiceId, GattStatus, Handle,
 };
+
+pub type AppId = u16;
+pub type ConnectionId = u16;
+pub type TransferId = u32;
 
 pub struct EventRawData<'a>(pub &'a esp_ble_gatts_cb_param_t);
 
@@ -25,17 +30,17 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Application id which input in register API
-        app_id: u16,
+        app_id: AppId,
     },
     Read {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Transfer id
-        trans_id: u32,
+        trans_id: TransferId,
         /// The bluetooth device address which been read
         addr: BdAddr,
         /// The attribute handle
-        handle: u16,
+        handle: Handle,
         /// Offset of the value, if the value is too long
         offset: u16,
         /// The value is too long or not
@@ -45,13 +50,13 @@ pub enum GattsEvent<'a> {
     },
     Write {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Transfer id
-        trans_id: u32,
+        trans_id: TransferId,
         /// The bluetooth device address which been written
         addr: BdAddr,
         /// The attribute handle
-        handle: u16,
+        handle: Handle,
         /// Offset of the value, if the value is too long
         offset: u16,
         /// The write operation need to do response
@@ -63,9 +68,9 @@ pub enum GattsEvent<'a> {
     },
     ExecWrite {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Transfer id
-        trans_id: u32,
+        trans_id: TransferId,
         /// The bluetooth device address which been written
         addr: BdAddr,
         /// Execute write flag
@@ -73,7 +78,7 @@ pub enum GattsEvent<'a> {
     },
     Mtu {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// MTU size
         mtu: u16,
     },
@@ -81,9 +86,9 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// attribute handle
-        handle: u16,
+        handle: Handle,
         /// The indication or notification value, value is valid when send notification or indication failed
         value: Option<&'a [u8]>,
     },
@@ -91,7 +96,7 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
         /// Service id, include service uuid and other information
         service_id: GattServiceId,
     },
@@ -99,7 +104,7 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
         /// Service id, include service uuid and other information
         service_id: GattServiceId,
     },
@@ -107,17 +112,17 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Included service attribute handle
-        attr_handle: u16,
+        attr_handle: Handle,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
     },
     AddCharacteristicComplete {
         /// Operation status
         status: GattStatus,
         /// Characteristic attribute handle
-        attr_handle: u16,
+        attr_handle: Handle,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
         /// Characteristic uuid
         char_uuid: BtUuid,
     },
@@ -125,9 +130,9 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Descriptor attribute handle
-        attr_handle: u16,
+        attr_handle: Handle,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
         /// Characteristic descriptor uuid
         descr_uuid: BtUuid,
     },
@@ -135,23 +140,23 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
     },
     StartComplete {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
     },
     StopComplete {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
-        service_handle: u16,
+        service_handle: Handle,
     },
     Connect {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Link role : master role = 0  ; slave role = 1
         link_role: u8,
         /// Remote bluetooth device address
@@ -161,7 +166,7 @@ pub enum GattsEvent<'a> {
     },
     Disconnect {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Remote bluetooth device address
         addr: BdAddr,
         /// Indicate the reason of disconnection
@@ -175,18 +180,18 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
     },
     // TODO: Are the parameters below correct?
     Listen {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Congested or not
         congested: bool,
     },
     Congest {
         /// Connection id
-        conn_id: u16,
+        conn_id: ConnectionId,
         /// Congested or not
         congested: bool,
     },
@@ -194,23 +199,23 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
         /// Attribute handle which send response
-        handle: u16,
+        handle: Handle,
     },
     CreateAttributeTableComplete {
         /// Operation status
         status: GattStatus,
-        /// Service uuid type
+        /// Service UUID type
         svc_uuid: BtUuid,
         /// Service id
         svc_inst_id: u8,
         /// The handles
-        handles: &'a [u16],
+        handles: &'a [Handle],
     },
     SetAttributeValueComplete {
         /// The service handle
-        srvc_handle: u16,
+        srvc_handle: Handle,
         /// The attribute  handle
-        attr_handle: u16,
+        attr_handle: Handle,
         /// Operation status
         status: GattStatus,
     },
@@ -447,7 +452,7 @@ where
 
     pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn((u8, GattsEvent)) + Send + 'static,
+        F: Fn((GattInterface, GattsEvent)) + Send + 'static,
     {
         self.internal_initialize(events_cb)
     }
@@ -477,33 +482,33 @@ where
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
     pub unsafe fn initialize_nonstatic<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn((u8, GattsEvent)) + Send + 'd,
+        F: Fn((GattInterface, GattsEvent)) + Send + 'd,
     {
         self.internal_initialize(events_cb)
     }
 
     fn internal_initialize<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn((u8, GattsEvent)) + Send + 'd,
+        F: Fn((GattInterface, GattsEvent)) + Send + 'd,
     {
         CALLBACK.set(events_cb)?;
 
         esp!(unsafe { esp_ble_gatts_register_callback(Some(Self::event_handler)) })
     }
 
-    pub fn register_app(&self, app_id: u16) -> Result<(), EspError> {
+    pub fn register_app(&self, app_id: AppId) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gatts_app_register(app_id) })
     }
 
-    pub fn unregister_app(&self, gatts_if: u8) -> Result<(), EspError> {
+    pub fn unregister_app(&self, gatts_if: GattInterface) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gatts_app_unregister(gatts_if) })
     }
 
     pub fn create_service(
         &self,
-        gatt_if: u8,
+        gatt_if: GattInterface,
         service_id: &GattServiceId,
-        service_handle: u16,
+        service_handle: Handle,
     ) -> Result<(), EspError> {
         let service_id: esp_gatt_srvc_id_t = service_id.clone().into();
 
@@ -512,24 +517,34 @@ where
         })
     }
 
-    pub fn delete_service(&self, service_handle: u16) -> Result<(), EspError> {
+    pub fn delete_service(&self, service_handle: Handle) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gatts_delete_service(service_handle) })
     }
 
-    pub fn start_service(&self, service_handle: u16) -> Result<(), EspError> {
+    pub fn start_service(&self, service_handle: Handle) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gatts_start_service(service_handle) })
     }
 
-    pub fn stop_service(&self, service_handle: u16) -> Result<(), EspError> {
+    pub fn stop_service(&self, service_handle: Handle) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gatts_stop_service(service_handle) })
     }
 
-    pub fn add_characteristic<const S: usize>(
+    pub fn add_characteristic(
         &self,
-        service_handle: u16,
-        characteristic: &GattCharacteristic<S>,
+        service_handle: Handle,
+        characteristic: &GattCharacteristic,
+        data: &[u8],
     ) -> Result<(), EspError> {
-        let value = (&characteristic.value).into();
+        if data.len() > characteristic.max_len {
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?;
+        }
+
+        let value = esp_attr_value_t {
+            attr_max_len: characteristic.max_len as _,
+            attr_len: data.len() as _,
+            attr_value: data.as_ptr() as *const _ as *mut _,
+        };
+
         let auto_rsp = esp_attr_control_t {
             auto_rsp: characteristic.auto_rsp as _,
         };
@@ -548,7 +563,7 @@ where
 
     pub fn add_descriptor(
         &self,
-        service_handle: u16,
+        service_handle: Handle,
         descriptor: &GattDescriptor,
     ) -> Result<(), EspError> {
         esp!(unsafe {
@@ -562,7 +577,7 @@ where
         })
     }
 
-    pub fn get_attr(&self, attr_handle: u16, buf: &mut [u8]) -> Result<usize, EspError> {
+    pub fn get_attr(&self, attr_handle: Handle, buf: &mut [u8]) -> Result<usize, EspError> {
         let mut len: u16 = 0;
         let mut data: *const u8 = core::ptr::null_mut();
 
@@ -586,7 +601,7 @@ where
         }
     }
 
-    pub fn set_attr(&self, attr_handle: u16, data: &[u8]) -> Result<(), EspError> {
+    pub fn set_attr(&self, attr_handle: Handle, data: &[u8]) -> Result<(), EspError> {
         esp!(unsafe {
             esp_ble_gatts_set_attr_value(attr_handle, data.len() as _, data.as_ptr() as *const _)
         })
@@ -594,9 +609,9 @@ where
 
     pub fn indicate(
         &self,
-        gatts_if: u8,
-        conn_id: u16,
-        attr_handle: u16,
+        gatts_if: GattInterface,
+        conn_id: ConnectionId,
+        attr_handle: Handle,
         data: &[u8],
     ) -> Result<(), EspError> {
         esp!(unsafe {
@@ -613,9 +628,9 @@ where
 
     pub fn notify(
         &self,
-        gatts_if: u8,
-        conn_id: u16,
-        attr_handle: u16,
+        gatts_if: GattInterface,
+        conn_id: ConnectionId,
+        attr_handle: Handle,
         data: &[u8],
     ) -> Result<(), EspError> {
         esp!(unsafe {
@@ -656,4 +671,4 @@ where
     }
 }
 
-static CALLBACK: BtCallback<(u8, GattsEvent), ()> = BtCallback::new(());
+static CALLBACK: BtCallback<(GattInterface, GattsEvent), ()> = BtCallback::new(());
