@@ -16,7 +16,7 @@ documentation = "https://docs.esp-rs.org/esp-idf-svc/"
 rust-version = "1.75"
 
 [features]
-default = ["std", "binstart"]
+default = ["std", "binstart", "experimental"]
 
 std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std"]
 alloc = ["esp-idf-hal/alloc", "embedded-svc/alloc", "uncased/alloc"]
