@@ -23,7 +23,6 @@ extern crate alloc;
 pub mod a2dp;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_a2dp_enable))]
 pub mod avrc;
-// TODO: Future
 pub mod ble;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled))]
 pub mod gap;
