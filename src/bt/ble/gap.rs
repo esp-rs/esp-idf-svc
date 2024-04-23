@@ -477,6 +477,9 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_WHITELIST_COMPLETE_EVT => {
                     Self::UpdateWhitelistComplete {
+                        #[cfg(esp_idf_version_major = "4")]
+                        wl_operation: param.update_whitelist_cmpl.wl_opration,
+                        #[cfg(not(esp_idf_version_major = "4"))]
                         wl_operation: param.update_whitelist_cmpl.wl_operation,
                         status: param.update_whitelist_cmpl.status.try_into().unwrap(),
                     }
