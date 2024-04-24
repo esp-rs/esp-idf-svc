@@ -34,7 +34,15 @@ pub mod hfp;
 pub struct BdAddr(esp_bd_addr_t);
 
 impl BdAddr {
-    pub fn raw(&self) -> esp_bd_addr_t {
+    pub const fn raw(&self) -> esp_bd_addr_t {
+        self.0
+    }
+
+    pub const fn from_bytes(bytes: [u8; 6]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn addr(&self) -> [u8; 6] {
         self.0
     }
 }
@@ -191,7 +199,7 @@ where
 unsafe impl<A, R> Sync for BtCallback<A, R> {}
 unsafe impl<A, R> Send for BtCallback<A, R> {}
 
-pub trait BtMode {
+pub trait BtMode: Send {
     fn mode() -> esp_bt_mode_t;
 }
 
@@ -568,3 +576,5 @@ where
         esp!(unsafe { esp_bt_controller_deinit() }).unwrap();
     }
 }
+
+unsafe impl<'d, M> Send for BtDriver<'d, M> where M: BtMode {}

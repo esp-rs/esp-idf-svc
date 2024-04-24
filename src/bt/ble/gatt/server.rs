@@ -1,6 +1,7 @@
 use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use log::info;
 
@@ -9,7 +10,7 @@ use crate::sys::*;
 
 use super::{
     GattCharacteristic, GattConnParams, GattConnReason, GattDescriptor, GattInterface,
-    GattServiceId, GattStatus, Handle,
+    GattResponse, GattServiceId, GattStatus, Handle,
 };
 
 pub type AppId = u16;
@@ -26,7 +27,7 @@ impl<'a> Debug for EventRawData<'a> {
 
 #[derive(Debug)]
 pub enum GattsEvent<'a> {
-    Register {
+    ServiceRegistered {
         /// Operation status
         status: GattStatus,
         /// Application id which input in register API
@@ -73,8 +74,8 @@ pub enum GattsEvent<'a> {
         trans_id: TransferId,
         /// The bluetooth device address which been written
         addr: BdAddr,
-        /// Execute write flag
-        exec_write_flag: u8, // TODO
+        /// Whether execution was canceled
+        canceled: bool,
     },
     Mtu {
         /// Connection id
@@ -92,7 +93,7 @@ pub enum GattsEvent<'a> {
         /// The indication or notification value, value is valid when send notification or indication failed
         value: Option<&'a [u8]>,
     },
-    Unregister {
+    ServiceUnregistered {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
@@ -100,7 +101,7 @@ pub enum GattsEvent<'a> {
         /// Service id, include service uuid and other information
         service_id: GattServiceId,
     },
-    Create {
+    ServiceCreated {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
@@ -108,7 +109,7 @@ pub enum GattsEvent<'a> {
         /// Service id, include service uuid and other information
         service_id: GattServiceId,
     },
-    AddIncludedServiceComplete {
+    IncludedServiceAdded {
         /// Operation status
         status: GattStatus,
         /// Included service attribute handle
@@ -116,7 +117,7 @@ pub enum GattsEvent<'a> {
         /// Service attribute handle
         service_handle: Handle,
     },
-    AddCharacteristicComplete {
+    CharacteristicAdded {
         /// Operation status
         status: GattStatus,
         /// Characteristic attribute handle
@@ -126,7 +127,7 @@ pub enum GattsEvent<'a> {
         /// Characteristic uuid
         char_uuid: BtUuid,
     },
-    AddDescriptorComplete {
+    DescriptorAdded {
         /// Operation status
         status: GattStatus,
         /// Descriptor attribute handle
@@ -136,25 +137,25 @@ pub enum GattsEvent<'a> {
         /// Characteristic descriptor uuid
         descr_uuid: BtUuid,
     },
-    DeleteComplete {
+    ServiceDeleted {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
         service_handle: Handle,
     },
-    StartComplete {
+    ServiceStarted {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
         service_handle: Handle,
     },
-    StopComplete {
+    ServiceStopped {
         /// Operation status
         status: GattStatus,
         /// Service attribute handle
         service_handle: Handle,
     },
-    Connect {
+    PeerConnected {
         /// Connection id
         conn_id: ConnectionId,
         /// Link role : master role = 0  ; slave role = 1
@@ -164,7 +165,7 @@ pub enum GattsEvent<'a> {
         /// Current Connection parameters
         conn_params: GattConnParams,
     },
-    Disconnect {
+    PeerDisconnected {
         /// Connection id
         conn_id: ConnectionId,
         /// Remote bluetooth device address
@@ -201,7 +202,7 @@ pub enum GattsEvent<'a> {
         /// Attribute handle which send response
         handle: Handle,
     },
-    CreateAttributeTableComplete {
+    AttributeTableCreated {
         /// Operation status
         status: GattStatus,
         /// Service UUID type
@@ -211,7 +212,7 @@ pub enum GattsEvent<'a> {
         /// The handles
         handles: &'a [Handle],
     },
-    SetAttributeValueComplete {
+    AttributeValueModified {
         /// The service handle
         srvc_handle: Handle,
         /// The attribute  handle
@@ -219,7 +220,7 @@ pub enum GattsEvent<'a> {
         /// Operation status
         status: GattStatus,
     },
-    SendServiceChangeComplete {
+    ServiceChanged {
         /// Operation status
         status: GattStatus,
     },
@@ -236,7 +237,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
 
         match event {
             esp_gatts_cb_event_t_ESP_GATTS_REG_EVT => unsafe {
-                Self::Register {
+                Self::ServiceRegistered {
                     status: param.reg.status.try_into().unwrap(),
                     app_id: param.reg.app_id,
                 }
@@ -269,7 +270,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                     conn_id: param.exec_write.conn_id,
                     addr: param.exec_write.bda.into(),
                     trans_id: param.exec_write.trans_id,
-                    exec_write_flag: param.exec_write.exec_write_flag,
+                    canceled: param.exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_CANCEL as _,
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_MTU_EVT => unsafe {
@@ -294,28 +295,28 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_UNREG_EVT => unsafe {
-                Self::Unregister {
+                Self::ServiceUnregistered {
                     status: param.create.status.try_into().unwrap(),
                     service_handle: param.create.service_handle,
                     service_id: param.create.service_id.into(),
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_CREATE_EVT => unsafe {
-                Self::Create {
+                Self::ServiceCreated {
                     status: param.create.status.try_into().unwrap(),
                     service_handle: param.create.service_handle,
                     service_id: param.create.service_id.into(),
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_ADD_INCL_SRVC_EVT => unsafe {
-                Self::AddIncludedServiceComplete {
+                Self::IncludedServiceAdded {
                     status: param.add_incl_srvc.status.try_into().unwrap(),
                     attr_handle: param.add_incl_srvc.attr_handle,
                     service_handle: param.add_incl_srvc.service_handle,
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_EVT => unsafe {
-                Self::AddCharacteristicComplete {
+                Self::CharacteristicAdded {
                     status: param.add_char.status.try_into().unwrap(),
                     attr_handle: param.add_char.attr_handle,
                     service_handle: param.add_char.service_handle,
@@ -323,7 +324,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_ADD_CHAR_DESCR_EVT => unsafe {
-                Self::AddDescriptorComplete {
+                Self::DescriptorAdded {
                     status: param.add_char_descr.status.try_into().unwrap(),
                     attr_handle: param.add_char_descr.attr_handle,
                     service_handle: param.add_char_descr.service_handle,
@@ -331,25 +332,25 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_DELETE_EVT => unsafe {
-                Self::DeleteComplete {
+                Self::ServiceDeleted {
                     status: param.del.status.try_into().unwrap(),
                     service_handle: param.del.service_handle,
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_START_EVT => unsafe {
-                Self::StartComplete {
+                Self::ServiceStarted {
                     status: param.start.status.try_into().unwrap(),
                     service_handle: param.start.service_handle,
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_STOP_EVT => unsafe {
-                Self::StopComplete {
+                Self::ServiceStopped {
                     status: param.stop.status.try_into().unwrap(),
                     service_handle: param.stop.service_handle,
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_CONNECT_EVT => unsafe {
-                Self::Connect {
+                Self::PeerConnected {
                     conn_id: param.connect.conn_id,
                     link_role: param.connect.link_role,
                     addr: param.connect.remote_bda.into(),
@@ -361,7 +362,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_DISCONNECT_EVT => unsafe {
-                Self::Disconnect {
+                Self::PeerDisconnected {
                     conn_id: param.disconnect.conn_id,
                     addr: param.disconnect.remote_bda.into(),
                     reason: param.disconnect.reason.try_into().unwrap(),
@@ -397,7 +398,7 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_CREAT_ATTR_TAB_EVT => unsafe {
-                Self::CreateAttributeTableComplete {
+                Self::AttributeTableCreated {
                     status: param.add_attr_tab.status.try_into().unwrap(),
                     svc_uuid: param.add_attr_tab.svc_uuid.into(),
                     svc_inst_id: param.add_attr_tab.svc_inst_id,
@@ -408,14 +409,14 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_SET_ATTR_VAL_EVT => unsafe {
-                Self::SetAttributeValueComplete {
+                Self::AttributeValueModified {
                     srvc_handle: param.set_attr_val.srvc_handle,
                     attr_handle: param.set_attr_val.attr_handle,
                     status: param.set_attr_val.status.try_into().unwrap(),
                 }
             },
             esp_gatts_cb_event_t_ESP_GATTS_SEND_SERVICE_CHANGE_EVT => unsafe {
-                Self::SendServiceChangeComplete {
+                Self::ServiceChanged {
                     status: param.service_change.status.try_into().unwrap(),
                 }
             },
@@ -433,6 +434,7 @@ where
     M: BleEnabled,
 {
     _driver: T,
+    initialized: AtomicBool,
     _p: PhantomData<&'d ()>,
     _m: PhantomData<M>,
 }
@@ -445,6 +447,7 @@ where
     pub fn new(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
+            initialized: AtomicBool::new(false),
             _p: PhantomData,
             _m: PhantomData,
         })
@@ -493,7 +496,11 @@ where
     {
         CALLBACK.set(events_cb)?;
 
-        esp!(unsafe { esp_ble_gatts_register_callback(Some(Self::event_handler)) })
+        esp!(unsafe { esp_ble_gatts_register_callback(Some(Self::event_handler)) })?;
+
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
     }
 
     pub fn register_app(&self, app_id: AppId) -> Result<(), EspError> {
@@ -508,12 +515,12 @@ where
         &self,
         gatt_if: GattInterface,
         service_id: &GattServiceId,
-        service_handle: Handle,
+        num_handles: u16,
     ) -> Result<(), EspError> {
         let service_id: esp_gatt_srvc_id_t = service_id.clone().into();
 
         esp!(unsafe {
-            esp_ble_gatts_create_service(gatt_if, &service_id as *const _ as *mut _, service_handle)
+            esp_ble_gatts_create_service(gatt_if, &service_id as *const _ as *mut _, num_handles)
         })
     }
 
@@ -553,8 +560,8 @@ where
             esp_ble_gatts_add_char(
                 service_handle,
                 &characteristic.uuid.raw() as *const _ as *mut _,
-                characteristic.permissions,
-                characteristic.properties,
+                characteristic.permissions.as_repr(),
+                characteristic.properties.as_repr(),
                 &value as *const esp_attr_value_t as *mut _,
                 &auto_rsp as *const esp_attr_control_t as *mut _,
             )
@@ -570,7 +577,7 @@ where
             esp_ble_gatts_add_char_descr(
                 service_handle,
                 &descriptor.uuid.raw() as *const _ as *mut _,
-                descriptor.permissions,
+                descriptor.permissions.as_repr(),
                 core::ptr::null_mut(),
                 core::ptr::null_mut(),
             )
@@ -604,6 +611,27 @@ where
     pub fn set_attr(&self, attr_handle: Handle, data: &[u8]) -> Result<(), EspError> {
         esp!(unsafe {
             esp_ble_gatts_set_attr_value(attr_handle, data.len() as _, data.as_ptr() as *const _)
+        })
+    }
+
+    pub fn send_response(
+        &self,
+        gatts_if: GattInterface,
+        conn_id: ConnectionId,
+        trans_id: TransferId,
+        status: GattStatus,
+        response: Option<&GattResponse>,
+    ) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_ble_gatts_send_response(
+                gatts_if,
+                conn_id,
+                trans_id,
+                status as _,
+                response
+                    .map(|response| &response.0 as *const _)
+                    .unwrap_or(core::ptr::null()) as *mut _,
+            )
         })
     }
 
@@ -665,10 +693,19 @@ where
     M: BleEnabled,
 {
     fn drop(&mut self) {
-        esp!(unsafe { esp_ble_gatts_register_callback(None) }).unwrap();
+        if self.initialized.load(Ordering::SeqCst) {
+            esp!(unsafe { esp_ble_gatts_register_callback(None) }).unwrap();
 
-        CALLBACK.clear().unwrap();
+            CALLBACK.clear().unwrap();
+        }
     }
+}
+
+unsafe impl<'d, M, T> Send for EspGatts<'d, M, T>
+where
+    T: Borrow<BtDriver<'d, M>> + Send,
+    M: BleEnabled,
+{
 }
 
 static CALLBACK: BtCallback<(GattInterface, GattsEvent), ()> = BtCallback::new(());
