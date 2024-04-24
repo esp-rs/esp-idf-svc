@@ -1,6 +1,7 @@
 use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::{ffi::CStr, ops::BitOr};
 
 use crate::sys::*;
@@ -238,15 +239,15 @@ impl<'a> Debug for EventRawData<'a> {
 
 #[derive(Debug)]
 pub enum BleGapEvent<'a> {
-    AdvertisingDatasetComplete(BtStatus),
-    ScanResponseDatasetComplete(BtStatus),
-    ScanParameterDatasetComplete(BtStatus),
+    AdvertisingConfigured(BtStatus),
+    ScanResponseConfigured(BtStatus),
+    ScanParameterConfigured(BtStatus),
     // TODO
     ScanResult(esp_ble_gap_cb_param_t_ble_scan_result_evt_param),
-    RawAdvertisingDatasetComplete(BtStatus),
-    RawScanResponseDatasetComplete(BtStatus),
-    AdvertisingStartComplete(BtStatus),
-    ScanStartComplete(BtStatus),
+    RawAdvertisingConfigured(BtStatus),
+    RawScanResponseConfigured(BtStatus),
+    AdvertisingStarted(BtStatus),
+    ScanStarted(BtStatus),
     AuthenticationComplete {
         // TODO: More fields here
         bd_addr: BdAddr,
@@ -270,72 +271,72 @@ pub enum BleGapEvent<'a> {
     LocalER,
     // TODO: Parameters
     NumericComparisonRequest,
-    AdvertisingStopComplete(BtStatus),
-    ScanStopComplete(BtStatus),
-    SetStaticRandomAddressComplete(BtStatus),
-    UpdateConnectionParamsComplete {
+    AdvertisingStopped(BtStatus),
+    ScanStopped(BtStatus),
+    StaticRandomAddressConfigured(BtStatus),
+    ConnectionParamsConfigured {
         addr: BdAddr,
         status: BtStatus,
-        min_int: u16,
-        max_int: u16,
-        latency: u16,
+        min_int_ms: u32,
+        max_int_ms: u32,
+        latency_ms: u32,
         conn_int: u16,
-        timeout: u16,
+        timeout_ms: u32,
     },
-    SetPacketLengthComplete {
+    PacketLengthConfigured {
         status: BtStatus,
         rx_len: u16,
         tx_len: u16,
     },
-    SetLocalPrivacy(BtStatus),
-    RemoveDeviceBondComplete {
+    LocalPrivacyConfigured(BtStatus),
+    DeviceBondRemoved {
         bd_addr: BdAddr,
         status: BtStatus,
     },
-    ClearDeviceBondComplete(BtStatus),
+    DeviceBondCleared(BtStatus),
     // TODO
-    GetDeviceBondComplete(esp_ble_gap_cb_param_t_ble_get_bond_dev_cmpl_evt_param),
-    ReadRssiComplete {
+    DeviceBond(esp_ble_gap_cb_param_t_ble_get_bond_dev_cmpl_evt_param),
+    ReadRssiConfigured {
         bd_addr: BdAddr,
         rssdi: i8,
         status: BtStatus,
     },
-    UpdateWhitelistComplete {
+    WhitelistUpdated {
         status: BtStatus,
         wl_operation: u32,
     },
     // TODO
-    UpdateDuplicateListComplete(
+    DuplicateListUpdated(
         esp_ble_gap_cb_param_t_ble_update_duplicate_exceptional_list_cmpl_evt_param,
     ),
-    SetChannelsComplete(BtStatus),
+    ChannelsConfigured(BtStatus),
     // BLE 5.0
     // TODO
-    ReadFeaturesComplete(esp_ble_gap_cb_param_t_ble_read_phy_cmpl_evt_param),
-    SetPreferredDefaultPhyComplete(BtStatus),
-    SetPreferredPhyComplete(BtStatus),
-    ExtendedAdvertisingSetRandomAddressComplete(BtStatus),
-    ExtendedAdvertisingSetParametersComplete(BtStatus),
-    ExtendedAdvertisingDataSetComplete(BtStatus),
-    ExtendedAdvertisingScanResponseComplete(BtStatus),
-    ExtendedAdvertisingStartComplete(BtStatus),
-    ExtendedAdvertisingStopComplete(BtStatus),
-    ExtendedAdvertisingSetRemoveComplete(BtStatus),
-    ExtendedAdvertisingSetClearComplete(BtStatus),
-    PeriodicAdvertisingSetParametersComplete(BtStatus),
+    ReadFeaturesConfigured(esp_ble_gap_cb_param_t_ble_read_phy_cmpl_evt_param),
+    PreferredDefaultPhyConfigured(BtStatus),
+    PreferredPhyConfigured(BtStatus),
+    ExtendedAdvertisingRandomAddressConfigured(BtStatus),
+    ExtendedAdvertisingParametersConfigured(BtStatus),
+    ExtendedAdvertisingConfigured(BtStatus),
+    ExtendedAdvertisingScanResponseConfigured(BtStatus),
+    ExtendedAdvertisingStarted(BtStatus),
+    ExtendedAdvertisingStopped(BtStatus),
+    ExtendedAdvertisingRemoved(BtStatus),
+    ExtendedAdvertisingCleared(BtStatus),
+    PeriodicAdvertisingParametersConfigured(BtStatus),
     PeriodicAdvertisingDataSetComplete(BtStatus),
-    PeriodicAdvertisingStartComplete(BtStatus),
-    PeriodicAdvertisingStopComplete(BtStatus),
-    PeriodicAdvertisingCreateSyncComplete(BtStatus),
-    PeriodicAdvertisingCancelSyncComplete(BtStatus),
-    PeriodicAdvertisingTerminateSyncComplete(BtStatus),
-    PeriodicAdvertisingAddDeviceListComplete(BtStatus),
-    PeriodicAdvertisingRemoveDeviceListComplete(BtStatus),
-    PeriodicAdvertisingClearDeviceListComplete(BtStatus),
-    ExtendedAdvertisingScanParametersComplete(BtStatus),
-    ExtendedAdvertisingScanStartComplete(BtStatus),
-    ExtendedAdvertisingScanStopComplete(BtStatus),
-    ExtendedAdvertisingPreferExtendedConnectionParamsComplete(BtStatus),
+    PeriodicAdvertisingStarted(BtStatus),
+    PeriodicAdvertisingStopped(BtStatus),
+    PeriodicAdvertisingSyncCreated(BtStatus),
+    PeriodicAdvertisingSyncCanceled(BtStatus),
+    PeriodicAdvertisingSyncTerminated(BtStatus),
+    PeriodicAdvertisingDeviceListAdded(BtStatus),
+    PeriodicAdvertisingDeviceListRemoved(BtStatus),
+    PeriodicAdvertisingDeviceListCleared(BtStatus),
+    ExtendedAdvertisingScanParametersConfigured(BtStatus),
+    ExtendedAdvertisingScanStarted(BtStatus),
+    ExtendedAdvertisingScanStopped(BtStatus),
+    ExtendedAdvertisingExtendedConnectionParamsConfigured(BtStatus),
     /*
     #if (BLE_50_FEATURE_SUPPORT == TRUE)
         PHY_UPDATE_COMPLETE_EVT,
@@ -364,36 +365,34 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
         unsafe {
             match event {
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT => {
-                    Self::AdvertisingDatasetComplete(param.adv_data_cmpl.status.try_into().unwrap())
+                    Self::AdvertisingConfigured(param.adv_data_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT => {
-                    Self::ScanResponseDatasetComplete(
+                    Self::ScanResponseConfigured(
                         param.scan_rsp_data_cmpl.status.try_into().unwrap(),
                     )
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT => {
-                    Self::ScanParameterDatasetComplete(
-                        param.scan_param_cmpl.status.try_into().unwrap(),
-                    )
+                    Self::ScanParameterConfigured(param.scan_param_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => {
                     Self::ScanResult(param.scan_rst)
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT => {
-                    Self::RawAdvertisingDatasetComplete(
+                    Self::RawAdvertisingConfigured(
                         param.adv_data_raw_cmpl.status.try_into().unwrap(),
                     )
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RSP_DATA_RAW_SET_COMPLETE_EVT => {
-                    Self::RawScanResponseDatasetComplete(
+                    Self::RawScanResponseConfigured(
                         param.scan_rsp_data_raw_cmpl.status.try_into().unwrap(),
                     )
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_START_COMPLETE_EVT => {
-                    Self::AdvertisingStartComplete(param.adv_start_cmpl.status.try_into().unwrap())
+                    Self::AdvertisingStarted(param.adv_start_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_START_COMPLETE_EVT => {
-                    Self::ScanStartComplete(param.scan_start_cmpl.status.try_into().unwrap())
+                    Self::ScanStarted(param.scan_start_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_AUTH_CMPL_EVT => Self::AuthenticationComplete {
                     bd_addr: param.ble_security.auth_cmpl.bd_addr.into(),
@@ -418,25 +417,25 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_LOCAL_ER_EVT => Self::LocalER,
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_NC_REQ_EVT => Self::NumericComparisonRequest,
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT => {
-                    Self::AdvertisingStopComplete(param.adv_stop_cmpl.status.try_into().unwrap())
+                    Self::AdvertisingStopped(param.adv_stop_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT => {
-                    Self::ScanStopComplete(param.scan_stop_cmpl.status.try_into().unwrap())
+                    Self::ScanStopped(param.scan_stop_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_STATIC_RAND_ADDR_EVT => {
-                    Self::SetStaticRandomAddressComplete(
+                    Self::StaticRandomAddressConfigured(
                         param.set_rand_addr_cmpl.status.try_into().unwrap(),
                     )
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT => {
-                    Self::UpdateConnectionParamsComplete {
+                    Self::ConnectionParamsConfigured {
                         addr: param.update_conn_params.bda.into(),
                         status: param.update_conn_params.status.try_into().unwrap(),
-                        min_int: param.update_conn_params.min_int,
-                        max_int: param.update_conn_params.max_int,
-                        latency: param.update_conn_params.latency,
+                        min_int_ms: param.update_conn_params.min_int as u32 * 125 / 100,
+                        max_int_ms: param.update_conn_params.max_int as u32 * 125 / 100,
+                        latency_ms: param.update_conn_params.latency as u32 * 125 / 100,
                         conn_int: param.update_conn_params.conn_int,
-                        timeout: param.update_conn_params.timeout,
+                        timeout_ms: param.update_conn_params.timeout as u32 * 10,
                     }
                 }
                 #[cfg(esp_idf_version_major = "4")]
@@ -449,38 +448,38 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 }
                 #[cfg(not(esp_idf_version_major = "4"))]
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT => {
-                    Self::SetPacketLengthComplete {
+                    Self::PacketLengthConfigured {
                         status: param.pkt_data_length_cmpl.status.try_into().unwrap(),
                         rx_len: param.pkt_data_length_cmpl.params.rx_len,
                         tx_len: param.pkt_data_length_cmpl.params.tx_len,
                     }
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_LOCAL_PRIVACY_COMPLETE_EVT => {
-                    Self::SetLocalPrivacy(param.local_privacy_cmpl.status.try_into().unwrap())
+                    Self::LocalPrivacyConfigured(
+                        param.local_privacy_cmpl.status.try_into().unwrap(),
+                    )
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_REMOVE_BOND_DEV_COMPLETE_EVT => {
-                    Self::RemoveDeviceBondComplete {
+                    Self::DeviceBondRemoved {
                         bd_addr: param.remove_bond_dev_cmpl.bd_addr.into(),
                         status: param.remove_bond_dev_cmpl.status.try_into().unwrap(),
                     }
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_CLEAR_BOND_DEV_COMPLETE_EVT => {
-                    Self::ClearDeviceBondComplete(
-                        param.clear_bond_dev_cmpl.status.try_into().unwrap(),
-                    )
+                    Self::DeviceBondCleared(param.clear_bond_dev_cmpl.status.try_into().unwrap())
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_GET_BOND_DEV_COMPLETE_EVT => {
-                    Self::GetDeviceBondComplete(param.get_bond_dev_cmpl)
+                    Self::DeviceBond(param.get_bond_dev_cmpl)
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT => {
-                    Self::ReadRssiComplete {
+                    Self::ReadRssiConfigured {
                         bd_addr: param.read_rssi_cmpl.remote_addr.into(),
                         rssdi: param.read_rssi_cmpl.rssi,
                         status: param.read_rssi_cmpl.status.try_into().unwrap(),
                     }
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_WHITELIST_COMPLETE_EVT => {
-                    Self::UpdateWhitelistComplete {
+                    Self::WhitelistUpdated {
                         #[cfg(esp_idf_version_major = "4")]
                         wl_operation: param.update_whitelist_cmpl.wl_opration,
                         #[cfg(not(esp_idf_version_major = "4"))]
@@ -489,10 +488,10 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                     }
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT => {
-                    Self::UpdateDuplicateListComplete(param.update_duplicate_exceptional_list_cmpl)
+                    Self::DuplicateListUpdated(param.update_duplicate_exceptional_list_cmpl)
                 }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_CHANNELS_EVT => {
-                    Self::SetChannelsComplete(param.ble_set_channels.stat.try_into().unwrap())
+                    Self::ChannelsConfigured(param.ble_set_channels.stat.try_into().unwrap())
                 }
                 _ => Self::Other {
                     raw_event: event,
@@ -509,6 +508,7 @@ where
     M: BleEnabled,
 {
     _driver: T,
+    initialized: AtomicBool,
     _p: PhantomData<&'d ()>,
     _m: PhantomData<M>,
 }
@@ -518,9 +518,10 @@ where
     T: Borrow<BtDriver<'d, M>>,
     M: BleEnabled,
 {
-    pub fn new<F>(driver: T) -> Result<Self, EspError> {
+    pub fn new(driver: T) -> Result<Self, EspError> {
         Ok(Self {
             _driver: driver,
+            initialized: AtomicBool::new(false),
             _p: PhantomData,
             _m: PhantomData,
         })
@@ -569,7 +570,11 @@ where
     {
         CALLBACK.set(events_cb)?;
 
-        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })
+        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })?;
+
+        self.initialized.store(true, Ordering::SeqCst);
+
+        Ok(())
     }
 
     pub fn set_device_name(&self, device_name: &str) -> Result<(), EspError> {
@@ -674,6 +679,25 @@ where
         esp!(unsafe { esp_ble_gap_stop_advertising() })
     }
 
+    pub fn set_conn_params_conf(
+        &self,
+        addr: BdAddr,
+        min_int_ms: u16,
+        max_int_ms: u16,
+        latency_ms: u16,
+        timeout_ms: u16,
+    ) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_ble_gap_update_conn_params(&esp_ble_conn_update_params_t {
+                min_int: (min_int_ms as u32 * 100 / 125) as _,
+                max_int: (max_int_ms as u32 * 100 / 125) as _,
+                latency: latency_ms / 10,
+                timeout: timeout_ms / 10,
+                bda: addr.0,
+            } as *const _ as *mut _)
+        })
+    }
+
     unsafe extern "C" fn event_handler(
         event: esp_gap_ble_cb_event_t,
         param: *mut esp_ble_gap_cb_param_t,
@@ -693,10 +717,19 @@ where
     M: BleEnabled,
 {
     fn drop(&mut self) {
-        esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
+        if self.initialized.load(Ordering::SeqCst) {
+            esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
 
-        CALLBACK.clear().unwrap();
+            CALLBACK.clear().unwrap();
+        }
     }
+}
+
+unsafe impl<'d, M, T> Send for EspBleGap<'d, M, T>
+where
+    T: Borrow<BtDriver<'d, M>> + Send,
+    M: BleEnabled,
+{
 }
 
 static CALLBACK: BtCallback<BleGapEvent, ()> = BtCallback::new(());

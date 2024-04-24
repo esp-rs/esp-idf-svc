@@ -1,3 +1,4 @@
+use enumset::{EnumSet, EnumSetType};
 use num_enum::TryFromPrimitive;
 
 use crate::bt::BtUuid;
@@ -223,20 +224,51 @@ pub enum AutoResponse {
     ByGatt = ESP_GATT_AUTO_RSP as _,
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumSetType, TryFromPrimitive)]
+#[enumset(repr = "u16")]
+#[repr(u16)]
+pub enum Permission {
+    Read = 0,              // ESP_GATT_PERM_READ
+    ReadEncrypted = 1,     // ESP_GATT_PERM_READ_ENCRYPTED
+    ReadEncryptedMitm = 2, // ESP_GATT_PERM_READ_ENC_MITM
+    Unknown = 3,
+    Write = 4,               // ESP_GATT_PERM_WRITE
+    WriteEncrypted = 5,      // ESP_GATT_PERM_WRITE_ENCRYPTED
+    WriteEncryptedMitm = 6,  // ESP_GATT_PERM_WRITE_ENC_MITM
+    WriteSigned = 7,         // ESP_GATT_PERM_WRITE_SIGNED
+    WriteSiognedMitm = 8,    // ESP_GATT_PERM_WRITE_SIGNED_MITM
+    ReadAuthorization = 9,   // ESP_GATT_PERM_READ_AUTHORIZATION
+    WriteAuthorization = 10, // ESP_GATT_PERM_WRITE_AUTHORIZATION
+}
+
+#[derive(Debug, EnumSetType, TryFromPrimitive)]
+#[enumset(repr = "u8")]
+#[repr(u8)]
+pub enum Property {
+    Broadcast = 0,       // ESP_GATT_CHAR_PROP_BIT_BROADCAST
+    Read = 1,            // ESP_GATT_CHAR_PROP_BIT_READ
+    WriteNoResponse = 2, // ESP_GATT_CHAR_PROP_BIT_WRITE_NR
+    Write = 3,           // ESP_GATT_CHAR_PROP_BIT_WRITE
+    Notify = 4,          // ESP_GATT_CHAR_PROP_BIT_NOTIFY
+    Indicate = 5,        // ESP_GATT_CHAR_PROP_BIT_INDICATE
+    Auth = 6,            // ESP_GATT_CHAR_PROP_BIT_AUTH
+    ExtendedProps = 7,   // ESP_GATT_CHAR_PROP_BIT_EXT_PROP
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct GattCharacteristic {
-    pub(crate) uuid: BtUuid,
-    pub(crate) permissions: esp_gatt_perm_t,
-    pub(crate) properties: esp_gatt_char_prop_t,
-    pub(crate) max_len: usize,
-    pub(crate) auto_rsp: AutoResponse,
+    pub uuid: BtUuid,
+    pub permissions: EnumSet<Permission>,
+    pub properties: EnumSet<Property>,
+    pub max_len: usize,
+    pub auto_rsp: AutoResponse,
 }
 
 impl GattCharacteristic {
-    pub fn new(
+    pub const fn new(
         uuid: BtUuid,
-        permissions: esp_gatt_perm_t,
-        properties: esp_gatt_char_prop_t,
+        permissions: EnumSet<Permission>,
+        properties: EnumSet<Property>,
         max_len: usize,
         auto_rsp: AutoResponse,
     ) -> Self {
@@ -250,14 +282,58 @@ impl GattCharacteristic {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct GattDescriptor {
-    pub(crate) uuid: BtUuid,
-    pub(crate) permissions: esp_gatt_perm_t,
+    pub uuid: BtUuid,
+    pub permissions: EnumSet<Permission>,
 }
 
 impl GattDescriptor {
-    pub fn new(uuid: BtUuid, permissions: esp_gatt_perm_t) -> Self {
+    pub const fn new(uuid: BtUuid, permissions: EnumSet<Permission>) -> Self {
         Self { uuid, permissions }
+    }
+}
+
+#[repr(transparent)]
+pub struct GattResponse(esp_gatt_rsp_t);
+
+impl GattResponse {
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self(esp_gatt_rsp_t {
+            attr_value: esp_gatt_value_t {
+                len: 0,
+                value: [0; 600],
+                handle: 0,
+                offset: 0,
+                auth_req: 0,
+            },
+        })
+    }
+
+    pub fn attr_handle(&mut self, handle: Handle) -> &mut Self {
+        self.0.attr_value.handle = handle;
+        self
+    }
+
+    pub fn auth_req(&mut self, auth_req: u8) -> &mut Self {
+        self.0.attr_value.auth_req = auth_req;
+        self
+    }
+
+    pub fn offset(&mut self, offset: u16) -> &mut Self {
+        self.0.attr_value.offset = offset;
+        self
+    }
+
+    pub fn value(&mut self, value: &[u8]) -> Result<&mut Self, EspError> {
+        if value.len() > 600 {
+            return Err(EspError::from_infallible::<{ ESP_ERR_INVALID_ARG }>());
+        }
+
+        self.0.attr_value.len = value.len() as u16;
+        unsafe { self.0.attr_value.value.copy_from_slice(value) };
+
+        Ok(self)
     }
 }
