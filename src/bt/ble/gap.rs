@@ -440,7 +440,7 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 }
                 #[cfg(esp_idf_version_major = "4")]
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT => {
-                    Self::SetPacketLengthComplete {
+                    Self::PacketLengthConfigured {
                         status: param.pkt_data_lenth_cmpl.status.try_into().unwrap(),
                         rx_len: param.pkt_data_lenth_cmpl.params.rx_len,
                         tx_len: param.pkt_data_lenth_cmpl.params.tx_len,
