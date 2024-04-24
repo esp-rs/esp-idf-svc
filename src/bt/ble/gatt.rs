@@ -337,3 +337,9 @@ impl GattResponse {
         Ok(self)
     }
 }
+
+impl Default for GattResponse {
+    fn default() -> Self {
+        Self::new()
+    }
+}
