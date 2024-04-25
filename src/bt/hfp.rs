@@ -564,5 +564,21 @@ pub mod client {
         }
     }
 
+    unsafe impl<'d, M, T> Send for EspHfpc<'d, M, T>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>> + Send,
+    {
+    }
+
+    // Safe because the ESP IDF Bluedroid APIs all do message passing
+    // to a dedicated Bluedroid task
+    unsafe impl<'d, M, T> Sync for EspHfpc<'d, M, T>
+    where
+        M: BtClassicEnabled,
+        T: Borrow<BtDriver<'d, M>> + Send,
+    {
+    }
+
     static CALLBACK: BtCallback<HfpcEvent, usize> = BtCallback::new(0);
 }

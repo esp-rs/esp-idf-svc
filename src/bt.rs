@@ -578,3 +578,4 @@ where
 }
 
 unsafe impl<'d, M> Send for BtDriver<'d, M> where M: BtMode {}
+unsafe impl<'d, M> Sync for BtDriver<'d, M> where M: BtMode {}

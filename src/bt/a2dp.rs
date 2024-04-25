@@ -16,7 +16,7 @@ use crate::bt::{BtClassicEnabled, BtDriver};
 
 use super::{BdAddr, BtCallback};
 
-pub trait A2dpMode {
+pub trait A2dpMode: Send {
     fn sink() -> bool;
     fn source() -> bool;
 }
@@ -551,6 +551,24 @@ where
             CALLBACK.clear().unwrap();
         }
     }
+}
+
+unsafe impl<'d, M, T, S> Send for EspA2dp<'d, M, T, S>
+where
+    M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>> + Send,
+    S: A2dpMode,
+{
+}
+
+// Safe because the ESP IDF Bluedroid APIs all do message passing
+// to a dedicated Bluedroid task
+unsafe impl<'d, M, T, S> Sync for EspA2dp<'d, M, T, S>
+where
+    M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>> + Send,
+    S: A2dpMode,
+{
 }
 
 static CALLBACK: BtCallback<A2dpEvent, usize> = BtCallback::new(0);
