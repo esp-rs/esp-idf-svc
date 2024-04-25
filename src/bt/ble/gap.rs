@@ -658,8 +658,6 @@ where
     }
 
     pub fn start_advertising(&self) -> Result<(), EspError> {
-        info!("start_advertise enter");
-
         let mut adv_param: esp_ble_adv_params_t = esp_ble_adv_params_t {
             // TODO
             adv_int_min: 0x20,
@@ -726,6 +724,15 @@ where
 }
 
 unsafe impl<'d, M, T> Send for EspBleGap<'d, M, T>
+where
+    T: Borrow<BtDriver<'d, M>> + Send,
+    M: BleEnabled,
+{
+}
+
+// Safe because the ESP IDF Bluedroid APIs all do message passing
+// to a dedicated Bluedroid task
+unsafe impl<'d, M, T> Sync for EspBleGap<'d, M, T>
 where
     T: Borrow<BtDriver<'d, M>> + Send,
     M: BleEnabled,

@@ -836,4 +836,20 @@ where
     }
 }
 
+unsafe impl<'d, M, T> Send for EspGap<'d, M, T>
+where
+    M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>> + Send,
+{
+}
+
+// Safe because the ESP IDF Bluedroid APIs all do message passing
+// to a dedicated Bluedroid task
+unsafe impl<'d, M, T> Sync for EspGap<'d, M, T>
+where
+    M: BtClassicEnabled,
+    T: Borrow<BtDriver<'d, M>> + Send,
+{
+}
+
 static CALLBACK: BtCallback<GapEvent, ()> = BtCallback::new(());

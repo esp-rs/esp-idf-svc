@@ -708,4 +708,13 @@ where
 {
 }
 
+// Safe because the ESP IDF Bluedroid APIs all do message passing
+// to a dedicated Bluedroid task
+unsafe impl<'d, M, T> Sync for EspGatts<'d, M, T>
+where
+    T: Borrow<BtDriver<'d, M>> + Send,
+    M: BleEnabled,
+{
+}
+
 static CALLBACK: BtCallback<(GattInterface, GattsEvent), ()> = BtCallback::new(());
