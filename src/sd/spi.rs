@@ -25,7 +25,10 @@ impl Default for SpiDeviceBuilder {
 }
 
 impl SpiDeviceBuilder {
-    pub fn set_spi<T: spi::Spi>(&mut self, _: &mut T) -> &mut Self {
+    pub fn set_spi<T: spi::SpiAnyPins + spi::Spi>(
+        &mut self,
+        _spi: impl peripheral::Peripheral<P = T>,
+    ) -> &mut Self {
         self.0.host_id = T::device();
         self
     }
