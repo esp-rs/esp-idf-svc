@@ -1,15 +1,15 @@
 use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, Ordering};
 use core::{ffi::CStr, ops::BitOr};
 
+use crate::bt::BtSingleton;
 use crate::sys::*;
 
 use log::info;
 
 use crate::{
-    bt::{BdAddr, BleEnabled, BtCallback, BtDriver, BtStatus, BtUuid},
+    bt::{BdAddr, BleEnabled, BtDriver, BtStatus, BtUuid},
     private::cstr::to_cstring_arg,
 };
 
@@ -508,7 +508,6 @@ where
     M: BleEnabled,
 {
     _driver: T,
-    initialized: AtomicBool,
     _p: PhantomData<&'d ()>,
     _m: PhantomData<M>,
 }
@@ -519,24 +518,29 @@ where
     M: BleEnabled,
 {
     pub fn new(driver: T) -> Result<Self, EspError> {
+        SINGLETON.take()?;
+
+        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })?;
+
         Ok(Self {
             _driver: driver,
-            initialized: AtomicBool::new(false),
             _p: PhantomData,
             _m: PhantomData,
         })
     }
 
-    pub fn initialize<F>(&self, events_cb: F) -> Result<(), EspError>
+    pub fn subscribe<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(BleGapEvent) + Send + 'static,
+        F: FnMut(BleGapEvent) + Send + 'static,
     {
-        self.internal_initialize(events_cb)
+        SINGLETON.subscribe(events_cb);
+
+        Ok(())
     }
 
     /// # Safety
     ///
-    /// This method - in contrast to method `initialize` - allows the user to pass
+    /// This method - in contrast to method `subscribe` - allows the user to pass
     /// a non-static callback/closure. This enables users to borrow
     /// - in the closure - variables that live on the stack - or more generally - in the same
     /// scope where the service is created.
@@ -557,22 +561,17 @@ where
     ///
     /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
-    pub unsafe fn initialize_nonstatic<F>(&self, events_cb: F) -> Result<(), EspError>
+    pub unsafe fn subscribe_nonstatic<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: Fn(BleGapEvent) + Send + 'd,
+        F: FnMut(BleGapEvent) + Send + 'static,
     {
-        self.internal_initialize(events_cb)
+        SINGLETON.subscribe(events_cb);
+
+        Ok(())
     }
 
-    fn internal_initialize<F>(&self, events_cb: F) -> Result<(), EspError>
-    where
-        F: Fn(BleGapEvent) + Send + 'd,
-    {
-        CALLBACK.set(events_cb)?;
-
-        esp!(unsafe { esp_ble_gap_register_callback(Some(Self::event_handler)) })?;
-
-        self.initialized.store(true, Ordering::SeqCst);
+    pub fn unsubscribe(&self) -> Result<(), EspError> {
+        SINGLETON.unsubscribe();
 
         Ok(())
     }
@@ -705,7 +704,7 @@ where
 
         info!("Got event {{ {:#?} }}", event);
 
-        CALLBACK.call(event);
+        SINGLETON.call(event);
     }
 }
 
@@ -715,11 +714,11 @@ where
     M: BleEnabled,
 {
     fn drop(&mut self) {
-        if self.initialized.load(Ordering::SeqCst) {
-            esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
+        self.unsubscribe().unwrap();
 
-            CALLBACK.clear().unwrap();
-        }
+        esp!(unsafe { esp_ble_gap_register_callback(None) }).unwrap();
+
+        SINGLETON.release().unwrap();
     }
 }
 
@@ -739,4 +738,4 @@ where
 {
 }
 
-static CALLBACK: BtCallback<BleGapEvent, ()> = BtCallback::new(());
+static SINGLETON: BtSingleton<BleGapEvent, ()> = BtSingleton::new(());
