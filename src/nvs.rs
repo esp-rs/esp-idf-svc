@@ -59,6 +59,27 @@ impl NvsDefault {
 
         Ok(Self(()))
     }
+
+    fn erase() -> Result<(), EspError> {
+        let mut taken = DEFAULT_TAKEN.lock();
+
+        if *taken {
+            // partition is already taken either by other erase call or NvsDefault instance
+            esp!(ESP_ERR_INVALID_STATE)?;
+        }
+
+        *taken = true;
+
+        // drop lock and reaquire later since nvs_flash_erase can take some time
+        // depending on partition size
+        drop(taken);
+
+        esp!(unsafe { nvs_flash_erase() })?;
+
+        *DEFAULT_TAKEN.lock() = false;
+
+        Ok(())
+    }
 }
 
 impl Drop for NvsDefault {
@@ -111,6 +132,32 @@ impl NvsCustom {
         registrations.insert(c_partition.clone());
 
         Ok(Self(c_partition))
+    }
+
+    fn erase(partition: &str) -> Result<(), EspError> {
+        let c_partition = to_cstring_arg(partition)?;
+
+        let mut registrations = NONDEFAULT_LOCKED.lock();
+
+        if registrations.contains(c_partition.as_ref()) {
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
+        }
+
+        // mark partition as taken
+        registrations.insert(c_partition.clone());
+
+        // drop registrations and reaquire later since nvs_flash_erase_partition can take some time
+        // depending on partition size
+        drop(registrations);
+
+        esp!(unsafe { nvs_flash_erase_partition(c_partition.as_ptr()) })?;
+
+        // remove partition taken marker
+        let mut registrations = NONDEFAULT_LOCKED.lock();
+        registrations.remove(c_partition.as_ref());
+        drop(registrations);
+
+        Ok(())
     }
 }
 
@@ -228,6 +275,10 @@ impl EspNvsPartition<NvsDefault> {
     pub fn take_simple() -> Result<Self, EspError> {
         Ok(Self(Arc::new(NvsDefault::new(true)?)))
     }
+
+    pub fn erase() -> Result<(), EspError> {
+        NvsDefault::erase()
+    }
 }
 
 impl EspNvsPartition<NvsCustom> {
@@ -238,6 +289,10 @@ impl EspNvsPartition<NvsCustom> {
     /// Like [`EspNvsPartition::take`] but don't erase the OTA partition to recover from version / corruption errors.
     pub fn take_simple(partition: &str) -> Result<Self, EspError> {
         Ok(Self(Arc::new(NvsCustom::new(partition, true)?)))
+    }
+
+    pub fn erase(partition: &str) -> Result<(), EspError> {
+        NvsCustom::erase(partition)
     }
 }
 
