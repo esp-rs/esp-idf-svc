@@ -1,13 +1,13 @@
-#[cfg(esp32)]
+#[cfg(all(esp32, sdmmc_host_enabled))]
 use esp_idf_svc::{
     fs::Fat,
     log::EspLogger,
     sd::{host::SdHost, mmc::SlotConfiguration, spi::SpiDevice},
 };
-
+#[cfg(all(esp32, sdmmc_host_enabled))]
 use std::{fs::File, io::Write};
 
-#[cfg(esp32)]
+#[cfg(all(esp32, sdmmc_host_enabled))]
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(esp32))]
+#[cfg(any(not(esp32), not(esp_idf_sdmmc_host_enabled)))]
 fn main() {
     use esp_idf_svc::{self as _};
 
