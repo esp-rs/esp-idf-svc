@@ -3,6 +3,9 @@ use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
 use log::info;
 
 use num_enum::TryFromPrimitive;
@@ -10,7 +13,7 @@ use num_enum::TryFromPrimitive;
 use crate::hal::modem::BluetoothModemPeripheral;
 use crate::hal::peripheral::Peripheral;
 
-use crate::private::mutex;
+use crate::private::mutex::{self, Mutex};
 use crate::sys::*;
 
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
@@ -143,61 +146,78 @@ impl From<esp_bt_uuid_t> for BtUuid {
 
 #[allow(dead_code)]
 #[allow(clippy::type_complexity)]
-pub(crate) struct BtCallback<A, R> {
+pub(crate) struct BtSingleton<A, R> {
     initialized: AtomicBool,
-    callback: UnsafeCell<Option<alloc::boxed::Box<dyn Fn(A) -> R>>>,
+    callback: Mutex<Option<Arc<UnsafeCell<Box<dyn FnMut(A) -> R>>>>>,
     default_result: R,
 }
 
 #[allow(dead_code)]
-impl<A, R> BtCallback<A, R>
+impl<A, R> BtSingleton<A, R>
 where
     R: Clone,
 {
     pub const fn new(default_result: R) -> Self {
         Self {
             initialized: AtomicBool::new(false),
-            callback: UnsafeCell::new(None),
+            callback: Mutex::new(None),
             default_result,
         }
     }
 
-    pub fn set<'d, F>(&self, callback: F) -> Result<(), EspError>
-    where
-        F: Fn(A) -> R + Send + 'd,
-    {
-        self.initialized
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
+    pub fn release(&self) -> Result<(), EspError> {
+        self.unsubscribe();
 
-        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'd> = alloc::boxed::Box::new(callback);
-        let b: alloc::boxed::Box<dyn Fn(A) -> R + 'static> = unsafe { core::mem::transmute(b) };
-        *unsafe { self.callback.get().as_mut() }.unwrap() = Some(b);
-
-        Ok(())
-    }
-
-    pub fn clear(&self) -> Result<(), EspError> {
         self.initialized
             .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
 
-        *unsafe { self.callback.get().as_mut() }.unwrap() = None;
+        Ok(())
+    }
+
+    pub fn take(&self) -> Result<(), EspError> {
+        self.initialized
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
 
         Ok(())
     }
 
+    pub fn subscribe<'d, F>(&self, callback: F)
+    where
+        F: FnMut(A) -> R + Send + 'd,
+    {
+        let callback = unsafe {
+            core::mem::transmute::<
+                Box<dyn FnMut(A) -> R + Send + 'd>,
+                Box<dyn FnMut(A) -> R + Send + 'static>,
+            >(Box::new(callback))
+        };
+
+        *self.callback.lock() = Some(Arc::new(UnsafeCell::new(callback)));
+    }
+
+    pub fn unsubscribe(&self) {
+        *self.callback.lock() = None;
+    }
+
+    /// Safe to use only from within the ESP IDF Bluedroid task
     pub unsafe fn call(&self, arg: A) -> R {
-        if let Some(callback) = unsafe { self.callback.get().as_ref() }.unwrap() {
-            (callback)(arg)
+        if let Some(callback) = self
+            .callback
+            .lock()
+            .as_ref()
+            .map(|callback| callback.clone())
+        {
+            ((callback.get()).as_mut().unwrap())(arg)
         } else {
             self.default_result.clone()
         }
     }
 }
 
-unsafe impl<A, R> Sync for BtCallback<A, R> {}
-unsafe impl<A, R> Send for BtCallback<A, R> {}
+unsafe impl<A, R> Sync for BtSingleton<A, R> {}
+unsafe impl<A, R> Send for BtSingleton<A, R> {}
 
 pub trait BtMode: Send {
     fn mode() -> esp_bt_mode_t;
