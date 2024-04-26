@@ -1559,7 +1559,7 @@ impl<'d> EspWifi<'d> {
             #[cfg(esp_idf_esp_wifi_softap_support)]
             let ok = ok && {
                 let ap_enabled = self.driver().is_ap_enabled()?;
-                (!ap_enabled || self.ap_netif().is_up()?)
+                !ap_enabled || self.ap_netif().is_up()?
             };
             Ok(ok)
         }
