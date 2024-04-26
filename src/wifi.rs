@@ -489,8 +489,8 @@ impl<'d> WifiDriver<'d> {
                 WifiEvent::ApStopped => guard.ap = WifiApStatus::Stopped,
                 WifiEvent::StaStarted => guard.sta = WifiStaStatus::Started,
                 WifiEvent::StaStopped => guard.sta = WifiStaStatus::Stopped,
-                WifiEvent::StaConnected => guard.sta = WifiStaStatus::Connected,
-                WifiEvent::StaDisconnected => guard.sta = WifiStaStatus::Started,
+                WifiEvent::StaConnected(_) => guard.sta = WifiStaStatus::Connected,
+                WifiEvent::StaDisconnected(_) => guard.sta = WifiStaStatus::Started,
                 WifiEvent::ScanDone => guard.scan = WifiScanStatus::Done,
                 WifiEvent::StaWpsSuccess(_)
                 | WifiEvent::StaWpsFailed
@@ -1895,7 +1895,22 @@ impl TryFrom<&WpsCredentialsRef> for WpsCredentials {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaConnectedData {
+    pub ssid: heapless::String<32>,
+    pub bssid: [u8; 6],
+    pub channel: u8,
+    pub authmode: AuthMethod,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaDisconnectedData {
+    pub ssid: heapless::String<32>,
+    pub bssid: [u8; 6],
+    pub reason: wifi_err_reason_t,
+}
+
+#[derive(Clone, Debug)]
 pub enum WifiEvent<'a> {
     Ready,
 
@@ -1903,8 +1918,8 @@ pub enum WifiEvent<'a> {
 
     StaStarted,
     StaStopped,
-    StaConnected,
-    StaDisconnected,
+    StaConnected(StaConnectedData),
+    StaDisconnected(StaDisconnectedData),
     StaAuthmodeChanged,
     StaBssRssiLow,
     StaBeaconTimeout,
@@ -1952,8 +1967,29 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_SCAN_DONE => WifiEvent::ScanDone,
             wifi_event_t_WIFI_EVENT_STA_START => WifiEvent::StaStarted,
             wifi_event_t_WIFI_EVENT_STA_STOP => WifiEvent::StaStopped,
-            wifi_event_t_WIFI_EVENT_STA_CONNECTED => WifiEvent::StaConnected,
-            wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => WifiEvent::StaDisconnected,
+            wifi_event_t_WIFI_EVENT_STA_CONNECTED => {
+                let data: &wifi_event_sta_connected_t = unsafe { data.as_payload() };
+                WifiEvent::StaConnected(StaConnectedData {
+                    ssid: std::str::from_utf8(&data.ssid[..data.ssid_len as usize])
+                        .unwrap()
+                        .try_into()
+                        .expect("TODO: stabl-gjn FIX ME"),
+                    bssid: data.bssid,
+                    channel: data.channel,
+                    authmode: AuthMethod::try_from(data.authmode as u8).expect("TODO: stabl-gjn FIX ME"),
+                })
+            }
+            wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => {
+                let data: &wifi_event_sta_disconnected_t = unsafe { data.as_payload() };
+                WifiEvent::StaDisconnected(StaDisconnectedData {
+                    ssid: std::str::from_utf8(&data.ssid[..data.ssid_len as usize])
+                        .unwrap()
+                        .try_into()
+                        .expect("TODO: stabl-gjn FIX ME"),
+                    bssid: data.bssid,
+                    reason: data.reason.into(),
+                })
+            }
             wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE => WifiEvent::StaAuthmodeChanged,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS => {
                 let payload = unsafe {
