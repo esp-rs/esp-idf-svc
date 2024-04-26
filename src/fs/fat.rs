@@ -1,15 +1,20 @@
+#[cfg(esp_idf_sdmmc_host_enabled)]
 use std::os::raw::c_void;
 
 use alloc::ffi::CString;
 
 use crate::{
-    sd::{host::SdHost, mmc::SlotConfiguration, spi::SpiDevice},
+    sd::{host::SdHost, spi::SpiDevice},
     sys::*,
 };
+
+#[cfg(esp_idf_sdmmc_host_enabled)]
+use crate::sd::mmc::SlotConfiguration;
 
 pub struct FatBuilder {
     host: Option<SdHost>,
     spi_device: Option<SpiDevice>,
+    #[cfg(esp_idf_sdmmc_host_enabled)]
     slot_configuration: Option<SlotConfiguration>,
     mount_config: esp_vfs_fat_mount_config_t,
     base_path: CString,
@@ -25,6 +30,7 @@ impl Default for FatBuilder {
                 allocation_unit_size: 16 * 1024,
             },
             spi_device: None,
+            #[cfg(esp_idf_sdmmc_host_enabled)]
             slot_configuration: None,
             base_path: CString::new("/").unwrap(),
         }
@@ -38,6 +44,7 @@ impl FatBuilder {
     }
 
     pub fn set_spi_device(mut self, spi_device: SpiDevice) -> Self {
+        #[cfg(esp_idf_sdmmc_host_enabled)]
         if self.slot_configuration.is_some() {
             panic!("SPI device cannot be set when using MMC slot configuration");
         }
@@ -46,6 +53,7 @@ impl FatBuilder {
         self
     }
 
+    #[cfg(esp_idf_sdmmc_host_enabled)]
     pub fn set_slot_configuration(mut self, slot_configuration: SlotConfiguration) -> Self {
         if self.spi_device.is_some() {
             panic!("Slot configuration cannot be set when using SPI device");
@@ -102,8 +110,8 @@ impl Fat {
 
         let host = builder.host.as_ref().expect("Host not set");
 
-        let result = if let Some(spi_device) = &builder.spi_device {
-            unsafe {
+        if let Some(spi_device) = &builder.spi_device {
+            let result = unsafe {
                 esp_vfs_fat_sdspi_mount(
                     builder.base_path.as_ptr(),
                     host.get_inner_handle() as *const sdmmc_host_t,
@@ -111,9 +119,18 @@ impl Fat {
                     &builder.mount_config as *const esp_vfs_fat_mount_config_t,
                     &mut card as *mut *mut sdmmc_card_t,
                 )
+            };
+
+            if result == ESP_OK {
+                return Ok(Self { builder, card });
+            } else {
+                return Err(result);
             }
-        } else if let Some(slot_configuration) = &builder.slot_configuration {
-            unsafe {
+        }
+
+        #[cfg(esp_idf_sdmmc_host_enabled)]
+        if let Some(slot_configuration) = &builder.slot_configuration {
+            let result = unsafe {
                 esp_vfs_fat_sdmmc_mount(
                     builder.base_path.as_ptr(),
                     host.get_inner_handle() as *const sdmmc_host_t,
@@ -121,15 +138,15 @@ impl Fat {
                     &builder.mount_config as *const esp_vfs_fat_mount_config_t,
                     &mut card as *mut *mut sdmmc_card_t,
                 )
-            }
-        } else {
-            panic!("Either SPI device or slot configuration must be set");
-        };
+            };
 
-        if result == ESP_OK {
-            Ok(Self { builder, card })
-        } else {
-            Err(result)
+            if result == ESP_OK {
+                return Ok(Self { builder, card });
+            } else {
+                return Err(result);
+            }
         }
+
+        panic!("Either SPI device or slot configuration must be set");
     }
 }
