@@ -1,5 +1,7 @@
 //! Simple HTTP client example.
 
+use core::convert::TryInto;
+
 use embedded_svc::{
     http::{client::Client as HttpClient, Method},
     io::Write,
@@ -35,7 +37,20 @@ fn main() -> anyhow::Result<()> {
 
     connect_wifi(&mut wifi)?;
 
-    // Create HTTP(S) client
+    // Create HTTP client
+    //
+    // Note: To send a request to an HTTPS server, you can do:
+    //
+    // ```
+    // use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
+    //
+    // let config = &HttpConfiguration {
+    //     crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+    //     ..Default::default()
+    // };
+    //
+    // let mut client = HttpClient::wrap(EspHttpConnection::new(&config)?);
+    // ```
     let mut client = HttpClient::wrap(EspHttpConnection::new(&Default::default())?);
 
     // GET
@@ -166,11 +181,12 @@ fn post_chunked_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::R
 
 fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
     let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
-        ssid: SSID.into(),
+        ssid: SSID.try_into().unwrap(),
         bssid: None,
         auth_method: AuthMethod::WPA2Personal,
-        password: PASSWORD.into(),
+        password: PASSWORD.try_into().unwrap(),
         channel: None,
+        ..Default::default()
     });
 
     wifi.set_configuration(&wifi_configuration)?;

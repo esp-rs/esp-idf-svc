@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.1] - 2024-02-21
+* Disable the `esp_idf_svc::io::vfs` module if the ESP IDF VFS component is not enabled either
+* Bugfix / async MQTT: The internal `Unblocker` utility was missing `drop` and therefore did not delete its task properly, resulting in a crash when the async MQTT client is dropped
+* #357 - `AsyncWifi` was not `Send` anymore (regression). `Send` restored.
+* #356 - Change payload of `EspEventPostData` from `&[u32]` to `&[u8]`
+* #357 - Restore `Send` for `AsyncWifi`
+* #369 - (Crash) Restore the drop impl EspMqttClient
+* #370 - (Deadlock) Fix a deadlock when dropping an MQTT client in the presence of a blocking EspMqttConnection
+* Fix clippy duplicate imports warnings with latest 1.78 nightly
+
+## [0.48.0] - 2024-01-26
+* New examples: 
+  * MQTT client (blocking and async)
+  * TLS (async; blocking already exists)
+  * Event loop (blocking and async)
+  * Timers (blocking and async)
+  * SPI Ethernet (async; a blocking example for RMII Ethernet already exists)
+  * TCP client and server (blocking and async)
+  * SNTP service
+  * Websocket client (blocking)
+* Breaking changes in module `eventloop`: 
+  * Async send and receive functionality now implemented directly on the `esp-idf-svc` event loop types, as the `embedded_svc::utils::asyncify` module is now gone
+  * Types `EspTypedEventLoop` and `EspPostbox` are now retired. Use `EspEventLoop` directly, as it has the same functionality
+  * `EspEventFetchData` renamed to `EspEvent`; both `EspEvent` and `EspEventPostData` now lifetimed instead of using raw pointers
+  * Trait `EspTypedEventSource` is renamed to `EspEventSource` and marked as unsafe (i.e., implementors should do `unsafe impl EspTypedEventSource for ...`); check the documentation of the trait for justification
+  * Types `EspTypedEventDeserializer` and `EspTypedEventSerializer` renamed to just `EspEventSerializer` and `EspEventDeserializer`; more importantly, their payload is now modeled using a lifetimed GAT member called `Data<'a>`; this allows deserializers to implement zerocopy deserialization by referencing the event payload which is owned by the event loop; all `esp-idf-svc` deserializers (notably - `WifiEvent` and `IpEvent`) are now implemented with zerocopy, thus reducing the pressure on the system event loop task stack size
+  * The `EspEvent` type is now also a dummy (no op) `EspEventDeserializer`; the `EspEventPostData` type is now also a dummy (no op) `EspEventSerializer`
+  * Because of the above changes, methods `subscribe*` and `post*` are now slightly less convenient to use in that they need the (de)serializer specified using turbofish syntax, i.e. `event_loop.subscribe::<WifiEvent, _>(...)`; this is so because these methods no longer require (and cannot require - due to the lifetimed GAT from above) `where P: EspEvent(De)serializer<P>`, i.e. the event type *itself* to implement the (de)sderializer, even if all event types provided by `esp-idf-svc` do that
+  * The `post*` and `spin` methods now take a timeout of type `TickType_t` as everywhere rather than the complex `Option<Duration>`
+* Breaking changes in module `http::server`: 
+  * Due to the breaking change in `embedded_svc::http::server`, whereas `HandlerError` and `HandlerResult` were removed, these types are no longer used in the `embedded_svc::http::server` module either. Check the Changelog of `embedded_svc` for more details
+* Breaking change in module `timer`: all async timer functionality now implemented directly on the `esp-idf-svc` timer types, as the `embedded_svc::utils::asyncify` module is now gone
+* Breaking changes in module `mqtt::client`: 
+  * All async send/receive functionality now implemented directly on the `esp-idf-svc` MQTT types, as the `embedded_svc::utils::asyncify` module is now gone
+  * Changes induced by breaking changes in `embedded_svc::mqtt::client` API contract:
+    * All event conversion logic now retired, significantly simplifying the type signatures of `EspMqttClient` and `EspMqttConnection`, as well as the number of offered constructors
+    * For MQTT events, user always gets an instance of `EspMqttEvent` which implements the `embedded_svc::mqtt::client::Event` trait - valid for both callback-based event processing as well as for connection-based blocking and asynchronous event processing
+* Breaking change: `AsyncEspTls` renamed to `EspAsyncTls`
+* MSRV 1.75; remove the nightly feature flag from all async trait implementations
+* Update public dependency `heapless` to 0.8
+* Remove dependency on `embassy-time` and replace it with a dependency on `embassy-time-driver`; get rid of the custom embassy time queue as it was anyway re-implementing something like a generic timer queue, which is available in the `embassy-time` crate (with its feature `generic-queue` enabled)
+* #316 - breaking change addressing a typo - `http::server::Configuration::max_resp_handlers` renamed to `http::server::Configuration::max_resp_headers`
+* #319 - Set default TTL in `EspPing` to 64
+* #322 - Fix MQTT PSK code (did not compile)
+* #323 - ETH example with a statically configured IP
+* #324 - New methods in `EspWifi` to swap STA and AP netifs separately from each other
+* #326 - logging from multiple threads in Rust/ESP-IDF no longer results in intermixed logs
+* #331 - Add support for WPS
+
 ## [0.47.3] - 2023-11-12
 * BREAKING CHANGE IN A PATCH RELEASE DUE TO DISCOVERED UB: All constructors and methods in the Classic BT services, as well as in
 services `EspNow`, driver `EthDriver`, `EventLoop`, `Wait`, `EspHttpServer`, `EspMqttClient`, `EspSntp`, `EspTimerService`,

@@ -14,20 +14,18 @@ use alloc::boxed::Box;
 
 use crate::sys::*;
 
-use crate::private::mutex::{Mutex, RawMutex};
+use crate::private::mutex::Mutex;
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
 pub const BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 
 #[allow(clippy::type_complexity)]
-static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send + 'static> =
-    Mutex::wrap(RawMutex::new(), None);
+static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send + 'static> = Mutex::new(None);
 #[allow(clippy::type_complexity)]
-static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send + 'static> =
-    Mutex::wrap(RawMutex::new(), None);
+static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send + 'static> = Mutex::new(None);
 
-static TAKEN: Mutex<bool> = Mutex::wrap(RawMutex::new(), false);
+static TAKEN: Mutex<bool> = Mutex::new(false);
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -147,6 +145,13 @@ impl<'a> EspNow<'a> {
         let mut num = esp_now_peer_num_t::default();
         esp!(unsafe { esp_now_get_peer_num(&mut num as *mut esp_now_peer_num_t) })?;
         Ok((num.total_num as usize, num.encrypt_num as usize))
+    }
+
+    pub fn fetch_peer(&self, from_head: bool) -> Result<PeerInfo, EspError> {
+        let mut peer_info = PeerInfo::default();
+        esp!(unsafe { esp_now_fetch_peer(from_head, &mut peer_info as *mut esp_now_peer_info_t) })?;
+
+        Ok(peer_info)
     }
 
     pub fn set_pmk(&self, pmk: &[u8]) -> Result<(), EspError> {

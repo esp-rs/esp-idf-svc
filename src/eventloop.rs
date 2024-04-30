@@ -1,22 +1,20 @@
 //! Event loop library
 
-use core::convert::{TryFrom, TryInto};
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use core::result::Result;
 use core::time::Duration;
 use core::{ffi, mem, ptr, slice};
 
 extern crate alloc;
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
+
+use embedded_svc::channel;
 
 use ::log::*;
 
-use embedded_svc::event_bus::{self, ErrorType};
-
 use crate::hal::cpu::Core;
-use crate::hal::delay::TickType;
+use crate::hal::delay;
 use crate::hal::interrupt;
 
 use crate::sys::*;
@@ -25,9 +23,7 @@ use crate::handle::RawHandle;
 use crate::private::cstr::RawCstrs;
 use crate::private::mutex;
 use crate::private::waitable::Waitable;
-
-#[allow(unused_imports)]
-pub use asyncify::*;
+use crate::private::zerocopy::{Channel, QuitOnDrop, Receiver};
 
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 pub use async_wait::*;
@@ -36,13 +32,13 @@ pub type EspSystemSubscription<'a> = EspSubscription<'a, System>;
 pub type EspBackgroundSubscription<'a> = EspSubscription<'a, User<Background>>;
 pub type EspExplicitSubscription<'a> = EspSubscription<'a, User<Explicit>>;
 
+pub type EspSystemAsyncSubscription<P> = EspAsyncSubscription<P, System>;
+pub type EspBackgroundAsyncSubscription<P> = EspAsyncSubscription<P, User<Background>>;
+pub type EspExplicitAsyncSubscription<P> = EspAsyncSubscription<P, User<Explicit>>;
+
 pub type EspSystemEventLoop = EspEventLoop<System>;
 pub type EspBackgroundEventLoop = EspEventLoop<User<Background>>;
 pub type EspExplicitEventLoop = EspEventLoop<User<Explicit>>;
-
-pub type EspSystemPostbox = EspPostbox<EspEventLoop<System>>;
-pub type EspBackgroundPostbox = EspPostbox<EspEventLoop<User<Background>>>;
-pub type EspExplicitPostbox = EspPostbox<EspEventLoop<User<Explicit>>>;
 
 #[derive(Debug)]
 pub struct BackgroundLoopConfiguration<'a> {
@@ -103,7 +99,7 @@ impl From<&ExplicitLoopConfiguration> for esp_event_loop_args_t {
     }
 }
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
 #[derive(Clone, Debug)]
 pub struct System;
@@ -136,27 +132,65 @@ impl<T> EspEventLoopType for User<T> {
     }
 }
 
-pub struct EspEventPostData {
-    pub source: *const ffi::c_char,
-    pub event_id: i32,
-    pub payload: *const ffi::c_void,
-    pub payload_len: usize,
+/// # Safety
+///
+/// By implementing this trait, the user guarantees that the binary format serialized/deserialized by
+/// `EspTypedEventSerializer` and `EspTypedEventDeserializer` is indeed THE binary format that stands behind
+/// the source ID returned by the `source` method in this trait
+/// (and that other producers/consumers of the ESP IDF event loop also recognize as the binary format corresponbding
+/// to this source ID).
+///
+/// Providing the wrong source ID for a binary format, or the wrong binary format for a given source ID
+/// would lead to a runtime crash, hence this trait can only be implemented unsafely, as the guarantee lies with the user
+/// and not with the compiler, that cannot enforce this contract.
+pub unsafe trait EspEventSource {
+    fn source() -> Option<&'static ffi::CStr>;
+
+    fn event_id() -> Option<i32> {
+        None
+    }
 }
 
-impl EspEventPostData {
+pub trait EspEventSerializer: EspEventSource {
+    type Data<'a>;
+
+    fn serialize<F, R>(data: &Self::Data<'_>, f: F) -> R
+    where
+        F: FnOnce(&EspEventPostData) -> R;
+}
+
+pub trait EspEventDeserializer: EspEventSource {
+    type Data<'a>;
+
+    fn deserialize<'a>(data: &EspEvent<'a>) -> Self::Data<'a>;
+}
+
+#[derive(Debug, Clone)]
+pub struct EspEventPostData<'a> {
+    source: &'static ffi::CStr,
+    event_id: i32,
+    payload: &'a ffi::c_void,
+    payload_len: usize,
+}
+
+impl<'a> EspEventPostData<'a> {
     /// # Safety
     ///
     /// Care should be taken to only call this function with payload reference that lives at least as long as
     /// the call that will post this data to the event loop
-    pub unsafe fn new<P: Copy>(
-        source: *const ffi::c_char,
+    pub unsafe fn new<P: Copy + Send + 'static>(
+        source: &'static ffi::CStr,
         event_id: Option<i32>,
-        payload: &P,
-    ) -> EspEventPostData {
+        payload: &'a P,
+    ) -> Self {
         Self {
             source,
             event_id: event_id.unwrap_or(0),
-            payload: payload as *const _ as *const _,
+            payload: unsafe {
+                (payload as *const _ as *const ffi::c_void)
+                    .as_ref()
+                    .unwrap()
+            },
             payload_len: mem::size_of::<P>(),
         }
     }
@@ -166,33 +200,55 @@ impl EspEventPostData {
     /// Care should be taken to only call this function with payload reference that lives at least as long as
     /// the call that will post this data to the event loop
     pub unsafe fn new_raw(
-        source: *const ffi::c_char,
+        source: &'static ffi::CStr,
         event_id: Option<i32>,
-        payload: &[u32],
-    ) -> EspEventPostData {
+        payload: &'a [u8],
+    ) -> Self {
         Self {
             source,
             event_id: event_id.unwrap_or(0),
-            payload: payload.as_ptr() as *const _,
+            payload: unsafe {
+                (payload.as_ptr() as *const _ as *const ffi::c_void)
+                    .as_ref()
+                    .unwrap()
+            },
             payload_len: payload.len(),
         }
     }
 }
 
-pub struct EspEventFetchData {
-    pub source: *const ffi::c_char,
-    pub event_id: i32,
-    pub payload: *const ffi::c_void,
+unsafe impl<'a> EspEventSource for EspEventPostData<'a> {
+    fn source() -> Option<&'static ffi::CStr> {
+        None
+    }
 }
 
-impl EspEventFetchData {
+impl<'a> EspEventSerializer for EspEventPostData<'a> {
+    type Data<'d> = EspEventPostData<'d>;
+
+    fn serialize<F, R>(data: &Self::Data<'_>, f: F) -> R
+    where
+        F: FnOnce(&EspEventPostData) -> R,
+    {
+        f(data)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EspEvent<'a> {
+    pub source: &'static ffi::CStr,
+    pub event_id: i32,
+    pub payload: Option<&'a ffi::c_void>,
+}
+
+impl<'a> EspEvent<'a> {
     /// # Safety
     ///
     /// Care should be taken to only call this function on fetch data that one is certain to be
     /// of type `P`
-    pub unsafe fn as_payload<P: Copy>(&self) -> &P {
+    pub unsafe fn as_payload<P: Copy + Send + 'static>(&self) -> &P {
         let payload: &P = if mem::size_of::<P>() > 0 {
-            self.payload as *const P
+            self.payload.unwrap() as *const _ as *const P
         } else {
             ptr::NonNull::dangling().as_ptr() as *const P
         }
@@ -206,16 +262,31 @@ impl EspEventFetchData {
     ///
     /// Care should be taken to only call this function on fetch data that one is certain to be
     /// of length `len`
-    pub unsafe fn as_raw_payload(&self, len: usize) -> &[u8] {
-        slice::from_raw_parts(self.payload as *const _, len)
+    pub unsafe fn as_raw_payload(&self, len: usize) -> Option<&[u8]> {
+        self.payload
+            .map(|payload| slice::from_raw_parts(payload as *const _ as *const _, len))
     }
 }
 
-struct UnsafeCallback<'a>(*mut Box<dyn FnMut(&EspEventFetchData) + Send + 'a>);
+unsafe impl<'a> EspEventSource for EspEvent<'a> {
+    fn source() -> Option<&'static ffi::CStr> {
+        None
+    }
+}
+
+impl<'a> EspEventDeserializer for EspEvent<'a> {
+    type Data<'d> = EspEvent<'d>;
+
+    fn deserialize<'d>(data: &EspEvent<'d>) -> Self::Data<'d> {
+        data.clone()
+    }
+}
+
+struct UnsafeCallback<'a>(*mut Box<dyn FnMut(EspEvent) + Send + 'a>);
 
 impl<'a> UnsafeCallback<'a> {
     #[allow(clippy::type_complexity)]
-    fn from(boxed: &mut Box<Box<dyn FnMut(&EspEventFetchData) + Send + 'a>>) -> Self {
+    fn from(boxed: &mut Box<Box<dyn FnMut(EspEvent) + Send + 'a>>) -> Self {
         Self(boxed.as_mut())
     }
 
@@ -227,10 +298,36 @@ impl<'a> UnsafeCallback<'a> {
         self.0 as *mut _
     }
 
-    unsafe fn call(&self, data: &EspEventFetchData) {
+    unsafe fn call(&self, data: EspEvent) {
         let reference = self.0.as_mut().unwrap();
 
         (reference)(data);
+    }
+}
+
+enum EventLoopHandleRef<T>
+where
+    T: EspEventLoopType,
+{
+    Strong(Arc<EventLoopHandle<T>>),
+    Weak(Weak<EventLoopHandle<T>>),
+}
+
+impl<T> EventLoopHandleRef<T>
+where
+    T: EspEventLoopType,
+{
+    fn make_weak(&mut self) {
+        if matches!(self, Self::Strong(_)) {
+            *self = Self::Weak(Arc::downgrade(&self.upgrade().unwrap()))
+        }
+    }
+
+    fn upgrade(&self) -> Option<Arc<EventLoopHandle<T>>> {
+        match self {
+            Self::Strong(handle) => Some(handle.clone()),
+            Self::Weak(handle) => handle.upgrade(),
+        }
     }
 }
 
@@ -238,32 +335,36 @@ pub struct EspSubscription<'a, T>
 where
     T: EspEventLoopType,
 {
-    event_loop_handle: Arc<EventLoopHandle<T>>,
+    event_loop_handle: EventLoopHandleRef<T>,
     handler_instance: esp_event_handler_instance_t,
-    source: *const ffi::c_char,
+    source: Option<&'static ffi::CStr>,
     event_id: i32,
     #[allow(clippy::type_complexity)]
-    _callback: Box<Box<dyn FnMut(&EspEventFetchData) + Send + 'a>>,
+    _callback: Box<Box<dyn FnMut(EspEvent) + Send + 'a>>,
 }
 
 impl<'a, T> EspSubscription<'a, T>
 where
     T: EspEventLoopType,
 {
+    pub fn make_weak(&mut self) {
+        self.event_loop_handle.make_weak();
+    }
+
     extern "C" fn handle(
         event_handler_arg: *mut ffi::c_void,
         event_base: esp_event_base_t,
         event_id: i32,
         event_data: *mut ffi::c_void,
     ) {
-        let data = EspEventFetchData {
-            source: event_base,
+        let data = EspEvent {
+            source: unsafe { ffi::CStr::from_ptr(event_base) },
             event_id,
-            payload: event_data,
+            payload: unsafe { (event_data as *const ffi::c_void).as_ref() },
         };
 
         unsafe {
-            UnsafeCallback::from_ptr(event_handler_arg).call(&data);
+            UnsafeCallback::from_ptr(event_handler_arg).call(data);
         }
     }
 }
@@ -275,27 +376,29 @@ where
     T: EspEventLoopType,
 {
     fn drop(&mut self) {
-        if T::is_system() {
-            unsafe {
-                esp!(esp_event_handler_instance_unregister(
-                    self.source,
-                    self.event_id,
-                    self.handler_instance
-                ))
-                .unwrap();
-            }
-        } else {
-            unsafe {
-                let handle: &T = &self.event_loop_handle.0;
-                let user: &User<Background> = mem::transmute(handle);
+        if let Some(handle) = self.event_loop_handle.upgrade() {
+            if T::is_system() {
+                unsafe {
+                    esp!(esp_event_handler_instance_unregister(
+                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.event_id,
+                        self.handler_instance
+                    ))
+                    .unwrap();
+                }
+            } else {
+                unsafe {
+                    let handle: &T = &handle.0;
+                    let user: &User<Background> = mem::transmute(handle);
 
-                esp!(esp_event_handler_instance_unregister_with(
-                    user.0,
-                    self.source,
-                    self.event_id,
-                    self.handler_instance
-                ))
-                .unwrap();
+                    esp!(esp_event_handler_instance_unregister_with(
+                        user.0,
+                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.event_id,
+                        self.handler_instance
+                    ))
+                    .unwrap();
+                }
             }
         }
     }
@@ -309,6 +412,73 @@ where
 
     fn handle(&self) -> Self::Handle {
         self.handler_instance
+    }
+}
+
+pub struct EspAsyncSubscription<D, T>
+where
+    D: EspEventDeserializer,
+    T: EspEventLoopType,
+{
+    receiver: Receiver<EspEvent<'static>>,
+    subscription: EspSubscription<'static, T>,
+    given: bool,
+    _deserializer: PhantomData<fn() -> D>,
+}
+
+impl<D, T> EspAsyncSubscription<D, T>
+where
+    D: EspEventDeserializer,
+    T: EspEventLoopType,
+{
+    pub fn make_weak(&mut self) {
+        self.subscription.make_weak();
+    }
+
+    pub async fn recv(&mut self) -> Result<D::Data<'_>, EspError> {
+        if self.given {
+            self.receiver.done();
+            self.given = false;
+        }
+
+        if let Some(data) = self.receiver.get_shared_async().await {
+            self.given = true;
+            Ok(D::deserialize(data))
+        } else {
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())
+        }
+    }
+}
+
+impl<D, T> RawHandle for EspAsyncSubscription<D, User<T>>
+where
+    D: EspEventDeserializer,
+    T: EspEventLoopType,
+{
+    type Handle = esp_event_handler_instance_t;
+
+    fn handle(&self) -> Self::Handle {
+        self.subscription.handle()
+    }
+}
+
+impl<D, T> channel::ErrorType for EspAsyncSubscription<D, T>
+where
+    D: EspEventDeserializer,
+    T: EspEventLoopType,
+{
+    type Error = EspError;
+}
+
+impl<D, T> channel::asynch::Receiver for EspAsyncSubscription<D, T>
+where
+    D: EspEventDeserializer + 'static,
+    T: EspEventLoopType + 'static,
+{
+    type Data<'a> = D::Data<'a>;
+
+    async fn recv(&mut self) -> Result<Self::Data<'_>, Self::Error> {
+        EspAsyncSubscription::recv(self).await
     }
 }
 
@@ -394,150 +564,34 @@ impl<T> EspEventLoop<T>
 where
     T: EspEventLoopType,
 {
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn subscribe_raw<'a, F>(
-        &self,
-        source: *const ffi::c_char,
-        event_id: i32,
-        mut callback: F,
-    ) -> Result<EspSubscription<'a, T>, EspError>
+    pub fn subscribe_async<D>(&self) -> Result<EspAsyncSubscription<D, T>, EspError>
     where
-        F: FnMut(&EspEventFetchData) + Send + 'a,
+        D: EspEventDeserializer,
     {
-        let mut handler_instance: esp_event_handler_instance_t = ptr::null_mut();
+        let (channel, receiver) = Channel::new();
 
-        let callback: Box<dyn FnMut(&EspEventFetchData) + Send + 'a> =
-            Box::new(move |data| callback(data));
-        let mut callback = Box::new(callback);
+        let sender = QuitOnDrop::new(channel);
 
-        let unsafe_callback = UnsafeCallback::from(&mut callback);
+        let subscription = self.subscribe::<EspEvent, _>(move |event| {
+            let mut event = unsafe { mem::transmute::<EspEvent<'_>, EspEvent<'_>>(event) };
 
-        if T::is_system() {
-            esp!(unsafe {
-                esp_event_handler_instance_register(
-                    source,
-                    event_id,
-                    Some(EspSubscription::<System>::handle),
-                    unsafe_callback.as_ptr(),
-                    &mut handler_instance as *mut _,
-                )
-            })?;
-        } else {
-            esp!(unsafe {
-                let handle: &T = &self.0 .0;
-                let user: &User<Background> = mem::transmute(handle);
+            sender.channel().share(&mut event);
+        })?;
 
-                esp_event_handler_instance_register_with(
-                    user.0,
-                    source,
-                    event_id,
-                    Some(EspSubscription::<User<T>>::handle),
-                    unsafe_callback.as_ptr(),
-                    &mut handler_instance as *mut _,
-                )
-            })?;
-        }
-
-        Ok(EspSubscription {
-            event_loop_handle: self.0.clone(),
-            handler_instance,
-            source,
-            event_id,
-            _callback: callback,
+        Ok(EspAsyncSubscription {
+            receiver,
+            subscription,
+            given: false,
+            _deserializer: PhantomData,
         })
     }
 
-    pub fn post_raw(
-        &self,
-        data: &EspEventPostData,
-        wait: Option<Duration>,
-    ) -> Result<bool, EspError> {
-        let result = if T::is_system() {
-            unsafe {
-                esp_event_post(
-                    data.source,
-                    data.event_id,
-                    data.payload as *mut _,
-                    data.payload_len as _,
-                    TickType::from(wait).0,
-                )
-            }
-        } else {
-            unsafe {
-                let handle: &T = &self.0 .0;
-                let user: &User<Background> = mem::transmute(handle);
-
-                esp_event_post_to(
-                    user.0,
-                    data.source,
-                    data.event_id,
-                    data.payload as *mut _,
-                    data.payload_len as _,
-                    TickType::from(wait).0,
-                )
-            }
-        };
-
-        if result == ESP_ERR_TIMEOUT {
-            Ok(false)
-        } else {
-            esp_result!(result, true)
-        }
-    }
-
-    #[cfg(esp_idf_esp_event_post_from_isr)]
-    pub fn isr_post_raw(&self, data: &EspEventPostData) -> Result<bool, EspError> {
-        let mut higher_prio_task_woken: BaseType_t = Default::default();
-
-        let result = if T::is_system() {
-            unsafe {
-                esp_event_isr_post(
-                    data.source,
-                    data.event_id,
-                    data.payload as *const _ as *mut _,
-                    data.payload_len as _,
-                    &mut higher_prio_task_woken as *mut _,
-                )
-            }
-        } else {
-            unsafe {
-                let handle: &T = &self.0 .0;
-                let user: &User<Background> = mem::transmute(handle);
-
-                esp_event_isr_post_to(
-                    user.0,
-                    data.source,
-                    data.event_id,
-                    data.payload as *const _ as *mut _,
-                    data.payload_len as _,
-                    &mut higher_prio_task_woken as *mut _,
-                )
-            }
-        };
-
-        if higher_prio_task_woken != 0 {
-            crate::hal::task::do_yield();
-        }
-
-        if result == ESP_FAIL {
-            Ok(false)
-        } else {
-            esp!(result)?;
-
-            Ok(true)
-        }
-    }
-
-    pub fn subscribe<P, F>(&self, mut callback: F) -> Result<EspSubscription<'static, T>, EspError>
+    pub fn subscribe<D, F>(&self, mut callback: F) -> Result<EspSubscription<'static, T>, EspError>
     where
-        P: EspTypedEventDeserializer<P>,
-        F: FnMut(&P) + Send + 'static,
+        D: EspEventDeserializer,
+        F: for<'a> FnMut(D::Data<'a>) + Send + 'static,
     {
-        self.subscribe_raw(
-            P::source(),
-            P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| P::deserialize(raw_event, &mut callback),
-        )
+        self.subscribe_raw::<D, _>(move |event| callback(D::deserialize(&event)))
     }
 
     /// # Safety
@@ -563,48 +617,173 @@ where
     ///
     /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
-    pub unsafe fn subscribe_nonstatic<'a, P, F>(
+    pub unsafe fn subscribe_nonstatic<'a, D, F>(
         &self,
         mut callback: F,
     ) -> Result<EspSubscription<'a, T>, EspError>
     where
-        P: EspTypedEventDeserializer<P>,
-        F: FnMut(&P) + Send + 'a,
+        D: EspEventDeserializer,
+        F: for<'d> FnMut(D::Data<'d>) + Send + 'a,
     {
-        self.subscribe_raw(
-            P::source(),
-            P::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| P::deserialize(raw_event, &mut callback),
-        )
+        self.subscribe_raw::<D, _>(move |event| callback(D::deserialize(&event)))
     }
 
-    pub fn post<P>(&self, payload: &P, wait: Option<Duration>) -> Result<bool, EspError>
+    pub async fn post_async<S>(&self, payload: &S::Data<'_>) -> Result<(), EspError>
     where
-        P: EspTypedEventSerializer<P>,
+        S: EspEventSerializer,
+    {
+        loop {
+            if self.post::<S>(payload, delay::NON_BLOCK)? {
+                break Ok(());
+            }
+
+            crate::hal::task::yield_now().await;
+        }
+    }
+
+    pub fn post<S>(&self, payload: &S::Data<'_>, timeout: TickType_t) -> Result<bool, EspError>
+    where
+        S: EspEventSerializer,
     {
         if interrupt::active() {
             #[cfg(not(esp_idf_esp_event_post_from_isr))]
             panic!("Trying to post from an ISR handler. Enable `CONFIG_ESP_EVENT_POST_FROM_ISR` in `sdkconfig.defaults`");
 
             #[cfg(esp_idf_esp_event_post_from_isr)]
-            P::serialize(payload, |raw_event| self.isr_post_raw(raw_event))
+            S::serialize(payload, |event| self.isr_post_raw(event))
         } else {
-            P::serialize(payload, |raw_event| self.post_raw(raw_event, wait))
+            S::serialize(payload, |event| self.post_raw(event, timeout))
         }
     }
 
-    pub fn into_typed<M, P>(self) -> EspTypedEventLoop<M, P, Self> {
-        EspTypedEventLoop::new(self)
+    fn subscribe_raw<'a, S, F>(&self, callback: F) -> Result<EspSubscription<'a, T>, EspError>
+    where
+        S: EspEventSource,
+        F: FnMut(EspEvent) + Send + 'a,
+    {
+        let mut handler_instance: esp_event_handler_instance_t = ptr::null_mut();
+
+        let callback: Box<dyn FnMut(EspEvent) + Send + 'a> = Box::new(callback);
+        let mut callback = Box::new(callback);
+
+        let unsafe_callback = UnsafeCallback::from(&mut callback);
+
+        if T::is_system() {
+            esp!(unsafe {
+                esp_event_handler_instance_register(
+                    S::source().map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                    S::event_id().unwrap_or(ESP_EVENT_ANY_ID),
+                    Some(EspSubscription::<System>::handle),
+                    unsafe_callback.as_ptr(),
+                    &mut handler_instance as *mut _,
+                )
+            })?;
+        } else {
+            esp!(unsafe {
+                let handle: &T = &self.0 .0;
+                let user: &User<Background> = mem::transmute(handle);
+
+                esp_event_handler_instance_register_with(
+                    user.0,
+                    S::source().map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                    S::event_id().unwrap_or(ESP_EVENT_ANY_ID),
+                    Some(EspSubscription::<User<T>>::handle),
+                    unsafe_callback.as_ptr(),
+                    &mut handler_instance as *mut _,
+                )
+            })?;
+        }
+
+        Ok(EspSubscription {
+            event_loop_handle: EventLoopHandleRef::Strong(self.0.clone()),
+            handler_instance,
+            source: S::source(),
+            event_id: S::event_id().unwrap_or(ESP_EVENT_ANY_ID),
+            _callback: callback,
+        })
     }
 
-    pub fn as_typed<M, P>(&mut self) -> EspTypedEventLoop<M, P, &mut Self> {
-        EspTypedEventLoop::new(self)
+    fn post_raw(&self, data: &EspEventPostData, timeout: TickType_t) -> Result<bool, EspError> {
+        let result = if T::is_system() {
+            unsafe {
+                esp_event_post(
+                    data.source.as_ptr(),
+                    data.event_id,
+                    data.payload as *const _ as *mut _,
+                    data.payload_len as _,
+                    timeout,
+                )
+            }
+        } else {
+            unsafe {
+                let handle: &T = &self.0 .0;
+                let user: &User<Background> = mem::transmute(handle);
+
+                esp_event_post_to(
+                    user.0,
+                    data.source.as_ptr(),
+                    data.event_id,
+                    data.payload as *const _ as *mut _,
+                    data.payload_len as _,
+                    timeout,
+                )
+            }
+        };
+
+        if result == ESP_ERR_TIMEOUT {
+            Ok(false)
+        } else {
+            esp_result!(result, true)
+        }
+    }
+
+    #[cfg(esp_idf_esp_event_post_from_isr)]
+    fn isr_post_raw(&self, data: &EspEventPostData) -> Result<bool, EspError> {
+        let mut higher_prio_task_woken: BaseType_t = Default::default();
+
+        let result = if T::is_system() {
+            unsafe {
+                esp_event_isr_post(
+                    data.source.as_ptr(),
+                    data.event_id,
+                    data.payload as *const _ as *mut _,
+                    data.payload_len as _,
+                    &mut higher_prio_task_woken as *mut _,
+                )
+            }
+        } else {
+            unsafe {
+                let handle: &T = &self.0 .0;
+                let user: &User<Background> = mem::transmute(handle);
+
+                esp_event_isr_post_to(
+                    user.0,
+                    data.source.as_ptr(),
+                    data.event_id,
+                    data.payload as *const _ as *mut _,
+                    data.payload_len as _,
+                    &mut higher_prio_task_woken as *mut _,
+                )
+            }
+        };
+
+        if higher_prio_task_woken != 0 {
+            crate::hal::task::do_yield();
+        }
+
+        if result == ESP_FAIL {
+            Ok(false)
+        } else {
+            esp!(result)?;
+
+            Ok(true)
+        }
     }
 }
 
 impl<T> EspEventLoop<User<T>> {
-    pub fn spin(&mut self, duration: Option<Duration>) -> Result<(), EspError> {
-        esp!(unsafe { esp_event_loop_run(self.0 .0 .0, TickType::from(duration).0,) })
+    pub fn spin(&mut self, timeout: TickType_t) -> Result<(), EspError> {
+        esp!(unsafe { esp_event_loop_run(self.0 .0 .0, timeout) })
     }
 }
 
@@ -650,378 +829,32 @@ where
 unsafe impl<T> Send for EspEventLoop<T> where T: EspEventLoopType + Send {}
 unsafe impl<T> Sync for EspEventLoop<T> where T: EspEventLoopType + Sync {}
 
-impl<T> ErrorType for EspEventLoop<T>
+pub struct Wait<T>
 where
     T: EspEventLoopType,
 {
-    type Error = EspError;
-}
-
-impl<T> event_bus::Spin for EspEventLoop<User<T>> {
-    fn spin(&mut self, duration: Option<Duration>) -> Result<(), Self::Error> {
-        EspEventLoop::spin(self, duration)
-    }
-}
-
-pub trait EspTypedEventSource {
-    fn source() -> *const ffi::c_char;
-
-    fn event_id() -> Option<i32> {
-        None
-    }
-}
-
-pub trait EspTypedEventSerializer<P>: EspTypedEventSource {
-    fn serialize<R>(payload: &P, f: impl for<'a> FnOnce(&'a EspEventPostData) -> R) -> R;
-}
-
-pub trait EspTypedEventDeserializer<P>: EspTypedEventSource {
-    fn deserialize<R>(data: &EspEventFetchData, f: &mut impl for<'a> FnMut(&'a P) -> R) -> R;
-}
-
-impl<P, T> event_bus::Postbox<P> for EspEventLoop<T>
-where
-    P: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        EspEventLoop::post(self, payload, wait)
-    }
-}
-
-impl<P, T> event_bus::EventBus<P> for EspEventLoop<T>
-where
-    P: EspTypedEventDeserializer<P>,
-    T: EspEventLoopType,
-{
-    type Subscription<'a> = EspSubscription<'static, T> where Self: 'a;
-
-    fn subscribe<F>(&self, callback: F) -> Result<Self::Subscription<'_>, Self::Error>
-    where
-        F: FnMut(&P) + Send + 'static,
-    {
-        EspEventLoop::subscribe(self, callback)
-    }
-}
-
-pub struct EspPostbox<T>(EspEventLoop<T>)
-where
-    T: EspEventLoopType;
-
-unsafe impl<T> Send for EspPostbox<T> where T: EspEventLoopType {}
-unsafe impl<T> Sync for EspPostbox<T> where T: EspEventLoopType {}
-
-impl<T> Clone for EspPostbox<T>
-where
-    T: EspEventLoopType,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T> ErrorType for EspPostbox<T>
-where
-    T: EspEventLoopType,
-{
-    type Error = EspError;
-}
-
-impl<P, T> event_bus::Postbox<P> for EspPostbox<T>
-where
-    P: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        self.0.post(payload, wait)
-    }
-}
-
-impl<P, T> event_bus::PostboxProvider<P> for EspEventLoop<T>
-where
-    P: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    type Postbox<'a> = EspPostbox<T> where Self: 'a;
-
-    fn postbox(&self) -> Result<Self::Postbox<'_>, Self::Error>
-    where
-        P: EspTypedEventSerializer<P>,
-    {
-        Ok(EspPostbox(self.clone()))
-    }
-}
-
-pub struct EspTypedEventLoop<M, P, L> {
-    untyped_event_loop: L,
-    _serde: PhantomData<fn() -> M>,
-    _payload: PhantomData<fn() -> P>,
-}
-
-impl<M, P, L> EspTypedEventLoop<M, P, L> {
-    pub fn new(untyped_event_loop: L) -> Self {
-        Self {
-            untyped_event_loop,
-            _serde: PhantomData,
-            _payload: PhantomData,
-        }
-    }
-}
-
-impl<M, P, T> EspTypedEventLoop<M, P, EspEventLoop<T>>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    pub fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, EspError> {
-        M::serialize(payload, |raw_event| {
-            self.untyped_event_loop.post_raw(raw_event, wait)
-        })
-    }
-}
-
-impl<M, P, L> Clone for EspTypedEventLoop<M, P, L>
-where
-    L: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            untyped_event_loop: self.untyped_event_loop.clone(),
-            _serde: PhantomData,
-            _payload: PhantomData,
-        }
-    }
-}
-
-impl<M, P, L> ErrorType for EspTypedEventLoop<M, P, L>
-where
-    L: ErrorType,
-{
-    type Error = L::Error;
-}
-
-impl<M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, EspEventLoop<T>>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        EspTypedEventLoop::post(self, payload, wait)
-    }
-}
-
-impl<'a, M, P, T> event_bus::Postbox<P> for EspTypedEventLoop<M, P, &'a EspEventLoop<T>>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        M::serialize(payload, |raw_event| {
-            self.untyped_event_loop.post_raw(raw_event, wait)
-        })
-    }
-}
-
-impl<M, P, T> event_bus::EventBus<P> for EspTypedEventLoop<M, P, EspEventLoop<T>>
-where
-    M: EspTypedEventDeserializer<P>,
-    T: EspEventLoopType,
-{
-    type Subscription<'a> = EspSubscription<'static, T> where Self: 'a;
-
-    fn subscribe<F>(&self, mut callback: F) -> Result<Self::Subscription<'_>, EspError>
-    where
-        F: FnMut(&P) + Send + 'static,
-    {
-        self.untyped_event_loop.subscribe_raw(
-            M::source(),
-            M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| M::deserialize(raw_event, &mut callback),
-        )
-    }
-}
-
-impl<'r, M, P, T> event_bus::EventBus<P> for EspTypedEventLoop<M, P, &'r EspEventLoop<T>>
-where
-    M: EspTypedEventDeserializer<P>,
-    T: EspEventLoopType,
-{
-    type Subscription<'a> = EspSubscription<'static, T> where Self: 'a;
-
-    fn subscribe<F>(&self, mut callback: F) -> Result<Self::Subscription<'_>, EspError>
-    where
-        F: FnMut(&P) + Send + 'static,
-    {
-        self.untyped_event_loop.subscribe_raw(
-            M::source(),
-            M::event_id().unwrap_or(ESP_EVENT_ANY_ID),
-            move |raw_event| M::deserialize(raw_event, &mut callback),
-        )
-    }
-}
-
-pub struct EspTypedPostbox<M, P, T>(EspTypedEventLoop<M, P, EspEventLoop<T>>)
-where
-    T: EspEventLoopType;
-
-unsafe impl<M, P, T> Send for EspTypedPostbox<M, P, T> where T: EspEventLoopType {}
-unsafe impl<M, P, T> Sync for EspTypedPostbox<M, P, T> where T: EspEventLoopType {}
-
-impl<M, P, T> Clone for EspTypedPostbox<M, P, T>
-where
-    T: EspEventLoopType,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<M, P, T> ErrorType for EspTypedPostbox<M, P, T>
-where
-    T: EspEventLoopType,
-{
-    type Error = EspError;
-}
-
-impl<M, P, T> event_bus::Postbox<P> for EspTypedPostbox<M, P, T>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    fn post(&self, payload: &P, wait: Option<Duration>) -> Result<bool, Self::Error> {
-        self.0.post(payload, wait)
-    }
-}
-
-impl<M, P, T> event_bus::PostboxProvider<P> for EspTypedEventLoop<M, P, EspEventLoop<T>>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    type Postbox<'a> = EspTypedPostbox<M, P, T> where Self: 'a;
-
-    fn postbox(&self) -> Result<Self::Postbox<'_>, Self::Error> {
-        Ok(EspTypedPostbox(Self::new(self.untyped_event_loop.clone())))
-    }
-}
-
-impl<'e, M, P, T> event_bus::PostboxProvider<P> for EspTypedEventLoop<M, P, &'e EspEventLoop<T>>
-where
-    M: EspTypedEventSerializer<P>,
-    T: EspEventLoopType,
-{
-    type Postbox<'a> = EspTypedPostbox<M, P, T> where Self: 'a;
-
-    fn postbox(&self) -> Result<Self::Postbox<'_>, Self::Error> {
-        Ok(EspTypedPostbox(EspTypedEventLoop::new(
-            self.untyped_event_loop.clone(),
-        )))
-    }
-}
-
-mod asyncify {
-    use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
-    use embedded_svc::utils::asyncify::{Asyncify, UnblockingAsyncify};
-
-    use crate::private::mutex::RawCondvar;
-
-    impl<T> Asyncify for super::EspEventLoop<T>
-    where
-        T: super::EspEventLoopType,
-    {
-        type AsyncWrapper<S> = AsyncEventBus<(), RawCondvar, S>;
-    }
-
-    impl<T> UnblockingAsyncify for super::EspEventLoop<T>
-    where
-        T: super::EspEventLoopType,
-    {
-        type AsyncWrapper<U, S> = AsyncEventBus<U, RawCondvar, S>;
-    }
-
-    impl<M, P, L> Asyncify for super::EspTypedEventLoop<M, P, L> {
-        type AsyncWrapper<S> = AsyncEventBus<(), RawCondvar, S>;
-    }
-
-    impl<M, P, L> UnblockingAsyncify for super::EspTypedEventLoop<M, P, L> {
-        type AsyncWrapper<U, S> = AsyncEventBus<U, RawCondvar, S>;
-    }
-}
-
-pub struct Wait<'a, E, T>
-where
-    T: EspEventLoopType,
-{
-    _subscription: EspSubscription<'a, T>,
     waitable: Arc<Waitable<()>>,
-    _event: PhantomData<fn() -> E>,
+    _subscription: EspSubscription<'static, T>,
 }
 
-impl<E, T> Wait<'static, E, T>
+impl<T> Wait<T>
 where
-    E: EspTypedEventDeserializer<E> + Debug,
     T: EspEventLoopType,
 {
-    pub fn new<F: FnMut(&E) -> bool + Send + 'static>(
-        event_loop: &EspEventLoop<T>,
-        waiter: F,
-    ) -> Result<Self, EspError> {
-        Self::internal_new(event_loop, waiter)
-    }
-}
-
-impl<'a, E, T> Wait<'a, E, T>
-where
-    E: EspTypedEventDeserializer<E> + Debug,
-    T: EspEventLoopType,
-{
-    /// # Safety
-    ///
-    /// This method - in contrast to method `new` - allows the user to pass
-    /// a non-static callback/closure. This enables users to borrow
-    /// - in the closure - variables that live on the stack - or more generally - in the same
-    /// scope where the service is created.
-    ///
-    /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
-    /// as that would immediately lead to an UB (crash).
-    /// Also note that forgetting the service might happen with `Rc` and `Arc`
-    /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
-    ///
-    /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
-    /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
-    /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
-    ///
-    /// The destructor of the service takes care - prior to the service being dropped and e.g.
-    /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
-    /// Unfortunately, when the service is forgotten, the un-subscription does not happen
-    /// and invalid references are left dangling.
-    ///
-    /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
-    /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
-    pub unsafe fn new_nonstatic<F: FnMut(&E) -> bool + Send + 'a>(
-        event_loop: &EspEventLoop<T>,
-        waiter: F,
-    ) -> Result<Self, EspError> {
-        Self::internal_new(event_loop, waiter)
-    }
-
-    fn internal_new<F: FnMut(&E) -> bool + Send + 'a>(
-        event_loop: &EspEventLoop<T>,
-        mut waiter: F,
-    ) -> Result<Self, EspError> {
+    pub fn new<S>(event_loop: &EspEventLoop<T>) -> Result<Self, EspError>
+    where
+        S: EspEventSource,
+    {
         let waitable: Arc<Waitable<()>> = Arc::new(Waitable::new(()));
 
         let s_waitable = waitable.clone();
-        let subscription = unsafe {
-            event_loop.subscribe_nonstatic(move |event: &E| {
-                Self::on_event(&s_waitable, event, &mut waiter)
-            })?
-        };
+        let subscription = event_loop.subscribe_raw::<S, _>(move |_| {
+            s_waitable.cvar.notify_all();
+        })?;
 
         Ok(Self {
             waitable,
             _subscription: subscription,
-            _event: PhantomData,
         })
     }
 
@@ -1054,76 +887,79 @@ where
             Ok(())
         }
     }
-
-    fn on_event<F: FnMut(&E) -> bool>(waitable: &Waitable<()>, event: &E, waiter: &mut F) {
-        debug!("Got event: {:?}", event);
-
-        if waiter(event) {
-            waitable.cvar.notify_all();
-        }
-    }
 }
 
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 mod async_wait {
-    use core::fmt::Debug;
     use core::marker::PhantomData;
+    use core::pin::pin;
     use core::time::Duration;
 
-    use embedded_svc::utils::asyncify::event_bus::{AsyncEventBus, AsyncSubscription};
-    use embedded_svc::utils::asyncify::timer::{AsyncTimer, AsyncTimerService};
+    extern crate alloc;
+    use alloc::sync::Arc;
 
-    use crate::sys::{esp, EspError, ESP_ERR_TIMEOUT};
+    use esp_idf_hal::task::asynch::Notification;
 
     use log::debug;
 
-    use crate::timer::{EspTaskTimerService, EspTimer};
+    use super::{EspEventDeserializer, EspEventLoop, EspEventLoopType, EspSubscription};
+    use crate::sys::{esp, EspError, ESP_ERR_TIMEOUT};
+    use crate::timer::{EspAsyncTimer, EspTimerService, Task};
 
-    pub struct AsyncWait<E, T>
+    pub struct AsyncWait<D, T>
     where
-        E: super::EspTypedEventDeserializer<E> + Send,
-        T: super::EspEventLoopType,
+        D: EspEventDeserializer,
+        T: EspEventLoopType,
     {
-        subscription: AsyncSubscription<
-            crate::private::mutex::RawCondvar,
-            E,
-            super::EspSubscription<'static, T>,
-            EspError,
-        >,
-        timer: AsyncTimer<EspTimer<'static>>,
-        _event: PhantomData<fn() -> E>,
+        notification: Arc<Notification>,
+        timer: EspAsyncTimer,
+        _subscription: EspSubscription<'static, T>,
+        _deserializer: PhantomData<fn() -> D>,
     }
 
-    impl<E, T> AsyncWait<E, T>
+    impl<D, T> AsyncWait<D, T>
     where
-        E: super::EspTypedEventDeserializer<E> + Debug + Send + Clone + 'static,
-        T: super::EspEventLoopType + 'static,
+        D: EspEventDeserializer,
+        T: EspEventLoopType + Send,
     {
         pub fn new(
-            event_loop: &AsyncEventBus<
-                (),
-                crate::private::mutex::RawCondvar,
-                super::EspEventLoop<T>,
-            >,
-            timer_service: &AsyncTimerService<EspTaskTimerService>,
+            event_loop: &EspEventLoop<T>,
+            timer_service: &EspTimerService<Task>,
         ) -> Result<Self, EspError> {
+            let notification = Arc::new(Notification::new());
+
             Ok(Self {
-                subscription: event_loop.subscribe()?,
-                timer: timer_service.timer()?,
-                _event: PhantomData,
+                _subscription: {
+                    let notification = notification.clone();
+                    event_loop.subscribe::<D, _>(move |_| {
+                        notification.notify_lsb();
+                    })?
+                },
+                notification,
+                timer: timer_service.timer_async()?,
+                _deserializer: PhantomData,
             })
         }
 
         pub async fn wait_while<F: FnMut() -> Result<bool, EspError>>(
             &mut self,
-            matcher: F,
+            mut matcher: F,
             duration: Option<Duration>,
         ) -> Result<(), EspError> {
+            let notification = &self.notification;
+
+            let subscription_wait = pin!(async move {
+                while matcher()? {
+                    notification.wait().await;
+                }
+
+                Result::<(), EspError>::Ok(())
+            });
+
             if let Some(duration) = duration {
                 debug!("About to wait for duration {:?}", duration);
 
                 let timer_wait = self.timer.after(duration);
-                let subscription_wait = Self::wait_sub(&mut self.subscription, matcher);
 
                 match embassy_futures::select::select(subscription_wait, timer_wait).await {
                     embassy_futures::select::Either::First(_) => {
@@ -1138,33 +974,12 @@ mod async_wait {
             } else {
                 debug!("About to wait");
 
-                Self::wait_sub(&mut self.subscription, matcher).await?;
+                subscription_wait.await?;
 
                 debug!("Waiting done - success");
 
                 Ok(())
             }
-        }
-
-        #[allow(clippy::all)]
-        async fn wait_sub<EE, TT, F: FnMut() -> Result<bool, EspError>>(
-            subscription: &mut AsyncSubscription<
-                crate::private::mutex::RawCondvar,
-                EE,
-                super::EspSubscription<'static, TT>,
-                EspError,
-            >,
-            mut matcher: F,
-        ) -> Result<(), EspError>
-        where
-            EE: Send + Clone,
-            TT: super::EspEventLoopType,
-        {
-            while matcher()? {
-                subscription.recv().await?;
-            }
-
-            Ok(())
         }
     }
 }

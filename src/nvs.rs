@@ -14,9 +14,9 @@ use crate::handle::RawHandle;
 use crate::private::cstr::*;
 use crate::private::mutex;
 
-static DEFAULT_TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static DEFAULT_TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 static NONDEFAULT_LOCKED: mutex::Mutex<alloc::collections::BTreeSet<CString>> =
-    mutex::Mutex::wrap(mutex::RawMutex::new(), alloc::collections::BTreeSet::new());
+    mutex::Mutex::new(alloc::collections::BTreeSet::new());
 
 pub type EspDefaultNvsPartition = EspNvsPartition<NvsDefault>;
 pub type EspCustomNvsPartition = EspNvsPartition<NvsCustom>;
@@ -157,15 +157,14 @@ impl NvsEncrypted {
             None
         };
 
-        let c_key_partition = c_key_partition
-            .map(|p| p.as_ptr())
-            .unwrap_or(core::ptr::null());
-
         let keys_partition_ptr = unsafe {
             esp_partition_find_first(
                 esp_partition_type_t_ESP_PARTITION_TYPE_DATA,
                 esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS,
-                c_key_partition,
+                match c_key_partition {
+                    Some(ref v) => v.as_ptr(),
+                    None => core::ptr::null(),
+                },
             )
         };
 
@@ -268,6 +267,7 @@ pub type EspDefaultNvs = EspNvs<NvsDefault>;
 pub type EspCustomNvs = EspNvs<NvsCustom>;
 pub type EspEncryptedNvs = EspNvs<NvsEncrypted>;
 
+#[allow(dead_code)]
 pub struct EspNvs<T: NvsPartitionId>(EspNvsPartition<T>, nvs_handle_t);
 
 impl<T: NvsPartitionId> EspNvs<T> {
@@ -546,7 +546,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
                 esp!(err)?;
 
                 Ok(Some(unsafe {
-                    core::str::from_utf8_unchecked(&(buf[..len]))
+                    core::str::from_utf8_unchecked(&(buf[..len - 1]))
                 }))
             }
         }

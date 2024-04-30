@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
-use core::{ffi, ptr};
+use core::{ffi, ops, ptr};
 
 use ::log::*;
 
@@ -32,8 +32,7 @@ use crate::hal::{spi, units::Hertz};
 use crate::sys::*;
 
 use crate::eventloop::{
-    EspEventLoop, EspSubscription, EspSystemEventLoop, EspTypedEventDeserializer,
-    EspTypedEventSource, System,
+    EspEventDeserializer, EspEventLoop, EspEventSource, EspSubscription, EspSystemEventLoop, System,
 };
 use crate::handle::RawHandle;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
@@ -118,11 +117,7 @@ pub enum SpiEthChipset {
     KSZ8851SNL,
 }
 
-struct RawHandleImpl(esp_eth_handle_t);
-
-unsafe impl Send for RawHandleImpl {}
-
-type RawCallback<'a> = Box<dyn FnMut(&[u8]) + Send + 'a>;
+type RawCallback<'a> = Box<dyn FnMut(EthFrame) + Send + 'a>;
 
 struct UnsafeCallback<'a>(*mut RawCallback<'a>);
 
@@ -140,7 +135,7 @@ impl<'a> UnsafeCallback<'a> {
         self.0.cast()
     }
 
-    unsafe fn call(&self, data: &[u8]) {
+    unsafe fn call(&self, data: EthFrame) {
         let reference = self.0.as_mut().unwrap();
 
         (reference)(data);
@@ -368,6 +363,7 @@ impl<'d, T> EthDriver<'d, SpiEth<T>>
 where
     T: core::borrow::Borrow<spi::SpiDriver<'d>>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         driver: T,
         int: impl Peripheral<P = impl gpio::InputPin> + 'd,
@@ -384,6 +380,7 @@ where
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_spi(
         driver: T,
         int: impl Peripheral<P = impl gpio::InputPin> + 'd,
@@ -421,6 +418,7 @@ where
         Ok(eth)
     }
 
+    #[allow(clippy::unnecessary_literal_unwrap)]
     fn init_spi(
         host: spi_host_device_t,
         chipset: SpiEthChipset,
@@ -440,7 +438,7 @@ where
         crate::hal::gpio::enable_isr_service()?;
 
         let mac_cfg = Self::eth_mac_default_config(0, 0);
-        let phy_cfg = Self::eth_phy_default_config(rst.map(|pin| pin), phy_addr);
+        let phy_cfg = Self::eth_phy_default_config(rst, phy_addr);
 
         let (mac, phy, spi_handle) = match chipset {
             #[cfg(esp_idf_eth_spi_ethernet_dm9051)]
@@ -464,6 +462,14 @@ where
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
                     int_gpio_num: int,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
+                        ),
+                    )))]
+                    custom_spi_driver: eth_spi_custom_driver_config_t::default(),
                 };
 
                 let mac = unsafe { esp_eth_mac_new_dm9051(&dm9051_cfg, &mac_cfg) };
@@ -492,6 +498,14 @@ where
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
                     int_gpio_num: int,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
+                        ),
+                    )))]
+                    custom_spi_driver: eth_spi_custom_driver_config_t::default(),
                 };
 
                 let mac = unsafe { esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg) };
@@ -520,6 +534,14 @@ where
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
                     int_gpio_num: int,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
+                        ),
+                    )))]
+                    custom_spi_driver: eth_spi_custom_driver_config_t::default(),
                 };
 
                 let mac = unsafe { esp_eth_mac_new_ksz8851snl(&ksz8851snl_cfg, &mac_cfg) };
@@ -543,7 +565,7 @@ where
             address_bits,
             mode: 0,
             clock_speed_hz: baudrate.0 as i32,
-            spics_io_num: cs.map(|pin| pin).unwrap_or(-1),
+            spics_io_num: cs.unwrap_or(-1),
             queue_size: 20,
             ..Default::default()
         }
@@ -609,13 +631,13 @@ impl<'d, T> EthDriver<'d, T> {
         handle: esp_eth_handle_t,
         sysloop: &EspEventLoop<System>,
     ) -> Result<(Arc<mutex::Mutex<Status>>, EspSubscription<'static, System>), EspError> {
-        let status = Arc::new(mutex::Mutex::wrap(mutex::RawMutex::new(), Status::Stopped));
+        let status = Arc::new(mutex::Mutex::new(Status::Stopped));
         let s_status = status.clone();
 
-        let handle = RawHandleImpl(handle);
+        let handle = handle as usize;
 
-        let subscription = sysloop.subscribe(move |event: &EthEvent| {
-            if event.is_for_handle(handle.0) {
+        let subscription = sysloop.subscribe::<EthEvent, _>(move |event| {
+            if event.is_for_handle(handle as _) {
                 let mut guard = s_status.lock();
 
                 match event {
@@ -667,7 +689,7 @@ impl<'d, T> EthDriver<'d, T> {
 
     pub fn set_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
-        F: FnMut(&[u8]) + Send + 'static,
+        F: FnMut(EthFrame) + Send + 'static,
     {
         self.internal_set_rx_callback(callback)
     }
@@ -697,24 +719,24 @@ impl<'d, T> EthDriver<'d, T> {
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
     pub unsafe fn set_nonstatic_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
-        F: FnMut(&[u8]) + Send + 'd,
+        F: FnMut(EthFrame) + Send + 'd,
     {
         self.internal_set_rx_callback(callback)
     }
 
-    fn internal_set_rx_callback<F>(&mut self, mut callback: F) -> Result<(), EspError>
+    fn internal_set_rx_callback<F>(&mut self, callback: F) -> Result<(), EspError>
     where
-        F: FnMut(&[u8]) + Send + 'd,
+        F: FnMut(EthFrame) + Send + 'd,
     {
         let _ = self.stop();
 
-        let mut callback: Box<RawCallback> = Box::new(Box::new(move |data| callback(data)));
+        let mut callback: Box<RawCallback> = Box::new(Box::new(callback));
 
         let unsafe_callback = UnsafeCallback::from(&mut callback);
 
-        unsafe {
-            esp_eth_update_input_path(self.handle(), Some(Self::handle), unsafe_callback.as_ptr());
-        }
+        esp!(unsafe {
+            esp_eth_update_input_path(self.handle(), Some(Self::handle), unsafe_callback.as_ptr())
+        })?;
 
         self.callback = Some(callback);
 
@@ -735,8 +757,7 @@ impl<'d, T> EthDriver<'d, T> {
         len: u32,
         event_handler_arg: *mut ffi::c_void,
     ) -> esp_err_t {
-        UnsafeCallback::from_ptr(event_handler_arg as *mut _)
-            .call(core::slice::from_raw_parts(buf, len as _));
+        UnsafeCallback::from_ptr(event_handler_arg as *mut _).call(EthFrame::new(buf, len));
 
         ESP_OK
     }
@@ -832,6 +853,47 @@ impl<'d, T> RawHandle for EthDriver<'d, T> {
 
     fn handle(&self) -> Self::Handle {
         self.handle
+    }
+}
+
+pub struct EthFrame {
+    buf: *mut u8,
+    len: u32,
+}
+
+unsafe impl Send for EthFrame {}
+
+impl EthFrame {
+    const unsafe fn new(buf: *mut u8, len: u32) -> Self {
+        Self { buf, len }
+    }
+
+    pub const fn as_slice(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.buf, self.len as _) }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
+    }
+}
+
+impl ops::Deref for EthFrame {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.buf, self.len as _) }
+    }
+}
+
+impl ops::DerefMut for EthFrame {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.buf, self.len as _) }
+    }
+}
+
+impl Drop for EthFrame {
+    fn drop(&mut self) {
+        unsafe { free(self.buf.cast()) };
     }
 }
 
@@ -1009,23 +1071,23 @@ impl EthEvent {
     }
 }
 
-impl EspTypedEventSource for EthEvent {
-    fn source() -> *const ffi::c_char {
-        unsafe { ETH_EVENT }
+unsafe impl EspEventSource for EthEvent {
+    fn source() -> Option<&'static ffi::CStr> {
+        Some(unsafe { ffi::CStr::from_ptr(ETH_EVENT) })
     }
 }
 
-impl EspTypedEventDeserializer<EthEvent> for EthEvent {
+impl EspEventDeserializer for EthEvent {
+    type Data<'a> = Self;
+
     #[allow(non_upper_case_globals, non_snake_case)]
-    fn deserialize<R>(
-        data: &crate::eventloop::EspEventFetchData,
-        f: &mut impl for<'a> FnMut(&'a EthEvent) -> R,
-    ) -> R {
-        let eth_handle_ref = unsafe { (data.payload as *const esp_eth_handle_t).as_ref() };
+    fn deserialize(data: &crate::eventloop::EspEvent) -> Self {
+        let eth_handle_ref =
+            unsafe { (data.payload.unwrap() as *const _ as *const esp_eth_handle_t).as_ref() };
 
         let event_id = data.event_id as u32;
 
-        let event = if event_id == eth_event_t_ETHERNET_EVENT_START {
+        if event_id == eth_event_t_ETHERNET_EVENT_START {
             EthEvent::Started(*eth_handle_ref.unwrap() as _)
         } else if event_id == eth_event_t_ETHERNET_EVENT_STOP {
             EthEvent::Stopped(*eth_handle_ref.unwrap() as _)
@@ -1035,9 +1097,7 @@ impl EspTypedEventDeserializer<EthEvent> for EthEvent {
             EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
         } else {
             panic!("Unknown event ID: {}", event_id);
-        };
-
-        f(&event)
+        }
     }
 }
 
@@ -1094,7 +1154,7 @@ where
         matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
-        let wait = crate::eventloop::Wait::<EthEvent, _>::new(&self.event_loop, |_| true)?;
+        let wait = crate::eventloop::Wait::new::<EthEvent>(&self.event_loop)?;
 
         wait.wait_while(matcher, timeout)
     }
@@ -1118,7 +1178,7 @@ where
         matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
-        let wait = crate::eventloop::Wait::<IpEvent, _>::new(&self.event_loop, |_| true)?;
+        let wait = crate::eventloop::Wait::new::<IpEvent>(&self.event_loop)?;
 
         wait.wait_while(matcher, timeout)
     }
@@ -1199,38 +1259,33 @@ where
 
     pub async fn start(&mut self) -> Result<(), EspError> {
         self.eth.start()?;
-        self.eth_wait_while(|| self.eth.is_started().map(|s| !s), None)
+        self.eth_wait_while(|this| this.eth.is_started().map(|s| !s), None)
             .await
     }
 
     pub async fn stop(&mut self) -> Result<(), EspError> {
         self.eth.stop()?;
-        self.eth_wait_while(|| self.eth.is_started(), None).await
+        self.eth_wait_while(|this| this.eth.is_started(), None)
+            .await
     }
 
-    pub async fn wait_connected(&self) -> Result<(), EspError> {
+    pub async fn wait_connected(&mut self) -> Result<(), EspError> {
         self.eth_wait_while(
-            || self.eth.is_connected().map(|s| !s),
+            |this| this.eth.is_connected().map(|s| !s),
             Some(CONNECT_TIMEOUT),
         )
         .await
     }
 
-    pub async fn eth_wait_while<F: Fn() -> Result<bool, EspError>>(
-        &self,
-        matcher: F,
+    pub async fn eth_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+        &mut self,
+        mut matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
-        use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
-        use embedded_svc::utils::asyncify::timer::AsyncTimerService;
-
-        let event_loop = AsyncEventBus::new((), self.event_loop.clone());
-        let timer_service = AsyncTimerService::new(self.timer_service.clone());
-
         let mut wait =
-            crate::eventloop::AsyncWait::<EthEvent, _>::new(&event_loop, &timer_service)?;
+            crate::eventloop::AsyncWait::<EthEvent, _>::new(&self.event_loop, &self.timer_service)?;
 
-        wait.wait_while(matcher, timeout).await
+        wait.wait_while(|| matcher(self), timeout).await
     }
 }
 
@@ -1244,29 +1299,24 @@ where
         self.eth.is_up()
     }
 
-    pub async fn wait_netif_up(&self) -> Result<(), EspError> {
-        self.ip_wait_while(|| self.eth.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
+    pub async fn wait_netif_up(&mut self) -> Result<(), EspError> {
+        self.ip_wait_while(|this| this.eth.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
             .await
     }
 
-    pub async fn ip_wait_while<F: FnMut() -> Result<bool, EspError>>(
-        &self,
-        matcher: F,
+    pub async fn ip_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
+        &mut self,
+        mut matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
-        use embedded_svc::utils::asyncify::event_bus::AsyncEventBus;
-        use embedded_svc::utils::asyncify::timer::AsyncTimerService;
+        let mut wait =
+            crate::eventloop::AsyncWait::<IpEvent, _>::new(&self.event_loop, &self.timer_service)?;
 
-        let event_loop = AsyncEventBus::new((), self.event_loop.clone());
-        let timer_service = AsyncTimerService::new(self.timer_service.clone());
-
-        let mut wait = crate::eventloop::AsyncWait::<IpEvent, _>::new(&event_loop, &timer_service)?;
-
-        wait.wait_while(matcher, timeout).await
+        wait.wait_while(|| matcher(self), timeout).await
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "alloc", esp_idf_comp_esp_timer_enabled))]
+#[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 impl<T> embedded_svc::eth::asynch::Eth for AsyncEth<T>
 where
     T: Eth<Error = EspError>,
@@ -1290,7 +1340,6 @@ where
     }
 }
 
-#[cfg(feature = "nightly")]
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<'d, T> crate::netif::asynch::NetifStatus for EspEth<'d, T> {
     async fn is_up(&self) -> Result<bool, EspError> {
@@ -1298,7 +1347,7 @@ impl<'d, T> crate::netif::asynch::NetifStatus for EspEth<'d, T> {
     }
 }
 
-#[cfg(all(feature = "nightly", feature = "alloc", esp_idf_comp_esp_timer_enabled))]
+#[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<T> crate::netif::asynch::NetifStatus for AsyncEth<T>
 where

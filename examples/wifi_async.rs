@@ -2,15 +2,16 @@
 //!
 //! Add your own ssid and password
 
+use core::convert::TryInto;
+
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
 use esp_idf_svc::hal::prelude::Peripherals;
+use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
-
-use futures::executor::block_on;
 
 use log::info;
 
@@ -47,11 +48,12 @@ fn main() -> anyhow::Result<()> {
 
 async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {
     let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
-        ssid: SSID.into(),
+        ssid: SSID.try_into().unwrap(),
         bssid: None,
         auth_method: AuthMethod::WPA2Personal,
-        password: PASSWORD.into(),
+        password: PASSWORD.try_into().unwrap(),
         channel: None,
+        ..Default::default()
     });
 
     wifi.set_configuration(&wifi_configuration)?;

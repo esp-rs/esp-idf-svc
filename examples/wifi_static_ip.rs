@@ -3,9 +3,12 @@
 //! Add your own ssid and password for the access point
 //! Add your own gateway IP, netmask, and local device IP for interface configuration
 
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration as WifiConfiguration};
+use core::convert::TryInto;
+
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration as WifiConfiguration};
 
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::ipv4::{
@@ -77,15 +80,17 @@ fn configure_wifi(wifi: WifiDriver) -> anyhow::Result<EspWifi> {
             )),
             ..NetifConfiguration::wifi_default_client()
         })?,
+        #[cfg(esp_idf_esp_wifi_softap_support)]
         EspNetif::new(NetifStack::Ap)?,
     )?;
 
     let wifi_configuration = WifiConfiguration::Client(ClientConfiguration {
-        ssid: SSID.into(),
+        ssid: SSID.try_into().unwrap(),
         bssid: None,
         auth_method: AuthMethod::WPA2Personal,
-        password: PASSWORD.into(),
+        password: PASSWORD.try_into().unwrap(),
         channel: None,
+        ..Default::default()
     });
     wifi.set_configuration(&wifi_configuration)?;
 

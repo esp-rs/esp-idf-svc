@@ -9,22 +9,19 @@
 //! EspTimer is a set of APIs that provides one-shot and periodic timers,
 //! microsecond time resolution, and 52-bit range.
 
-use core::result::Result;
+use core::num::NonZeroU32;
 use core::time::Duration;
 use core::{ffi, ptr};
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 
-use embedded_svc::sys_time::SystemTime;
-use embedded_svc::timer::{self, ErrorType, OnceTimer, PeriodicTimer, Timer, TimerService};
+use esp_idf_hal::task::asynch::Notification;
 
 use crate::sys::*;
 
-use ::log::info;
-
-#[allow(unused_imports)]
-pub use asyncify::*;
+use ::log::debug;
 
 #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
 pub use isr::*;
@@ -122,7 +119,7 @@ impl<'a> Drop for EspTimer<'a> {
             // Timer is still running, busy-loop
         }
 
-        info!("Timer dropped");
+        debug!("Timer dropped");
     }
 }
 
@@ -134,29 +131,50 @@ impl<'a> RawHandle for EspTimer<'a> {
     }
 }
 
-impl<'a> ErrorType for EspTimer<'a> {
-    type Error = EspError;
+pub struct EspAsyncTimer {
+    timer: EspTimer<'static>,
+    notification: Arc<Notification>,
 }
 
-impl<'a> timer::Timer for EspTimer<'a> {
-    fn is_scheduled(&self) -> Result<bool, Self::Error> {
-        EspTimer::is_scheduled(self)
+impl EspAsyncTimer {
+    pub async fn after(&mut self, duration: Duration) -> Result<(), EspError> {
+        self.timer.cancel()?;
+
+        self.notification.reset();
+        self.timer.after(duration)?;
+
+        self.notification.wait().await;
+
+        Ok(())
     }
 
-    fn cancel(&mut self) -> Result<bool, Self::Error> {
-        EspTimer::cancel(self)
+    pub fn every(&mut self, duration: Duration) -> Result<&'_ mut Self, EspError> {
+        self.timer.cancel()?;
+
+        self.notification.reset();
+        self.timer.every(duration)?;
+
+        Ok(self)
+    }
+
+    pub async fn tick(&mut self) -> Result<(), EspError> {
+        self.notification.wait().await;
+
+        Ok(())
     }
 }
 
-impl<'a> OnceTimer for EspTimer<'a> {
-    fn after(&mut self, duration: Duration) -> Result<(), Self::Error> {
-        EspTimer::after(self, duration)
+impl embedded_hal_async::delay::DelayNs for EspAsyncTimer {
+    async fn delay_ns(&mut self, ns: u32) {
+        EspAsyncTimer::after(self, Duration::from_micros(ns as _))
+            .await
+            .unwrap();
     }
-}
 
-impl<'a> PeriodicTimer for EspTimer<'a> {
-    fn every(&mut self, duration: Duration) -> Result<(), Self::Error> {
-        EspTimer::every(self, duration)
+    async fn delay_ms(&mut self, ms: u32) {
+        EspAsyncTimer::after(self, Duration::from_millis(ms as _))
+            .await
+            .unwrap();
     }
 }
 
@@ -190,6 +208,25 @@ where
         F: FnMut() + Send + 'static,
     {
         self.internal_timer(callback)
+    }
+
+    pub fn timer_async(&self) -> Result<EspAsyncTimer, EspError> {
+        let notification = Arc::new(Notification::new());
+
+        let timer = {
+            let notification = Arc::downgrade(&notification);
+
+            self.timer(move || {
+                if let Some(notification) = notification.upgrade() {
+                    notification.notify(NonZeroU32::new(1).unwrap());
+                }
+            })?
+        };
+
+        Ok(EspAsyncTimer {
+            timer,
+            notification,
+        })
     }
 
     /// # Safety
@@ -280,36 +317,6 @@ where
     }
 }
 
-impl<T> ErrorType for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    type Error = EspError;
-}
-
-impl<T> TimerService for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    type Timer<'a> = EspTimer<'static> where Self: 'a;
-
-    fn timer<F>(&self, callback: F) -> Result<Self::Timer<'_>, Self::Error>
-    where
-        F: FnMut() + Send + 'static,
-    {
-        EspTimerService::timer(self, callback)
-    }
-}
-
-impl<T> SystemTime for EspTimerService<T>
-where
-    T: EspTimerServiceType,
-{
-    fn now(&self) -> Duration {
-        EspTimerService::now(self)
-    }
-}
-
 #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
 mod isr {
     use crate::sys::EspError;
@@ -334,439 +341,139 @@ mod isr {
     }
 }
 
-mod asyncify {
-    use embedded_svc::utils::asyncify::timer::AsyncTimerService;
-    use embedded_svc::utils::asyncify::Asyncify;
+#[cfg(feature = "embassy-time-driver")]
+pub mod embassy_time_driver {
+    use core::cell::UnsafeCell;
 
-    impl Asyncify for super::EspTimerService<super::Task> {
-        type AsyncWrapper<S> = AsyncTimerService<S>;
+    use heapless::Vec;
+
+    use ::embassy_time_driver::{AlarmHandle, Driver};
+
+    use crate::hal::task::CriticalSection;
+
+    use crate::sys::*;
+
+    use crate::timer::*;
+
+    struct Alarm {
+        timer: Option<EspTimer<'static>>,
+        #[allow(clippy::type_complexity)]
+        callback: Option<(fn(*mut ()), *mut ())>,
     }
 
-    #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
-    impl Asyncify for super::EspTimerService<super::ISR> {
-        type AsyncWrapper<S> = AsyncTimerService<S>;
+    struct EspDriver<const MAX_ALARMS: usize = 16> {
+        alarms: UnsafeCell<Vec<Alarm, MAX_ALARMS>>,
+        cs: CriticalSection,
     }
-}
 
-pub mod embassy_time {
-    #[cfg(any(feature = "embassy-time-driver", feature = "embassy-time-isr-queue"))]
-    pub mod driver {
-        use core::cell::UnsafeCell;
-
-        use heapless::Vec;
-
-        use ::embassy_time::driver::{AlarmHandle, Driver};
-
-        use crate::hal::task::CriticalSection;
-
-        use crate::sys::*;
-
-        use crate::timer::*;
-
-        struct Alarm {
-            timer: Option<EspTimer<'static>>,
-            #[allow(clippy::type_complexity)]
-            callback: Option<(fn(*mut ()), *mut ())>,
-        }
-
-        struct EspDriver<const MAX_ALARMS: usize = 16> {
-            alarms: UnsafeCell<Vec<Alarm, MAX_ALARMS>>,
-            cs: CriticalSection,
-        }
-
-        impl<const MAX_ALARMS: usize> EspDriver<MAX_ALARMS> {
-            const fn new() -> Self {
-                Self {
-                    alarms: UnsafeCell::new(Vec::new()),
-                    cs: CriticalSection::new(),
-                }
-            }
-
-            fn call(&self, id: u8) {
-                let callback = {
-                    let _guard = self.cs.enter();
-
-                    let alarm = self.alarm(id);
-
-                    alarm.callback
-                };
-
-                if let Some((func, arg)) = callback {
-                    func(arg)
-                }
-            }
-
-            #[allow(clippy::mut_from_ref)]
-            fn alarm(&self, id: u8) -> &mut Alarm {
-                &mut unsafe { self.alarms.get().as_mut() }.unwrap()[id as usize]
+    impl<const MAX_ALARMS: usize> EspDriver<MAX_ALARMS> {
+        const fn new() -> Self {
+            Self {
+                alarms: UnsafeCell::new(Vec::new()),
+                cs: CriticalSection::new(),
             }
         }
 
-        unsafe impl<const MAX_ALARMS: usize> Send for EspDriver<MAX_ALARMS> {}
-        unsafe impl<const MAX_ALARMS: usize> Sync for EspDriver<MAX_ALARMS> {}
-
-        impl<const MAX_ALARMS: usize> Driver for EspDriver<MAX_ALARMS> {
-            fn now(&self) -> u64 {
-                unsafe { esp_timer_get_time() as _ }
-            }
-
-            unsafe fn allocate_alarm(&self) -> Option<AlarmHandle> {
-                let id = {
-                    let _guard = self.cs.enter();
-
-                    let id = self.alarms.get().as_mut().unwrap().len();
-
-                    if id < MAX_ALARMS {
-                        self.alarms
-                            .get()
-                            .as_mut()
-                            .unwrap()
-                            .push(Alarm {
-                                timer: None,
-                                callback: None,
-                            })
-                            .unwrap_or_else(|_| unreachable!());
-
-                        id as u8
-                    } else {
-                        return None;
-                    }
-                };
-
-                let service = EspTimerService::<Task>::new().unwrap();
-
-                // Driver is always statically allocated, so this is safe
-                let static_self: &'static Self = core::mem::transmute(self);
-
-                self.alarm(id).timer = Some(service.timer(move || static_self.call(id)).unwrap());
-
-                Some(AlarmHandle::new(id))
-            }
-
-            fn set_alarm_callback(&self, handle: AlarmHandle, callback: fn(*mut ()), ctx: *mut ()) {
+        fn call(&self, id: u8) {
+            let callback = {
                 let _guard = self.cs.enter();
 
-                let alarm = self.alarm(handle.id());
+                let alarm = self.alarm(id);
 
-                alarm.callback = Some((callback, ctx));
+                alarm.callback
+            };
+
+            if let Some((func, arg)) = callback {
+                func(arg)
             }
+        }
 
-            fn set_alarm(&self, handle: AlarmHandle, timestamp: u64) -> bool {
-                let alarm = self.alarm(handle.id());
+        #[allow(clippy::mut_from_ref)]
+        fn alarm(&self, id: u8) -> &mut Alarm {
+            &mut unsafe { self.alarms.get().as_mut() }.unwrap()[id as usize]
+        }
+    }
 
-                let now = self.now();
+    unsafe impl<const MAX_ALARMS: usize> Send for EspDriver<MAX_ALARMS> {}
+    unsafe impl<const MAX_ALARMS: usize> Sync for EspDriver<MAX_ALARMS> {}
 
-                if now < timestamp {
-                    alarm
-                        .timer
+    impl<const MAX_ALARMS: usize> Driver for EspDriver<MAX_ALARMS> {
+        fn now(&self) -> u64 {
+            unsafe { esp_timer_get_time() as _ }
+        }
+
+        unsafe fn allocate_alarm(&self) -> Option<AlarmHandle> {
+            let id = {
+                let _guard = self.cs.enter();
+
+                let id = self.alarms.get().as_mut().unwrap().len();
+
+                if id < MAX_ALARMS {
+                    self.alarms
+                        .get()
                         .as_mut()
                         .unwrap()
-                        .after(Duration::from_micros(timestamp))
-                        .unwrap();
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-
-        pub type LinkWorkaround = [*mut (); 4];
-
-        static mut __INTERNAL_REFERENCE: LinkWorkaround = [
-            _embassy_time_now as *mut _,
-            _embassy_time_allocate_alarm as *mut _,
-            _embassy_time_set_alarm_callback as *mut _,
-            _embassy_time_set_alarm as *mut _,
-        ];
-
-        pub fn link() -> LinkWorkaround {
-            unsafe { __INTERNAL_REFERENCE }
-        }
-
-        ::embassy_time::time_driver_impl!(static DRIVER: EspDriver = EspDriver::new());
-    }
-
-    #[cfg(feature = "embassy-time-isr-queue")]
-    pub mod queue {
-        #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
-        use crate::hal::interrupt::embassy_sync::IsrRawMutex as RawMutexImpl;
-
-        #[cfg(not(esp_idf_esp_timer_supports_isr_dispatch_method))]
-        use crate::hal::task::embassy_sync::EspRawMutex as RawMutexImpl;
-
-        use crate::sys::*;
-
-        use generic_queue::*;
-
-        struct AlarmImpl(esp_timer_handle_t);
-
-        impl AlarmImpl {
-            unsafe extern "C" fn handle_isr(alarm_context: *mut core::ffi::c_void) {
-                let alarm_context = (alarm_context as *const AlarmContext).as_ref().unwrap();
-
-                if crate::hal::interrupt::active() {
-                    #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
-                    {
-                        let signaled = crate::hal::interrupt::with_isr_yield_signal(move || {
-                            (alarm_context.callback)(alarm_context.ctx);
-                        });
-
-                        if signaled {
-                            crate::sys::esp_timer_isr_dispatch_need_yield();
-                        }
-                    }
-
-                    #[cfg(not(esp_idf_esp_timer_supports_isr_dispatch_method))]
-                    unreachable!();
-                } else {
-                    (alarm_context.callback)(alarm_context.ctx);
-                }
-            }
-        }
-
-        unsafe impl Send for AlarmImpl {}
-
-        impl Alarm for AlarmImpl {
-            fn new(context: &AlarmContext) -> Self {
-                #[cfg(esp_idf_esp_timer_supports_isr_dispatch_method)]
-                let dispatch_method = esp_timer_dispatch_t_ESP_TIMER_ISR;
-
-                #[cfg(not(esp_idf_esp_timer_supports_isr_dispatch_method))]
-                let dispatch_method = esp_timer_dispatch_t_ESP_TIMER_TASK;
-
-                let mut handle: esp_timer_handle_t = core::ptr::null_mut();
-
-                esp!(unsafe {
-                    esp_timer_create(
-                        &esp_timer_create_args_t {
-                            callback: Some(AlarmImpl::handle_isr),
-                            name: b"embassy-time-queue\0" as *const _ as *const _,
-                            arg: context as *const _ as *mut _,
-                            dispatch_method,
-                            skip_unhandled_events: false,
-                        },
-                        &mut handle as *mut _,
-                    )
-                })
-                .unwrap();
-
-                Self(handle)
-            }
-
-            fn schedule(&mut self, timestamp: u64) {
-                let now = unsafe { esp_timer_get_time() as _ };
-                let after = if timestamp <= now { 0 } else { timestamp - now };
-
-                unsafe {
-                    esp_timer_stop(self.0);
-                }
-
-                if timestamp < u64::MAX {
-                    esp!(unsafe { esp_timer_start_once(self.0, after as _) }).unwrap();
-                }
-            }
-        }
-
-        pub type LinkWorkaround = [*mut (); 1];
-
-        static mut __INTERNAL_REFERENCE: LinkWorkaround = [_embassy_time_schedule_wake as *mut _];
-
-        pub fn link() -> (LinkWorkaround, super::driver::LinkWorkaround) {
-            (unsafe { __INTERNAL_REFERENCE }, super::driver::link())
-        }
-
-        ::embassy_time::timer_queue_impl!(static QUEUE: Queue<RawMutexImpl, AlarmImpl> = Queue::new());
-
-        mod generic_queue {
-            use core::cell::RefCell;
-            use core::cmp::Ordering;
-            use core::task::Waker;
-
-            use embassy_sync::blocking_mutex::{raw::RawMutex, Mutex};
-
-            use embassy_time::queue::TimerQueue;
-            use embassy_time::Instant;
-
-            use heapless::sorted_linked_list::{LinkedIndexU8, Min, SortedLinkedList};
-
-            #[derive(Debug)]
-            struct Timer {
-                at: Instant,
-                waker: Waker,
-            }
-
-            impl PartialEq for Timer {
-                fn eq(&self, other: &Self) -> bool {
-                    self.at == other.at
-                }
-            }
-
-            impl Eq for Timer {}
-
-            impl PartialOrd for Timer {
-                fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                    Some(self.cmp(other))
-                }
-            }
-
-            impl Ord for Timer {
-                fn cmp(&self, other: &Self) -> Ordering {
-                    self.at.cmp(&other.at)
-                }
-            }
-
-            pub struct AlarmContext {
-                pub callback: fn(*mut ()),
-                pub ctx: *mut (),
-            }
-
-            impl AlarmContext {
-                const fn new() -> Self {
-                    Self {
-                        callback: Self::noop,
-                        ctx: core::ptr::null_mut(),
-                    }
-                }
-
-                fn set(&mut self, callback: fn(*mut ()), ctx: *mut ()) {
-                    self.callback = callback;
-                    self.ctx = ctx;
-                }
-
-                fn noop(_ctx: *mut ()) {}
-            }
-
-            unsafe impl Send for AlarmContext {}
-
-            pub trait Alarm {
-                fn new(context: &AlarmContext) -> Self;
-                fn schedule(&mut self, timestamp: u64);
-            }
-
-            struct InnerQueue<A> {
-                queue: SortedLinkedList<Timer, LinkedIndexU8, Min, 128>,
-                alarm: Option<A>,
-                alarm_context: AlarmContext,
-                alarm_at: Instant,
-            }
-
-            impl<A: Alarm> InnerQueue<A> {
-                const fn new() -> Self {
-                    Self {
-                        queue: SortedLinkedList::new_u8(),
-                        alarm: None,
-                        alarm_context: AlarmContext::new(),
-                        alarm_at: Instant::MAX,
-                    }
-                }
-
-                fn schedule_wake(&mut self, at: Instant, waker: &Waker) {
-                    self.initialize();
-
-                    self.queue
-                        .find_mut(|timer| timer.waker.will_wake(waker))
-                        .map(|mut timer| {
-                            timer.at = at;
-                            timer.finish();
+                        .push(Alarm {
+                            timer: None,
+                            callback: None,
                         })
-                        .unwrap_or_else(|| {
-                            let mut timer = Timer {
-                                waker: waker.clone(),
-                                at,
-                            };
+                        .unwrap_or_else(|_| unreachable!());
 
-                            loop {
-                                match self.queue.push(timer) {
-                                    Ok(()) => break,
-                                    Err(e) => timer = e,
-                                }
-
-                                self.queue.pop().unwrap().waker.wake();
-                            }
-                        });
-
-                    // Don't wait for the alarm callback to trigger and directly
-                    // dispatch all timers that are already due
-                    //
-                    // Then update the alarm if necessary
-                    self.dispatch();
+                    id as u8
+                } else {
+                    return None;
                 }
+            };
 
-                fn dispatch(&mut self) {
-                    let now = Instant::now();
+            let service = EspTimerService::<Task>::new().unwrap();
 
-                    while self.queue.peek().filter(|timer| timer.at <= now).is_some() {
-                        self.queue.pop().unwrap().waker.wake();
-                    }
+            // Driver is always statically allocated, so this is safe
+            let static_self: &'static Self = core::mem::transmute(self);
 
-                    self.update_alarm();
-                }
+            self.alarm(id).timer = Some(service.timer(move || static_self.call(id)).unwrap());
 
-                fn update_alarm(&mut self) {
-                    if let Some(timer) = self.queue.peek() {
-                        let new_at = timer.at;
+            Some(AlarmHandle::new(id))
+        }
 
-                        if self.alarm_at != new_at {
-                            self.alarm_at = new_at;
-                            self.alarm.as_mut().unwrap().schedule(new_at.as_ticks());
-                        }
-                    } else {
-                        self.alarm_at = Instant::MAX;
-                        self.alarm
-                            .as_mut()
-                            .unwrap()
-                            .schedule(Instant::MAX.as_ticks());
-                    }
-                }
+        fn set_alarm_callback(&self, handle: AlarmHandle, callback: fn(*mut ()), ctx: *mut ()) {
+            let _guard = self.cs.enter();
 
-                fn handle_alarm(&mut self) {
-                    self.alarm_at = Instant::MAX;
+            let alarm = self.alarm(handle.id());
 
-                    self.dispatch();
-                }
+            alarm.callback = Some((callback, ctx));
+        }
 
-                fn initialize(&mut self) {
-                    if self.alarm.is_none() {
-                        self.alarm = Some(A::new(&self.alarm_context));
-                    }
-                }
-            }
+        fn set_alarm(&self, handle: AlarmHandle, timestamp: u64) -> bool {
+            let alarm = self.alarm(handle.id());
 
-            pub struct Queue<R: RawMutex, A: Alarm> {
-                inner: Mutex<R, RefCell<InnerQueue<A>>>,
-            }
+            let now = self.now();
 
-            impl<R: RawMutex, A: Alarm> Queue<R, A> {
-                pub const fn new() -> Self {
-                    Self {
-                        inner: Mutex::new(RefCell::new(InnerQueue::new())),
-                    }
-                }
-
-                fn schedule_wake(&'static self, at: Instant, waker: &Waker) {
-                    self.inner.lock(|inner| {
-                        let mut inner = inner.borrow_mut();
-                        inner
-                            .alarm_context
-                            .set(Self::handle_alarm_callback, self as *const _ as _);
-                        inner.schedule_wake(at, waker);
-                    });
-                }
-
-                fn handle_alarm(&self) {
-                    self.inner.lock(|inner| inner.borrow_mut().handle_alarm());
-                }
-
-                fn handle_alarm_callback(ctx: *mut ()) {
-                    unsafe { (ctx as *const Self).as_ref().unwrap() }.handle_alarm();
-                }
-            }
-
-            impl<R: RawMutex, A: Alarm> TimerQueue for Queue<R, A> {
-                fn schedule_wake(&'static self, at: Instant, waker: &Waker) {
-                    Queue::schedule_wake(self, at, waker);
-                }
+            if now < timestamp {
+                alarm
+                    .timer
+                    .as_mut()
+                    .unwrap()
+                    .after(Duration::from_micros(timestamp - now))
+                    .unwrap();
+                true
+            } else {
+                false
             }
         }
     }
+
+    pub type LinkWorkaround = [*mut (); 4];
+
+    static mut __INTERNAL_REFERENCE: LinkWorkaround = [
+        _embassy_time_now as *mut _,
+        _embassy_time_allocate_alarm as *mut _,
+        _embassy_time_set_alarm_callback as *mut _,
+        _embassy_time_set_alarm as *mut _,
+    ];
+
+    pub fn link() -> LinkWorkaround {
+        unsafe { __INTERNAL_REFERENCE }
+    }
+
+    ::embassy_time_driver::time_driver_impl!(static DRIVER: EspDriver = EspDriver::new());
 }

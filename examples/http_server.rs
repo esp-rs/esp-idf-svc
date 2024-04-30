@@ -2,6 +2,8 @@
 //!
 //! Go to 192.168.71.1 to test
 
+use core::convert::TryInto;
+
 use embedded_svc::{
     http::{Headers, Method},
     io::{Read, Write},
@@ -22,7 +24,7 @@ use serde::Deserialize;
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
-static INDEX_HTML: &str = include_str!("json_post_handler.html");
+static INDEX_HTML: &str = include_str!("http_server_page.html");
 
 // Max payload length
 const MAX_LEN: usize = 128;
@@ -46,11 +48,12 @@ fn main() -> anyhow::Result<()> {
     let mut server = create_server()?;
 
     server.fn_handler("/", Method::Get, |req| {
-        req.into_ok_response()?.write(INDEX_HTML.as_bytes())?;
-        Ok(())
+        req.into_ok_response()?
+            .write_all(INDEX_HTML.as_bytes())
+            .map(|_| ())
     })?;
 
-    server.fn_handler("/post", Method::Post, |mut req| {
+    server.fn_handler::<anyhow::Error, _>("/post", Method::Post, |mut req| {
         let len = req.content_len().unwrap_or(0) as usize;
 
         if len > MAX_LEN {
@@ -98,10 +101,10 @@ fn create_server() -> anyhow::Result<EspHttpServer<'static>> {
     )?;
 
     let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
-        ssid: SSID.into(),
+        ssid: SSID.try_into().unwrap(),
         ssid_hidden: true,
         auth_method: AuthMethod::WPA2Personal,
-        password: PASSWORD.into(),
+        password: PASSWORD.try_into().unwrap(),
         channel: CHANNEL,
         ..Default::default()
     });

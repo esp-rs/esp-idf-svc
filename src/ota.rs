@@ -23,17 +23,23 @@ use crate::sys::*;
 use crate::io::EspIOError;
 use crate::private::{common::*, cstr::*, mutex};
 
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
 impl From<Newtype<&esp_app_desc_t>> for FirmwareInfo {
     fn from(app_desc: Newtype<&esp_app_desc_t>) -> Self {
         let app_desc = app_desc.0;
 
         let mut result = Self {
-            version: unsafe { from_cstr_ptr(&app_desc.version as *const _).into() },
+            version: unsafe { from_cstr_ptr(&app_desc.version as *const _) }
+                .try_into()
+                .unwrap(),
             signature: Some(heapless::Vec::from_slice(&app_desc.app_elf_sha256).unwrap()),
-            released: "".into(),
-            description: Some(unsafe { from_cstr_ptr(&app_desc.project_name as *const _).into() }),
+            released: "".try_into().unwrap(),
+            description: Some(
+                unsafe { from_cstr_ptr(&app_desc.project_name as *const _) }
+                    .try_into()
+                    .unwrap(),
+            ),
             download_id: None,
         };
 
@@ -234,19 +240,28 @@ impl EspOta {
     }
 
     pub fn get_boot_slot(&self) -> Result<Slot, EspError> {
-        self.get_slot(unsafe { esp_ota_get_boot_partition().as_ref().unwrap() })
+        if let Some(partition) = unsafe { esp_ota_get_boot_partition().as_ref() } {
+            self.get_slot(partition)
+        } else {
+            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
+        }
     }
 
     pub fn get_running_slot(&self) -> Result<Slot, EspError> {
-        self.get_slot(unsafe { esp_ota_get_running_partition().as_ref().unwrap() })
+        if let Some(partition) = unsafe { esp_ota_get_running_partition().as_ref() } {
+            self.get_slot(partition)
+        } else {
+            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
+        }
     }
 
     pub fn get_update_slot(&self) -> Result<Slot, EspError> {
-        self.get_slot(unsafe {
-            esp_ota_get_next_update_partition(ptr::null())
-                .as_ref()
-                .unwrap()
-        })
+        if let Some(partition) = unsafe { esp_ota_get_next_update_partition(ptr::null()).as_ref() }
+        {
+            self.get_slot(partition)
+        } else {
+            Err(EspError::from_infallible::<ESP_ERR_NOT_FOUND>())
+        }
     }
 
     pub fn get_last_invalid_slot(&self) -> Result<Option<Slot>, EspError> {
@@ -321,7 +336,9 @@ impl EspOta {
 
     fn get_slot(&self, partition: &esp_partition_t) -> Result<Slot, EspError> {
         Ok(Slot {
-            label: unsafe { from_cstr_ptr(&partition.label as *const _ as *const _).into() },
+            label: unsafe { from_cstr_ptr(&partition.label as *const _ as *const _) }
+                .try_into()
+                .unwrap(),
             state: self.get_state(partition)?,
             firmware: self.get_firmware_info(partition)?,
         })
