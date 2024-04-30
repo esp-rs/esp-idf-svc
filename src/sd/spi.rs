@@ -20,6 +20,7 @@ impl Default for SpiDeviceBuilder {
             gpio_cd: gpio_num_t_GPIO_NUM_NC,
             gpio_wp: gpio_num_t_GPIO_NUM_NC,
             gpio_int: gpio_num_t_GPIO_NUM_NC,
+            #[cfg(esp_idf_version = "5.2")]
             gpio_wp_polarity: false, // Active when low
         })
     }

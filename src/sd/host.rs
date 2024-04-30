@@ -39,7 +39,9 @@ impl SdHost {
             io_int_enable: Some(sdspi_host_io_int_enable),
             io_int_wait: Some(sdspi_host_io_int_wait),
             get_real_freq: Some(sdspi_host_get_real_freq),
+            #[cfg(esp_idf_version = "5.2")]
             input_delay_phase: sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_0,
+            #[cfg(esp_idf_version = "5.2")]
             set_input_delay: None,
             command_timeout_ms: 0,
         };
@@ -72,7 +74,9 @@ impl SdHost {
             io_int_enable: Some(sdmmc_host_io_int_enable),
             io_int_wait: Some(sdmmc_host_io_int_wait),
             get_real_freq: Some(sdmmc_host_get_real_freq),
+            #[cfg(esp_idf_version = "5.2")]
             input_delay_phases: sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_0,
+            #[cfg(esp_idf_version = "5.2")]
             set_input_delay: Some(sdmmc_host_set_input_delay),
             command_timeout_ms: 0,
         };
