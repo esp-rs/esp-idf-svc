@@ -488,7 +488,7 @@ where
     /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
     pub unsafe fn subscribe_nonstatic<F>(&self, events_cb: F) -> Result<(), EspError>
     where
-        F: FnMut((GattInterface, GattsEvent)) + Send + 'static,
+        F: FnMut((GattInterface, GattsEvent)) + Send + 'd,
     {
         SINGLETON.subscribe(events_cb);
 
