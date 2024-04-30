@@ -67,52 +67,48 @@ impl From<esp_bd_addr_t> for BdAddr {
 pub struct BtUuid(esp_bt_uuid_t);
 
 impl BtUuid {
-    pub fn raw(&self) -> esp_bt_uuid_t {
+    pub const fn raw(&self) -> esp_bt_uuid_t {
         self.0
     }
 
-    pub fn uuid16(uuid: u16) -> Self {
-        let mut esp_uuid = esp_bt_uuid_t {
+    pub const fn uuid16(uuid: u16) -> Self {
+        let esp_uuid = esp_bt_uuid_t {
+            len: 2,
+            uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid16: uuid },
+        };
+
+        Self(esp_uuid)
+    }
+
+    pub const fn uuid32(uuid: u32) -> Self {
+        let esp_uuid = esp_bt_uuid_t {
+            len: 4,
+            uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid32: uuid },
+        };
+
+        Self(esp_uuid)
+    }
+
+    pub const fn uuid128(uuid: u128) -> Self {
+        let esp_uuid = esp_bt_uuid_t {
             len: 16,
-            ..Default::default()
+            uuid: esp_bt_uuid_t__bindgen_ty_1 {
+                uuid128: uuid.to_le_bytes(),
+            },
         };
-
-        esp_uuid.uuid.uuid16 = uuid;
 
         Self(esp_uuid)
     }
 
-    pub fn uuid32(uuid: u32) -> Self {
-        let mut esp_uuid = esp_bt_uuid_t {
-            len: 32,
-            ..Default::default()
-        };
-
-        esp_uuid.uuid.uuid32 = uuid;
-
-        Self(esp_uuid)
-    }
-
-    pub fn uuid128(uuid: u128) -> Self {
-        let mut esp_uuid = esp_bt_uuid_t {
-            len: 128,
-            ..Default::default()
-        };
-
-        esp_uuid.uuid.uuid128 = uuid.to_ne_bytes();
-
-        Self(esp_uuid)
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         match self.0.len {
-            16 => unsafe {
+            2 => unsafe {
                 core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 2)
             },
-            32 => unsafe {
+            4 => unsafe {
                 core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 4)
             },
-            128 => unsafe { &self.0.uuid.uuid128 },
+            16 => unsafe { &self.0.uuid.uuid128 },
             _ => unreachable!(),
         }
     }
