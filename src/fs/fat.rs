@@ -28,6 +28,7 @@ impl Default for FatBuilder {
                 max_files: 4,
                 format_if_mount_failed: false,
                 allocation_unit_size: 16 * 1024,
+                disk_status_check_enable: false,
             },
             spi_device: None,
             #[cfg(esp_idf_sdmmc_host_enabled)]

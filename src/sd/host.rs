@@ -38,6 +38,7 @@ impl SdHost {
             },
             io_int_enable: Some(sdspi_host_io_int_enable),
             io_int_wait: Some(sdspi_host_io_int_wait),
+            get_real_freq: Some(sdspi_host_get_real_freq),
             command_timeout_ms: 0,
         };
 
