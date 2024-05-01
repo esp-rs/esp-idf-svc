@@ -354,9 +354,9 @@ impl<'a> From<(esp_gatts_cb_event_t, &'a esp_ble_gatts_cb_param_t)> for GattsEve
                     link_role: param.connect.link_role,
                     addr: param.connect.remote_bda.into(),
                     conn_params: GattConnParams {
-                        interval: param.connect.conn_params.interval,
-                        latency: param.connect.conn_params.latency,
-                        timeout: param.connect.conn_params.timeout,
+                        interval_ms: param.connect.conn_params.interval as u32 * 125 / 100,
+                        latency_ms: param.connect.conn_params.latency as u32 * 125 / 100,
+                        timeout_ms: param.connect.conn_params.timeout as u32 * 10,
                     },
                 }
             },
