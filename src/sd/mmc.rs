@@ -22,6 +22,26 @@ impl Default for SlotConfiguration {
                 // ? : Why union here?
                 gpio_wp: SDMMC_SLOT_NO_WP,
             },
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            clk: 14,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            cmd: 15,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d0: 2,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d1: 4,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d2: 12,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d3: 13,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d4: 33,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d5: 34,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d6: 35,
+            #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
+            d7: 36,
         })
     }
 }
