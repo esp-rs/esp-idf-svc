@@ -1,6 +1,6 @@
 pub mod spi;
 
-#[cfg(esp_idf_comp_sdmmc_enabled)]
+#[cfg(esp_idf_soc_sdmmc_host_supported)]
 pub mod mmc;
 
 pub mod host;

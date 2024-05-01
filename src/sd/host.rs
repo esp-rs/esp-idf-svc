@@ -51,7 +51,7 @@ impl SdHost {
 
     /// Create a new SD/MMC host with the default configuration.
     /// This host will use the MMC slot 1, with 4-bit mode enabled, and max frequency set to 20MHz
-    #[cfg(esp_idf_comp_sdmmc_enabled)]
+    #[cfg(esp_idf_soc_sdmmc_host_supported)]
     pub fn new_with_mmc() -> Self {
         let host = sdmmc_host_t {
             flags: _SDMMC_HOST_FLAG_8BIT
@@ -75,7 +75,7 @@ impl SdHost {
             io_int_wait: Some(sdmmc_host_io_int_wait),
             get_real_freq: Some(sdmmc_host_get_real_freq),
             #[cfg(esp_idf_version = "5.2")]
-            input_delay_phases: sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_0,
+            input_delay_phase: sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_0,
             #[cfg(esp_idf_version = "5.2")]
             set_input_delay: Some(sdmmc_host_set_input_delay),
             command_timeout_ms: 0,
