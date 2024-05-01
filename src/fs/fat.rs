@@ -3,19 +3,10 @@ use core::ffi::c_void;
 
 use crate::private::cstr::*;
 
-use crate::{
-    sd::{host::SdHost, spi::SpiDevice},
-    sys::*,
-};
-
-#[cfg(esp_idf_soc_sdmmc_host_supported)]
-use crate::sd::mmc::SlotConfiguration;
+use crate::sd::host::SdDevice;
+use crate::{sd::host::SdHost, sys::*};
 
 pub struct FatBuilder {
-    host: Option<SdHost>,
-    spi_device: Option<SpiDevice>,
-    #[cfg(esp_idf_soc_sdmmc_host_supported)]
-    slot_configuration: Option<SlotConfiguration>,
     mount_config: esp_vfs_fat_mount_config_t,
     base_path: CString,
 }
@@ -23,7 +14,6 @@ pub struct FatBuilder {
 impl Default for FatBuilder {
     fn default() -> Self {
         Self {
-            host: None,
             mount_config: esp_vfs_fat_mount_config_t {
                 max_files: 4,
                 format_if_mount_failed: false,
@@ -33,39 +23,12 @@ impl Default for FatBuilder {
                 ))] // For ESP-IDF v5.0 and later
                 disk_status_check_enable: false,
             },
-            spi_device: None,
-            #[cfg(esp_idf_soc_sdmmc_host_supported)]
-            slot_configuration: None,
             base_path: to_cstring_arg("/").expect("Failed to create CString from /sdcard"),
         }
     }
 }
 
 impl FatBuilder {
-    pub fn set_host(mut self, host: SdHost) -> Self {
-        self.host = Some(host);
-        self
-    }
-
-    pub fn set_spi_device(mut self, spi_device: SpiDevice) -> Self {
-        #[cfg(esp_idf_soc_sdmmc_host_supported)]
-        if self.slot_configuration.is_some() {
-            panic!("SPI device cannot be set when using MMC slot configuration");
-        }
-
-        self.spi_device = Some(spi_device);
-        self
-    }
-
-    #[cfg(esp_idf_soc_sdmmc_host_supported)]
-    pub fn set_slot_configuration(mut self, slot_configuration: SlotConfiguration) -> Self {
-        if self.spi_device.is_some() {
-            panic!("Slot configuration cannot be set when using SPI device");
-        }
-        self.slot_configuration = Some(slot_configuration);
-        self
-    }
-
     pub fn set_max_files(mut self, max_files: u32) -> Self {
         self.mount_config.max_files = max_files as i32;
         self
@@ -84,10 +47,6 @@ impl FatBuilder {
     pub fn set_base_path(mut self, base_path: &str) -> Self {
         self.base_path = CString::new(base_path).expect("Failed to create CString from base_path");
         self
-    }
-
-    pub fn build(self) -> Result<Fat, esp_err_t> {
-        Fat::mount(self)
     }
 }
 
@@ -109,32 +68,12 @@ impl Fat {
         FatBuilder::default()
     }
 
-    pub fn mount(builder: FatBuilder) -> Result<Self, esp_err_t> {
+    pub fn mount(builder: FatBuilder, host: SdHost) -> Result<Self, esp_err_t> {
         let mut card: *mut sdmmc_card_t = core::ptr::null_mut();
 
-        let host = builder.host.as_ref().expect("Host not set");
-
-        if let Some(spi_device) = &builder.spi_device {
-            let result = unsafe {
-                esp_vfs_fat_sdspi_mount(
-                    builder.base_path.as_ptr(),
-                    host.get_inner_handle() as *const sdmmc_host_t,
-                    spi_device.get_device_configuration() as *const sdspi_device_config_t,
-                    &builder.mount_config as *const esp_vfs_fat_mount_config_t,
-                    &mut card as *mut *mut sdmmc_card_t,
-                )
-            };
-
-            if result == ESP_OK {
-                return Ok(Self { builder, card });
-            } else {
-                return Err(result);
-            }
-        }
-
-        #[cfg(esp_idf_soc_sdmmc_host_supported)]
-        if let Some(slot_configuration) = &builder.slot_configuration {
-            let result = unsafe {
+        let result = match host.get_device() {
+            #[cfg(esp_idf_soc_sdmmc_host_supported)]
+            SdDevice::Mmc(slot_configuration) => unsafe {
                 esp_vfs_fat_sdmmc_mount(
                     builder.base_path.as_ptr(),
                     host.get_inner_handle() as *const sdmmc_host_t,
@@ -142,15 +81,22 @@ impl Fat {
                     &builder.mount_config as *const esp_vfs_fat_mount_config_t,
                     &mut card as *mut *mut sdmmc_card_t,
                 )
-            };
+            },
+            SdDevice::Spi(spi_device) => unsafe {
+                esp_vfs_fat_sdspi_mount(
+                    builder.base_path.as_ptr(),
+                    host.get_inner_handle() as *const sdmmc_host_t,
+                    spi_device.get_device_configuration() as *const sdspi_device_config_t,
+                    &builder.mount_config as *const esp_vfs_fat_mount_config_t,
+                    &mut card as *mut *mut sdmmc_card_t,
+                )
+            },
+        };
 
-            if result == ESP_OK {
-                return Ok(Self { builder, card });
-            } else {
-                return Err(result);
-            }
+        if result == ESP_OK {
+            Ok(Self { builder, card })
+        } else {
+            Err(result)
         }
-
-        panic!("Either SPI device or slot configuration must be set");
     }
 }

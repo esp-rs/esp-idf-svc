@@ -1,93 +1,20 @@
 use crate::sys::*;
 
-use core::ops::Deref;
+use core::{marker::PhantomData, ops::Deref};
 
-use esp_idf_hal::{gpio, peripheral, spi};
+use esp_idf_hal::{
+    gpio::{InputPin, OutputPin},
+    peripheral::Peripheral,
+    spi,
+};
 
-pub struct SpiDeviceBuilder(sdspi_device_config_t);
-
-impl From<sdspi_device_config_t> for SpiDeviceBuilder {
-    fn from(config: sdspi_device_config_t) -> Self {
-        Self(config)
-    }
-}
-
-impl Default for SpiDeviceBuilder {
-    fn default() -> Self {
-        Self(sdspi_device_config_t {
-            host_id: spi_host_device_t_SPI2_HOST,
-            gpio_cs: gpio_num_t_GPIO_NUM_13,
-            gpio_cd: gpio_num_t_GPIO_NUM_NC,
-            gpio_wp: gpio_num_t_GPIO_NUM_NC,
-            gpio_int: gpio_num_t_GPIO_NUM_NC,
-            #[cfg(not(any(
-                esp_idf_version_major = "4",
-                all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
-                all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
-            )))] // For ESP-IDF v5.2 and later
-            gpio_wp_polarity: false, // Active when low
-        })
-    }
-}
-
-impl SpiDeviceBuilder {
-    pub fn set_spi<T: spi::SpiAnyPins + spi::Spi>(
-        &mut self,
-        _spi: impl peripheral::Peripheral<P = T>,
-    ) -> &mut Self {
-        self.0.host_id = T::device();
-        self
-    }
-
-    pub fn set_cs_pin(
-        mut self,
-        pin: impl peripheral::Peripheral<P = impl gpio::OutputPin>,
-    ) -> Self {
-        let peripheral_reference = pin.into_ref();
-        let pin = peripheral_reference.deref();
-        self.0.gpio_cs = pin.pin();
-        self
-    }
-
-    pub fn set_cd_pin(mut self, pin: impl peripheral::Peripheral<P = impl gpio::InputPin>) -> Self {
-        let peripheral_reference = pin.into_ref();
-        let pin = peripheral_reference.deref();
-        self.0.gpio_cd = pin.pin();
-        self
-    }
-
-    pub fn set_wp_pin(mut self, pin: impl peripheral::Peripheral<P = impl gpio::InputPin>) -> Self {
-        let peripheral_reference = pin.into_ref();
-        let pin = peripheral_reference.deref();
-        self.0.gpio_wp = pin.pin();
-        self
-    }
-
-    pub fn set_int_pin(
-        mut self,
-        pin: impl peripheral::Peripheral<P = impl gpio::InputPin>,
-    ) -> Self {
-        let peripheral_reference = pin.into_ref();
-        let pin = peripheral_reference.deref();
-        self.0.gpio_int = pin.pin();
-        self
-    }
-
-    pub fn build(self) -> Result<SpiDevice, esp_err_t> {
-        SpiDevice::initialize(self.0)
-    }
-
-    pub fn get_inner_configuration(&self) -> &sdspi_device_config_t {
-        &self.0
-    }
-}
-
-pub struct SpiDevice {
+pub struct SpiDevice<'d> {
     configuration: sdspi_device_config_t,
     handle: sdspi_dev_handle_t,
+    _p: PhantomData<&'d mut ()>,
 }
 
-impl Drop for SpiDevice {
+impl Drop for SpiDevice<'_> {
     fn drop(&mut self) {
         let result = unsafe { sdspi_host_remove_device(self.handle) };
 
@@ -97,11 +24,7 @@ impl Drop for SpiDevice {
     }
 }
 
-impl SpiDevice {
-    pub fn builder() -> SpiDeviceBuilder {
-        SpiDeviceBuilder::default()
-    }
-
+impl<'d> SpiDevice<'d> {
     pub fn initialize_host() -> Result<(), esp_err_t> {
         let result = unsafe { sdspi_host_init() };
 
@@ -112,7 +35,36 @@ impl SpiDevice {
         }
     }
 
-    pub fn initialize(configuration: sdspi_device_config_t) -> Result<Self, esp_err_t> {
+    pub fn new<T>(
+        _spi: impl Peripheral<P = T>,
+        cs: impl Peripheral<P = impl OutputPin> + 'd,
+        cd: impl Peripheral<P = impl InputPin> + 'd,
+        wp: impl Peripheral<P = impl InputPin> + 'd,
+        int: impl Peripheral<P = impl InputPin> + 'd,
+        #[cfg(not(any(
+            esp_idf_version_major = "4",
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+        )))] // For ESP-IDF v5.2 and later
+        wp_polarity: Option<bool>,
+    ) -> Result<Self, esp_err_t>
+    where
+        T: spi::SpiAnyPins + spi::Spi,
+    {
+        let configuration = sdspi_device_config_t {
+            host_id: T::device(),
+            gpio_cs: cs.into_ref().deref().pin(),
+            gpio_cd: cd.into_ref().deref().pin(),
+            gpio_wp: wp.into_ref().deref().pin(),
+            gpio_int: int.into_ref().deref().pin(),
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+                all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+            )))] // For ESP-IDF v5.2 and later
+            gpio_wp_polarity: wp_polarity.unwrap_or(false), // Active when low
+        };
+
         let mut handle: sdspi_dev_handle_t = 0;
 
         let result = unsafe {
@@ -123,6 +75,7 @@ impl SpiDevice {
             Ok(Self {
                 configuration,
                 handle,
+                _p: PhantomData,
             })
         } else {
             Err(result)

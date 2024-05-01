@@ -1,26 +1,46 @@
-#![allow(unsued_variables)]
-
 use crate::sys::*;
+
+#[cfg(esp_idf_soc_sdmmc_host_supported)]
+use super::mmc::SlotConfiguration;
 
 use super::spi::SpiDevice;
 
-pub struct SdHost(sdmmc_host_t);
+pub enum SdDevice<'d> {
+    Spi(SpiDevice<'d>),
+    #[cfg(esp_idf_soc_sdmmc_host_supported)]
+    Mmc(SlotConfiguration<'d>),
+}
+
+pub struct SdHost<'d> {
+    device: SdDevice<'d>,
+    host: sdmmc_host_t,
+}
+
+#[cfg(not(any(
+    esp_idf_version_major = "4",
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+)))] // For ESP-IDF v5.2 and later
+pub enum DelayPhase {
+    Phase0 = sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_0 as isize,
+    Phase1 = sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_1 as isize,
+    Phase2 = sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_2 as isize,
+    Phase3 = sdmmc_delay_phase_t_SDMMC_DELAY_PHASE_3 as isize,
+}
 
 const _HOST_FLAG_SPI: u32 = 1 << 3;
 const _HOST_FLAG_DEINIT_ARG: u32 = 1 << 5;
 const _DEFAULT_FREQUENCY: i32 = 20000;
+const _HIGH_SPEED_FREQUENCY: i32 = 40000;
 
 const _DEFAULT_IO_VOLTAGE: f32 = 3.3;
 const _SDMMC_HOST_FLAG_1BIT: u32 = 1 << 0;
 const _SDMMC_HOST_FLAG_4BIT: u32 = 1 << 1;
 const _SDMMC_HOST_FLAG_8BIT: u32 = 1 << 2;
 const _SDMMC_HOST_FLAG_DDR: u32 = 1 << 3;
-const _SDMMC_HOST_SLOT_0: u32 = 0;
-const _SDMMC_HOST_SLOT_1: u32 = 1;
-const _SDMMC_HOST_DEFAULT_SLOT: u32 = _SDMMC_HOST_SLOT_1;
 
-impl SdHost {
-    pub fn new_with_spi(device: &SpiDevice) -> Self {
+impl<'d> SdHost<'d> {
+    pub fn new_with_spi(device: SpiDevice<'d>) -> Self {
         let host = sdmmc_host_t {
             flags: _HOST_FLAG_SPI | _HOST_FLAG_DEINIT_ARG,
             slot: *device.get_inner_handle(),
@@ -58,19 +78,22 @@ impl SdHost {
             command_timeout_ms: 0,
         };
 
-        Self(host)
+        Self {
+            device: SdDevice::Spi(device),
+            host,
+        }
     }
 
     /// Create a new SD/MMC host with the default configuration.
     /// This host will use the MMC slot 1, with 4-bit mode enabled, and max frequency set to 20MHz
     #[cfg(esp_idf_soc_sdmmc_host_supported)]
-    pub fn new_with_mmc() -> Self {
+    pub fn new_with_mmc(configuration: SlotConfiguration<'d>) -> Self {
         let host = sdmmc_host_t {
             flags: _SDMMC_HOST_FLAG_8BIT
                 | _SDMMC_HOST_FLAG_4BIT
                 | _SDMMC_HOST_FLAG_1BIT
                 | _SDMMC_HOST_FLAG_DDR,
-            slot: _SDMMC_HOST_DEFAULT_SLOT as i32,
+            slot: configuration.get_slot() as i32,
             max_freq_khz: _DEFAULT_FREQUENCY,
             io_voltage: _DEFAULT_IO_VOLTAGE,
             init: Some(sdmmc_host_init),
@@ -101,22 +124,46 @@ impl SdHost {
             command_timeout_ms: 0,
         };
 
-        Self(host)
+        Self {
+            device: SdDevice::Mmc(configuration),
+            host,
+        }
     }
 
-    pub fn set_command_timeout(&mut self, timeout: u32) {
-        self.0.command_timeout_ms = timeout as i32;
+    pub fn set_command_timeout(mut self, timeout: u32) -> Self {
+        self.host.command_timeout_ms = timeout as i32;
+        self
     }
 
-    pub fn set_io_voltage(&mut self, voltage: f32) {
-        self.0.io_voltage = voltage;
+    pub fn set_io_voltage(mut self, voltage: f32) -> Self {
+        self.host.io_voltage = voltage;
+        self
     }
 
-    pub fn set_maximum_frequency(&mut self, frequency: i32) {
-        self.0.max_freq_khz = frequency;
+    pub fn set_speed(mut self, high_speed: bool) -> Self {
+        if high_speed {
+            self.host.max_freq_khz = _HIGH_SPEED_FREQUENCY;
+        } else {
+            self.host.max_freq_khz = _DEFAULT_FREQUENCY;
+        }
+
+        self
     }
 
     pub fn get_inner_handle(&self) -> &sdmmc_host_t {
-        &self.0
+        &self.host
+    }
+
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+    )))] // For ESP-IDF v5.2 and later
+    pub fn set_input_delay_phase(&mut self, phase: DelayPhase) {
+        self.host.input_delay_phase = phase as sdmmc_delay_phase_t;
+    }
+
+    pub fn get_device(&self) -> &SdDevice {
+        &self.device
     }
 }
