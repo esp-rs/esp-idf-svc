@@ -22,6 +22,12 @@ fn main() -> anyhow::Result<()> {
         Option::<gpio::AnyInputPin>::None,
         Option::<gpio::AnyInputPin>::None,
         Option::<gpio::AnyInputPin>::None,
+        #[cfg(not(any(
+            esp_idf_version_major = "4",
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+        )))] // For ESP-IDF v5.2 and later
+        Option::<bool>::None,
     )?;
 
     let host = SdHost::new_with_spi(spi_device);
