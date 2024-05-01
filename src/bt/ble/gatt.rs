@@ -294,6 +294,7 @@ impl GattDescriptor {
     }
 }
 
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct GattResponse(esp_gatt_rsp_t);
 
