@@ -547,7 +547,11 @@ where
         let value = esp_attr_value_t {
             attr_max_len: characteristic.max_len as _,
             attr_len: data.len() as _,
-            attr_value: data.as_ptr() as *const _ as *mut _,
+            attr_value: if data.is_empty() {
+                core::ptr::null_mut()
+            } else {
+                data.as_ptr() as *const _ as *mut _
+            },
         };
 
         let auto_rsp = esp_attr_control_t {
