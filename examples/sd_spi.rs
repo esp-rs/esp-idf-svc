@@ -1,30 +1,34 @@
 #[cfg(esp32)]
-use esp_idf_svc::{
-    fs::Fat,
-    log::EspLogger,
-    sd::{host::SdHost, spi::SpiDevice},
-};
-
-use std::{fs::File, io::Write};
-
-#[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
+    use esp_idf_hal::{gpio, prelude::*};
+    use esp_idf_svc::{
+        fs::Fat,
+        log::EspLogger,
+        sd::{host::SdHost, spi::SpiDevice},
+    };
+    use std::{fs::File, io::Write};
+
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
 
+    let peripherals = Peripherals::take()?;
+    let pins = peripherals.pins;
+
     SpiDevice::initialize_host().expect("Failed to initialize SPI host");
 
-    let device_builder = SpiDevice::builder();
+    let spi_device = SpiDevice::new(
+        peripherals.spi2,
+        pins.gpio13,
+        Option::<gpio::AnyInputPin>::None,
+        Option::<gpio::AnyInputPin>::None,
+        Option::<gpio::AnyInputPin>::None,
+    )?;
 
-    let spi_device = device_builder.build().expect("Failed to build SPI device");
-
-    let host = SdHost::new_with_spi(&spi_device);
+    let host = SdHost::new_with_spi(spi_device);
 
     let _partition = Fat::builder()
-        .set_host(host)
-        .set_spi_device(spi_device)
-        .build()
-        .expect("Failed to build FAT");
+        .build(host)
+        .expect("Failed to mount fat partition");
 
     let mut file = File::create("/test.txt")?;
 
