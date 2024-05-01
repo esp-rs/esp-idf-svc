@@ -28,6 +28,9 @@ impl Default for FatBuilder {
                 max_files: 4,
                 format_if_mount_failed: false,
                 allocation_unit_size: 16 * 1024,
+                #[cfg(not(
+                    esp_idf_version_major = "4",
+                ))] // For ESP-IDF v5.0 and later
                 disk_status_check_enable: false,
             },
             spi_device: None,
