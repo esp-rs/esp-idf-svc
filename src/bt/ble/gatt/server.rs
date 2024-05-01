@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 
-use log::info;
+use log::{debug, trace};
 
 use crate::bt::{BdAddr, BleEnabled, BtDriver, BtSingleton, BtUuid};
 use crate::sys::*;
@@ -598,7 +598,7 @@ where
             ))?;
 
             let data = core::slice::from_raw_parts(data, len as _);
-            info!("len: {:?}, data: {:p}", len, data);
+            trace!("len: {:?}, data: {:p}", len, data);
 
             if buf.len() < len as _ {
                 Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?;
@@ -683,7 +683,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GattsEvent::from((event, param));
 
-        info!("Got event {{ {:#?} }}", event);
+        debug!("Got event {{ {:#?} }}", event);
 
         SINGLETON.call((gatts_if, event));
     }
