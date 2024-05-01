@@ -1,7 +1,7 @@
 #[cfg(esp_idf_soc_sdmmc_host_supported)]
 use std::os::raw::c_void;
 
-use alloc::ffi::CString;
+use crate::private::cstr::*;
 
 use crate::{
     sd::{host::SdHost, spi::SpiDevice},
@@ -33,7 +33,7 @@ impl Default for FatBuilder {
             spi_device: None,
             #[cfg(esp_idf_soc_sdmmc_host_supported)]
             slot_configuration: None,
-            base_path: CString::new("/").unwrap(),
+            base_path: to_cstring_arg("/").expect("Failed to create CString from /sdcard"),
         }
     }
 }

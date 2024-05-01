@@ -102,7 +102,9 @@ pub mod tls;
 pub mod wifi;
 pub mod ws;
 
+#[cfg(feature = "alloc")]
 pub mod fs;
+
 pub mod sd;
 
 mod private;
