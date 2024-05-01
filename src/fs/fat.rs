@@ -1,5 +1,5 @@
 #[cfg(esp_idf_soc_sdmmc_host_supported)]
-use std::os::raw::c_void;
+use core::ffi::c_void;
 
 use crate::private::cstr::*;
 
