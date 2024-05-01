@@ -679,17 +679,17 @@ where
     pub fn set_conn_params_conf(
         &self,
         addr: BdAddr,
-        min_int_ms: u16,
-        max_int_ms: u16,
-        latency_ms: u16,
-        timeout_ms: u16,
+        min_int_ms: u32,
+        max_int_ms: u32,
+        latency_ms: u32,
+        timeout_ms: u32,
     ) -> Result<(), EspError> {
         esp!(unsafe {
             esp_ble_gap_update_conn_params(&esp_ble_conn_update_params_t {
-                min_int: (min_int_ms as u32 * 100 / 125) as _,
-                max_int: (max_int_ms as u32 * 100 / 125) as _,
-                latency: latency_ms / 10,
-                timeout: timeout_ms / 10,
+                min_int: (min_int_ms * 100 / 125) as _,
+                max_int: (max_int_ms * 100 / 125) as _,
+                latency: (latency_ms / 10) as _,
+                timeout: (timeout_ms / 10) as _,
                 bda: addr.0,
             } as *const _ as *mut _)
         })

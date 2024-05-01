@@ -87,13 +87,13 @@ pub enum GattConnReason {
 #[derive(Clone, Debug)]
 pub struct GattConnParams {
     /// Connection interval
-    pub interval: u16,
+    pub interval_ms: u32,
     /// Slave latency for the connection in number of connection events. Range: 0x0000 to 0x01F3
-    pub latency: u16,
+    pub latency_ms: u32,
     /// Supervision timeout for the LE Link. Range: 0x000A to 0x0C80.
     /// Mandatory Range: 0x000A to 0x0C80 Time = N * 10 msec
     /// Time Range: 100 msec to 32 seconds
-    pub timeout: u16,
+    pub timeout_ms: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
