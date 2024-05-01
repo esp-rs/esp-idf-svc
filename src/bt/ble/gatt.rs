@@ -333,7 +333,7 @@ impl GattResponse {
         }
 
         self.0.attr_value.len = value.len() as u16;
-        unsafe { self.0.attr_value.value.copy_from_slice(value) };
+        unsafe { self.0.attr_value.value[..value.len()].copy_from_slice(value) };
 
         Ok(self)
     }
