@@ -25,38 +25,32 @@ impl Drop for SpiDevice<'_> {
 }
 
 impl<'d> SpiDevice<'d> {
-    pub fn initialize_host() -> Result<(), esp_err_t> {
-        let result = unsafe { sdspi_host_init() };
-
-        if result != ESP_OK {
-            Err(result)
-        } else {
-            Ok(())
-        }
+    pub fn initialize_host() -> Result<(), EspError> {
+        esp!(unsafe { sdspi_host_init() })
     }
 
     pub fn new<T>(
         _spi: impl Peripheral<P = T>,
         cs: impl Peripheral<P = impl OutputPin> + 'd,
-        cd: impl Peripheral<P = impl InputPin> + 'd,
-        wp: impl Peripheral<P = impl InputPin> + 'd,
-        int: impl Peripheral<P = impl InputPin> + 'd,
+        cd: Option<impl Peripheral<P = impl InputPin> + 'd>,
+        wp: Option<impl Peripheral<P = impl InputPin> + 'd>,
+        int: Option<impl Peripheral<P = impl InputPin> + 'd>,
         #[cfg(not(any(
             esp_idf_version_major = "4",
             all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
         wp_polarity: Option<bool>,
-    ) -> Result<Self, esp_err_t>
+    ) -> Result<Self, EspError>
     where
         T: spi::SpiAnyPins + spi::Spi,
     {
         let configuration = sdspi_device_config_t {
             host_id: T::device(),
             gpio_cs: cs.into_ref().deref().pin(),
-            gpio_cd: cd.into_ref().deref().pin(),
-            gpio_wp: wp.into_ref().deref().pin(),
-            gpio_int: int.into_ref().deref().pin(),
+            gpio_cd: cd.map(|cd| cd.into_ref().deref().pin()).unwrap_or(-1),
+            gpio_wp: wp.map(|wp| wp.into_ref().deref().pin()).unwrap_or(-1),
+            gpio_int: int.map(|int| int.into_ref().deref().pin()).unwrap_or(-1),
             #[cfg(not(any(
                 esp_idf_version_major = "4",
                 all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
@@ -71,15 +65,14 @@ impl<'d> SpiDevice<'d> {
             sdspi_host_init_device(&configuration as *const sdspi_device_config_t, &mut handle)
         };
 
-        if result == ESP_OK {
-            Ok(Self {
+        EspError::check_and_return(
+            result,
+            Self {
                 configuration,
                 handle,
                 _p: PhantomData,
-            })
-        } else {
-            Err(result)
-        }
+            },
+        )
     }
 
     pub fn get_inner_handle(&self) -> &sdspi_dev_handle_t {

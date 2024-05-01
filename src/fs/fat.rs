@@ -48,6 +48,10 @@ impl FatBuilder {
         self.base_path = CString::new(base_path).expect("Failed to create CString from base_path");
         self
     }
+
+    pub fn build(self, host: SdHost) -> Result<Fat, EspError> {
+        Fat::mount(self, host)
+    }
 }
 
 pub struct Fat {
@@ -68,7 +72,7 @@ impl Fat {
         FatBuilder::default()
     }
 
-    pub fn mount(builder: FatBuilder, host: SdHost) -> Result<Self, esp_err_t> {
+    pub fn mount(builder: FatBuilder, host: SdHost) -> Result<Self, EspError> {
         let mut card: *mut sdmmc_card_t = core::ptr::null_mut();
 
         let result = match host.get_device() {
@@ -93,10 +97,6 @@ impl Fat {
             },
         };
 
-        if result == ESP_OK {
-            Ok(Self { builder, card })
-        } else {
-            Err(result)
-        }
+        EspError::check_and_return(result, Self { builder, card })
     }
 }
