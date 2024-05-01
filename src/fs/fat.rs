@@ -1,4 +1,4 @@
-#[cfg(esp_idf_sdmmc_host_enabled)]
+#[cfg(esp_idf_comp_sdmmc_enabled)]
 use std::os::raw::c_void;
 
 use alloc::ffi::CString;
@@ -8,13 +8,13 @@ use crate::{
     sys::*,
 };
 
-#[cfg(esp_idf_sdmmc_host_enabled)]
+#[cfg(esp_idf_comp_sdmmc_enabled)]
 use crate::sd::mmc::SlotConfiguration;
 
 pub struct FatBuilder {
     host: Option<SdHost>,
     spi_device: Option<SpiDevice>,
-    #[cfg(esp_idf_sdmmc_host_enabled)]
+    #[cfg(esp_idf_comp_sdmmc_enabled)]
     slot_configuration: Option<SlotConfiguration>,
     mount_config: esp_vfs_fat_mount_config_t,
     base_path: CString,
@@ -31,7 +31,7 @@ impl Default for FatBuilder {
                 disk_status_check_enable: false,
             },
             spi_device: None,
-            #[cfg(esp_idf_sdmmc_host_enabled)]
+            #[cfg(esp_idf_comp_sdmmc_enabled)]
             slot_configuration: None,
             base_path: CString::new("/").unwrap(),
         }
@@ -45,7 +45,7 @@ impl FatBuilder {
     }
 
     pub fn set_spi_device(mut self, spi_device: SpiDevice) -> Self {
-        #[cfg(esp_idf_sdmmc_host_enabled)]
+        #[cfg(esp_idf_comp_sdmmc_enabled)]
         if self.slot_configuration.is_some() {
             panic!("SPI device cannot be set when using MMC slot configuration");
         }
@@ -54,7 +54,7 @@ impl FatBuilder {
         self
     }
 
-    #[cfg(esp_idf_sdmmc_host_enabled)]
+    #[cfg(esp_idf_comp_sdmmc_enabled)]
     pub fn set_slot_configuration(mut self, slot_configuration: SlotConfiguration) -> Self {
         if self.spi_device.is_some() {
             panic!("Slot configuration cannot be set when using SPI device");
@@ -129,7 +129,7 @@ impl Fat {
             }
         }
 
-        #[cfg(esp_idf_sdmmc_host_enabled)]
+        #[cfg(esp_idf_comp_sdmmc_enabled)]
         if let Some(slot_configuration) = &builder.slot_configuration {
             let result = unsafe {
                 esp_vfs_fat_sdmmc_mount(

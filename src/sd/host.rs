@@ -51,7 +51,7 @@ impl SdHost {
 
     /// Create a new SD/MMC host with the default configuration.
     /// This host will use the MMC slot 1, with 4-bit mode enabled, and max frequency set to 20MHz
-    #[cfg(esp_idf_sdmmc_host_enabled)]
+    #[cfg(esp_idf_comp_sdmmc_enabled)]
     pub fn new_with_mmc() -> Self {
         let host = sdmmc_host_t {
             flags: _SDMMC_HOST_FLAG_8BIT

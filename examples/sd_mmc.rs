@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(any(not(esp32), not(esp_idf_sdmmc_host_enabled)))]
+#[cfg(any(not(esp32), not(esp_idf_comp_sdmmc_enabled)))]
 fn main() {
     use esp_idf_svc::{self as _};
 
