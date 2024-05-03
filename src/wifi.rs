@@ -1895,19 +1895,65 @@ impl TryFrom<&WpsCredentialsRef> for WpsCredentials {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StaConnectedData {
-    pub ssid: heapless::String<32>,
-    pub bssid: [u8; 6],
-    pub channel: u8,
-    pub authmode: AuthMethod,
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct StaConnectedDataRef(wifi_event_sta_connected_t);
+
+impl StaConnectedDataRef {
+    pub fn ssid(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.0.ssid.as_ptr() as *const _) }
+    }
+
+    pub fn bssid(&self) -> &[u8; 6] {
+        &self.0.bssid
+    }
+
+    pub fn channel(&self) -> u8 {
+        self.0.channel
+    }
+
+    pub fn authmode(&self) -> u32 {
+        self.0.authmode
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StaDisconnectedData {
-    pub ssid: heapless::String<32>,
-    pub bssid: [u8; 6],
-    pub reason: wifi_err_reason_t,
+impl fmt::Debug for StaConnectedDataRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaConnectedDataRef")
+            .field("ssid", &self.ssid())
+            .field("bssid", &self.bssid())
+            .field("channel", &self.channel())
+            .field("authmode", &self.authmode())
+            .finish()
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct StaDisconnectedDataRef(wifi_event_sta_disconnected_t);
+
+impl StaDisconnectedDataRef {
+    pub fn ssid(&self) -> &CStr {
+        unsafe { CStr::from_ptr(self.0.ssid.as_ptr() as *const _) }
+    }
+
+    pub fn bssid(&self) -> &[u8; 6] {
+        &self.0.bssid
+    }
+
+    pub fn reason(&self) -> u8 {
+        self.0.reason
+    }
+}
+
+impl fmt::Debug for StaDisconnectedDataRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaDisconnectedDataRef")
+            .field("ssid", &self.ssid())
+            .field("bssid", &self.bssid())
+            .field("reason", &self.reason())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1918,8 +1964,8 @@ pub enum WifiEvent<'a> {
 
     StaStarted,
     StaStopped,
-    StaConnected(StaConnectedData),
-    StaDisconnected(StaDisconnectedData),
+    StaConnected(Option<&'a StaConnectedDataRef>),
+    StaDisconnected(Option<&'a StaDisconnectedDataRef>),
     StaAuthmodeChanged,
     StaBssRssiLow,
     StaBeaconTimeout,
@@ -1968,26 +2014,29 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_STA_START => WifiEvent::StaStarted,
             wifi_event_t_WIFI_EVENT_STA_STOP => WifiEvent::StaStopped,
             wifi_event_t_WIFI_EVENT_STA_CONNECTED => {
-                let data: &wifi_event_sta_connected_t = unsafe { data.as_payload() };
-                WifiEvent::StaConnected(StaConnectedData {
-                    ssid: std::str::from_utf8(&data.ssid[..data.ssid_len as usize])
-                        .unwrap()
-                        .try_into()
-                        .expect("TODO: stabl-gjn FIX ME"),
-                    bssid: data.bssid,
-                    channel: data.channel,
-                    authmode: AuthMethod::try_from(data.authmode as u8).expect("TODO: stabl-gjn FIX ME"),
+                let payload = unsafe {
+                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_connected_t)
+                        .as_ref()
+                };
+
+                WifiEvent::StaConnected(unsafe {
+                    core::mem::transmute::<
+                        Option<&'d wifi_event_sta_connected_t>,
+                        Option<&'d StaConnectedDataRef>,
+                    >(payload)
                 })
             }
             wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => {
-                let data: &wifi_event_sta_disconnected_t = unsafe { data.as_payload() };
-                WifiEvent::StaDisconnected(StaDisconnectedData {
-                    ssid: std::str::from_utf8(&data.ssid[..data.ssid_len as usize])
-                        .unwrap()
-                        .try_into()
-                        .expect("TODO: stabl-gjn FIX ME"),
-                    bssid: data.bssid,
-                    reason: data.reason.into(),
+                let payload = unsafe {
+                    (data.payload.unwrap() as *const _ as *const wifi_event_sta_disconnected_t)
+                        .as_ref()
+                };
+
+                WifiEvent::StaDisconnected(unsafe {
+                    core::mem::transmute::<
+                        Option<&'d wifi_event_sta_disconnected_t>,
+                        Option<&'d StaDisconnectedDataRef>,
+                    >(payload)
                 })
             }
             wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE => WifiEvent::StaAuthmodeChanged,

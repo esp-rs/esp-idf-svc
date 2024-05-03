@@ -43,7 +43,7 @@ enumset = { version = "1", default-features = false }
 log = { version = "0.4", default-features = false }
 uncased = { version = "0.9.7", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
-embedded-svc = { version = "0.27", default-features = false, features = ["use_numenum"] }
+embedded-svc = { version = "0.27", default-features = false }
 esp-idf-hal = { version = "0.43", default-features = false }
 embassy-time-driver = { version = "0.1", optional = true, features = ["tick-hz-1_000_000"] }
 embassy-futures = "0.1"
