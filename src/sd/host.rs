@@ -42,7 +42,9 @@ impl<'d> SdHost<'d> {
             all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
-        self.host.input_delay_phase = configuration.input_delay_phase as sdmmc_delay_phase_t;
+        {
+            self.host.input_delay_phase = configuration.input_delay_phase as sdmmc_delay_phase_t;
+        }
 
         self
     }

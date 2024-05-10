@@ -14,7 +14,6 @@
 #![allow(unknown_lints)]
 #![allow(renamed_and_removed_lints)]
 #![warn(clippy::large_futures)]
-#![feature(stmt_expr_attributes)]
 
 #[cfg(feature = "std")]
 #[allow(unused_imports)]
