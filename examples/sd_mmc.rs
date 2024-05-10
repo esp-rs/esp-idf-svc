@@ -1,11 +1,14 @@
 #[cfg(all(esp32, esp_idf_soc_sdmmc_host_supported))]
 fn main() -> anyhow::Result<()> {
-    use esp_idf_hal::{gpio, prelude::*};
+    use esp_idf_hal::{
+        gpio::{self, AnyIOPin},
+        prelude::*,
+    };
 
     use esp_idf_svc::{
-        fs::Fat,
+        fs::{Fat, FatConfiguration},
         log::EspLogger,
-        sd::{host::SdHost, mmc::SlotConfiguration},
+        sd::{host::SdHost, mmc::SlotConfiguration, SdConfiguration},
     };
 
     use std::{fs::File, io::Write};
@@ -27,13 +30,17 @@ fn main() -> anyhow::Result<()> {
         Option::<gpio::Gpio17>::None,
         Option::<gpio::Gpio15>::None,
         Option::<gpio::Gpio18>::None,
+        Option::<AnyIOPin>::None,
+        Option::<AnyIOPin>::None,
     );
 
-    let host = SdHost::new_with_mmc(slot);
+    let host_config = SdConfiguration::new();
 
-    let _partition = Fat::builder()
-        .build(host)
-        .expect("Failed to mount fat partition");
+    let host = SdHost::new_with_mmc(&host_config, slot);
+
+    let fat_config = FatConfiguration::new();
+
+    let _fat = Fat::mount(fat_config, host, "/");
 
     let mut file = File::create("/test.txt")?;
 

@@ -1,10 +1,14 @@
 #[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
-    use esp_idf_hal::{gpio, prelude::*};
+    use esp_idf_hal::{
+        gpio,
+        prelude::*,
+        spi::{config::DriverConfig, Dma, SpiDriver},
+    };
     use esp_idf_svc::{
-        fs::Fat,
+        fs::{Fat, FatConfiguration},
         log::EspLogger,
-        sd::{host::SdHost, spi::SpiDevice},
+        sd::{host::SdHost, spi::SpiDevice, SdConfiguration},
     };
     use std::{fs::File, io::Write};
 
@@ -14,10 +18,16 @@ fn main() -> anyhow::Result<()> {
     let peripherals = Peripherals::take()?;
     let pins = peripherals.pins;
 
-    SpiDevice::initialize_host().expect("Failed to initialize SPI host");
+    let spi_driver = SpiDriver::new(
+        peripherals.spi3,
+        pins.gpio23,
+        pins.gpio19,
+        Some(pins.gpio18),
+        &DriverConfig::default().dma(Dma::Auto(0)),
+    )?;
 
     let spi_device = SpiDevice::new(
-        peripherals.spi2,
+        spi_driver,
         pins.gpio13,
         Option::<gpio::AnyInputPin>::None,
         Option::<gpio::AnyInputPin>::None,
@@ -28,13 +38,15 @@ fn main() -> anyhow::Result<()> {
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
         Option::<bool>::None,
-    )?;
+    );
 
-    let host = SdHost::new_with_spi(spi_device);
+    let host_config = SdConfiguration::new();
 
-    let _partition = Fat::builder()
-        .build(host)
-        .expect("Failed to mount fat partition");
+    let host = SdHost::new_with_spi(&host_config, spi_device);
+
+    let fat_configuration = FatConfiguration::new();
+
+    let _fat = Fat::mount(fat_configuration, host, "/")?;
 
     let mut file = File::create("/test.txt")?;
 

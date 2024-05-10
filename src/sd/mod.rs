@@ -4,3 +4,6 @@ pub mod spi;
 pub mod mmc;
 
 pub mod host;
+
+pub mod config;
+pub use config::Configuration as SdConfiguration;
