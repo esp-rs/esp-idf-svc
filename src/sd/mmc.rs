@@ -219,11 +219,11 @@ impl<'d> SlotConfiguration<'d> {
         }
     }
 
-    pub fn get_inner(&self) -> &sdmmc_slot_config_t {
+    pub(crate) fn get_inner(&self) -> &sdmmc_slot_config_t {
         &self.configuration
     }
 
-    pub fn get_slot(&self) -> Slot {
+    pub(crate) fn get_slot(&self) -> Slot {
         self.slot
     }
 }

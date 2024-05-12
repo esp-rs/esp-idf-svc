@@ -79,7 +79,7 @@ impl<'d> SpiDevice<'d> {
         esp!(unsafe { sdspi_host_io_int_wait(self.get_host() as i32, timeout) })
     }
 
-    pub fn get_device_configuration(&self) -> &sdspi_device_config_t {
+    pub(crate) fn get_device_configuration(&self) -> &sdspi_device_config_t {
         &self.configuration
     }
 }
