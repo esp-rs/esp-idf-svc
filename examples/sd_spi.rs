@@ -1,12 +1,12 @@
 #[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
-    use esp_idf_hal::{
-        gpio,
-        prelude::*,
-        spi::{config::DriverConfig, Dma, SpiDriver},
-    };
     use esp_idf_svc::{
         fs::{Fat, FatConfiguration},
+        hal::{
+            gpio,
+            prelude::*,
+            spi::{config::DriverConfig, Dma, SpiDriver},
+        },
         log::EspLogger,
         sd::{host::SdHost, spi::SpiDevice, SdConfiguration},
     };

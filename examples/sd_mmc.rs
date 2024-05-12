@@ -1,12 +1,11 @@
 #[cfg(all(esp32, esp_idf_soc_sdmmc_host_supported))]
 fn main() -> anyhow::Result<()> {
-    use esp_idf_hal::{
-        gpio::{self, AnyIOPin},
-        prelude::*,
-    };
-
     use esp_idf_svc::{
         fs::{Fat, FatConfiguration},
+        hal::{
+            gpio::{self, AnyIOPin},
+            prelude::*,
+        },
         log::EspLogger,
         sd::{host::SdHost, mmc::SlotConfiguration, SdConfiguration},
     };
