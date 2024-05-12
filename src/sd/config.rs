@@ -45,6 +45,12 @@ pub struct Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Configuration {
+    const fn new() -> Self {
         Self {
             command_timeout_ms: 0,
             io_voltage: 3.3,
@@ -56,11 +62,5 @@ impl Default for Configuration {
             )))] // For ESP-IDF v5.2 and later
             input_delay_phase: DelayPhase::Phase0,
         }
-    }
-}
-
-impl Configuration {
-    pub fn new() -> Self {
-        Self::default()
     }
 }

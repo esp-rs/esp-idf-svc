@@ -10,6 +10,12 @@ pub struct Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Configuration {
+    const fn new() -> Self {
         Self {
             max_files: 4,
             format_if_mount_failed: false,
@@ -19,12 +25,6 @@ impl Default for Configuration {
             ))] // For ESP-IDF v5.0 and later
             disk_status_check_enable: false,
         }
-    }
-}
-
-impl Configuration {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 
