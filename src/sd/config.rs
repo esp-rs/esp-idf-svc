@@ -55,7 +55,7 @@ impl Default for Configuration {
 }
 
 impl Configuration {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             command_timeout_ms: 0,
             io_voltage: 3.3,

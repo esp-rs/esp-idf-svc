@@ -15,7 +15,7 @@ impl Default for Configuration {
 }
 
 impl Configuration {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             max_files: 4,
             format_if_mount_failed: false,
