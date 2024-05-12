@@ -1,7 +1,7 @@
 use core::{marker::PhantomData, ops::Deref};
 
 use esp_idf_hal::{
-    gpio::{AnyIOPin, InputPin, OutputPin},
+    gpio::{InputPin, OutputPin},
     peripheral::Peripheral,
 };
 
@@ -22,7 +22,7 @@ const SDMMC_SLOT_NO_CD: i32 = -1;
 const SDMMC_SLOT_NO_WP: i32 = -1;
 
 #[derive(Clone, Copy, Debug)]
-pub enum Slot {
+pub(crate) enum Slot {
     #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
     NotUsed = 0,
     #[cfg(not(esp_idf_soc_sdmmc_use_gpio_matrix))]
@@ -118,10 +118,10 @@ impl<'d> SlotConfiguration<'d> {
             d1,
             d2,
             d3,
-            Option::<AnyIOPin>::None,
-            Option::<AnyIOPin>::None,
-            Option::<AnyIOPin>::None,
-            Option::<AnyIOPin>::None,
+            Option::<gpio::AnyIOPin>::None,
+            Option::<gpio::AnyIOPin>::None,
+            Option::<gpio::AnyIOPin>::None,
+            Option::<gpio::AnyIOPin>::None,
             card_detect,
             write_protect,
         )

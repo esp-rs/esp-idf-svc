@@ -144,11 +144,11 @@ impl<'d> SdHost<'d> {
         .set_from_configuration(configuration)
     }
 
-    pub fn get_inner_handle(&self) -> &sdmmc_host_t {
+    pub(crate) fn get_inner_handle(&self) -> &sdmmc_host_t {
         &self.host
     }
 
-    pub fn get_device(&self) -> &SdDevice {
+    pub(crate) fn get_device(&self) -> &SdDevice {
         &self.device
     }
 }
