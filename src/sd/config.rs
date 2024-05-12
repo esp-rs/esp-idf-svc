@@ -1,9 +1,14 @@
+#[cfg(not(any(
+    esp_idf_version_major = "4",
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+)))] // For ESP-IDF v5.2 and later
 use crate::sys::*;
 
 #[cfg(not(any(
     esp_idf_version_major = "4",
     all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
-    all(esp_idf_version_mmdrrajor = "5", esp_idf_version_minor = "1"),
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
 )))] // For ESP-IDF v5.2 and later
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DelayPhase {
