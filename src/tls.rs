@@ -417,6 +417,16 @@ mod esptls {
         server_session: bool,
     }
 
+    // A single Mbed TLS context itself is safe to send across threads.
+    // Require the threading implementation to be enabled since a shared context such as RSA or X509 could be used by multiple threads at once.
+    // See https://mbed-tls.readthedocs.io/en/latest/kb/development/thread-safety-and-multi-threading/
+    #[cfg(all(
+        esp_idf_comp_esp_tls_enabled,
+        esp_idf_esp_tls_using_mbedtls,
+        esp_idf_mbedtls_threading_c
+    ))]
+    unsafe impl<S> Send for EspTls<S> where S: Send + Socket {}
+
     impl EspTls<InternalSocket> {
         /// Create a new `EspTls` instance using internally-managed socket.
         ///
