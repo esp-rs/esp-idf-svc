@@ -316,7 +316,8 @@ mod esptls {
         #[cfg(not(all(
             not(esp_idf_version_major = "4"),
             esp_idf_comp_esp_tls_enabled,
-            esp_idf_esp_tls_using_mbedtls
+            esp_idf_esp_tls_using_mbedtls,
+            esp_idf_mbedtls_ssl_alpn
         )))]
         unsafe fn extract_alpn(_raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
             None
@@ -325,7 +326,8 @@ mod esptls {
         #[cfg(all(
             not(esp_idf_version_major = "4"),
             esp_idf_comp_esp_tls_enabled,
-            esp_idf_esp_tls_using_mbedtls
+            esp_idf_esp_tls_using_mbedtls,
+            esp_idf_mbedtls_ssl_alpn
         ))]
         #[warn(unsafe_op_in_unsafe_fn)]
         unsafe fn extract_alpn(raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
