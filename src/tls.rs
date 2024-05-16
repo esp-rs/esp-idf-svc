@@ -313,12 +313,20 @@ mod esptls {
             }
         }
 
-        #[cfg(not(all(esp_idf_comp_esp_tls_enabled, esp_idf_esp_tls_using_mbedtls)))]
+        #[cfg(not(all(
+            not(esp_idf_version_major = "4"),
+            esp_idf_comp_esp_tls_enabled,
+            esp_idf_esp_tls_using_mbedtls
+        )))]
         unsafe fn extract_alpn(raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
             return None;
         }
 
-        #[cfg(all(esp_idf_comp_esp_tls_enabled, esp_idf_esp_tls_using_mbedtls))]
+        #[cfg(all(
+            not(esp_idf_version_major = "4"),
+            esp_idf_comp_esp_tls_enabled,
+            esp_idf_esp_tls_using_mbedtls
+        ))]
         #[warn(unsafe_op_in_unsafe_fn)]
         unsafe fn extract_alpn(raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
             let raw: *mut sys::mbedtls_ssl_context =
