@@ -296,7 +296,7 @@ mod esptls {
         pub fn alpn_proto(&self) -> Option<&str> {
             let p = CStr::from_bytes_until_nul(self.alpn.as_slice()).unwrap();
             // Safety: the bytes always come from a user supplied &str.
-            let p = unsafe { std::str::from_utf8_unchecked(p.to_bytes()) };
+            let p = unsafe { core::str::from_utf8_unchecked(p.to_bytes()) };
 
             // A valid protocol is never empty.
             if !p.is_empty() {
