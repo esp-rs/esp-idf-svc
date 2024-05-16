@@ -318,8 +318,8 @@ mod esptls {
             esp_idf_comp_esp_tls_enabled,
             esp_idf_esp_tls_using_mbedtls
         )))]
-        unsafe fn extract_alpn(raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
-            return None;
+        unsafe fn extract_alpn(_raw: *mut sys::esp_tls) -> Option<AlpnBuf> {
+            None
         }
 
         #[cfg(all(
