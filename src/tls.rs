@@ -733,7 +733,7 @@ mod esptls {
         not(esp_idf_version_major = "4"),
         any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
     ))]
-    pub struct EspAsyncTls<S>(EspTls<S>)
+    pub struct EspAsyncTls<S>(core::cell::RefCell<EspTls<S>>)
     where
         S: PollableSocket;
 
@@ -752,7 +752,7 @@ mod esptls {
         ///
         /// * `ESP_ERR_NO_MEM` if not enough memory to create the TLS connection
         pub fn adopt(socket: S) -> Result<Self, EspError> {
-            Ok(Self(EspTls::adopt(socket)?))
+            Ok(Self(core::cell::RefCell::new(EspTls::adopt(socket)?)))
         }
 
         /// Establish a TLS/SSL connection using the adopted socket.
@@ -784,7 +784,7 @@ mod esptls {
             rcfg.non_block = false;
 
             let res = loop {
-                let res = self.0.internal_connect(hostname, 0, true, &rcfg);
+                let res = self.0.get_mut().internal_connect(hostname, 0, true, &rcfg);
 
                 match res {
                     Err(e) => self.wait(e).await?,
@@ -813,9 +813,9 @@ mod esptls {
         // }
 
         /// Read in the supplied buffer. Returns the number of bytes read.
-        pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
+        pub async fn read(&self, buf: &mut [u8]) -> Result<usize, EspError> {
             loop {
-                let res = self.0.read(buf);
+                let res = self.0.borrow_mut().read(buf);
 
                 match res {
                     Err(e) => self.wait(e).await?,
@@ -825,9 +825,9 @@ mod esptls {
         }
 
         /// Write the supplied buffer. Returns the number of bytes written.
-        pub async fn write(&mut self, buf: &[u8]) -> Result<usize, EspError> {
+        pub async fn write(&self, buf: &[u8]) -> Result<usize, EspError> {
             loop {
-                let res = self.0.write(buf);
+                let res = self.0.borrow_mut().write(buf);
 
                 match res {
                     Err(e) => self.wait(e).await?,
@@ -836,7 +836,7 @@ mod esptls {
             }
         }
 
-        pub async fn write_all(&mut self, buf: &[u8]) -> Result<(), EspError> {
+        pub async fn write_all(&self, buf: &[u8]) -> Result<(), EspError> {
             let mut buf = buf;
 
             while !buf.is_empty() {
@@ -850,7 +850,7 @@ mod esptls {
             Ok(())
         }
 
-        async fn wait(&mut self, error: EspError) -> Result<(), EspError> {
+        async fn wait(&self, error: EspError) -> Result<(), EspError> {
             const EWOULDBLOCK_I32: i32 = EWOULDBLOCK as i32;
 
             match error.code() {
@@ -859,14 +859,14 @@ mod esptls {
                 // The code below is therefore a hack which just waits with a timeout for the socket to (eventually)
                 // become readable as we actually don't even know if that's what esp_tls wants
                 EWOULDBLOCK_I32 => {
-                    core::future::poll_fn(|ctx| self.0.socket.poll_writable(ctx)).await?;
+                    core::future::poll_fn(|ctx| self.0.borrow().socket.poll_writable(ctx)).await?;
                     crate::hal::delay::FreeRtos::delay_ms(0);
                 }
                 ESP_TLS_ERR_SSL_WANT_READ => {
-                    core::future::poll_fn(|ctx| self.0.socket.poll_readable(ctx)).await?
+                    core::future::poll_fn(|ctx| self.0.borrow().socket.poll_readable(ctx)).await?
                 }
                 ESP_TLS_ERR_SSL_WANT_WRITE => {
-                    core::future::poll_fn(|ctx| self.0.socket.poll_writable(ctx)).await?
+                    core::future::poll_fn(|ctx| self.0.borrow().socket.poll_writable(ctx)).await?
                 }
                 _ => Err(error)?,
             }
@@ -875,7 +875,7 @@ mod esptls {
         }
 
         pub fn context_handle(&self) -> *mut sys::esp_tls {
-            self.0.context_handle()
+            self.0.borrow().context_handle()
         }
     }
 
