@@ -889,7 +889,7 @@ mod esptls {
         // pub async fn negotiate_server(&mut self, cfg: &ServerConfig<'_>) -> Result<(), EspError> {
         //     // FIXME: this isn't actually async, but esp-idf does not expose anything else.
         //     // we would have to use various hacks to call mbedtls_ssl_handshake by ourself
-        //     self.0.negotiate_server(cfg)
+        //     self.0.borrow_mut().negotiate_server(cfg)
         // }
 
         /// Read in the supplied buffer. Returns the number of bytes read.
