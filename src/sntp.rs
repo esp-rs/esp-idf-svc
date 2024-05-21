@@ -13,7 +13,6 @@ use crate::private::mutex;
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-#[cfg(not(any(esp_idf_version_major = "4", esp_idf_version_minor = "0")))]
 mod esp_sntp {
     use super::OperatingMode;
     pub use crate::sys::*;
@@ -43,31 +42,6 @@ mod esp_sntp {
     pub use esp_sntp_setoperatingmode as sntp_setoperatingmode;
     pub use esp_sntp_setservername as sntp_setservername;
     pub use esp_sntp_stop as sntp_stop;
-}
-
-#[cfg(any(esp_idf_version_major = "4", esp_idf_version_minor = "0"))]
-mod esp_sntp {
-    use super::OperatingMode;
-    pub use crate::sys::*;
-
-    impl From<u8_t> for OperatingMode {
-        fn from(from: u8_t) -> Self {
-            match from as u32 {
-                SNTP_OPMODE_POLL => OperatingMode::Poll,
-                SNTP_OPMODE_LISTENONLY => OperatingMode::ListenOnly,
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    impl From<OperatingMode> for u8_t {
-        fn from(from: OperatingMode) -> Self {
-            match from {
-                OperatingMode::Poll => SNTP_OPMODE_POLL as u8_t,
-                OperatingMode::ListenOnly => SNTP_OPMODE_LISTENONLY as u8_t,
-            }
-        }
-    }
 }
 
 use esp_sntp::*;
