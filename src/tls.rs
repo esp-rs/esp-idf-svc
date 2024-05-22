@@ -815,7 +815,9 @@ mod esptls {
         not(esp_idf_version_major = "4"),
         any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
     ))]
-    pub struct EspAsyncTls<S>(std::sync::Mutex<EspTls<S>>)
+    // Safety: We are not Sync, so this is used by one thread at a time.
+    // There is no reentrancy and we are not handing out references to the inside of the UnsafeCell.
+    pub struct EspAsyncTls<S>(core::cell::UnsafeCell<EspTls<S>>)
     where
         S: PollableSocket;
 
@@ -834,7 +836,7 @@ mod esptls {
         ///
         /// * `ESP_ERR_NO_MEM` if not enough memory to create the TLS connection
         pub fn adopt(socket: S) -> Result<Self, EspError> {
-            Ok(Self(std::sync::Mutex::new(EspTls::adopt(socket)?)))
+            Ok(Self(core::cell::UnsafeCell::new(EspTls::adopt(socket)?)))
         }
 
         /// Establish a TLS/SSL connection using the adopted socket.
@@ -872,7 +874,6 @@ mod esptls {
                 let res = self
                     .0
                     .get_mut()
-                    .unwrap()
                     .internal_connect(hostname, 0, true, &rcfg.0);
 
                 match res {
@@ -904,7 +905,7 @@ mod esptls {
         /// Read in the supplied buffer. Returns the number of bytes read.
         pub async fn read(&self, buf: &mut [u8]) -> Result<usize, EspError> {
             loop {
-                let res = self.0.lock().unwrap().read(buf);
+                let res = unsafe { &mut *self.0.get() }.read(buf);
 
                 match res {
                     Err(e) => self.wait(e).await?,
@@ -916,7 +917,7 @@ mod esptls {
         /// Write the supplied buffer. Returns the number of bytes written.
         pub async fn write(&self, buf: &[u8]) -> Result<usize, EspError> {
             loop {
-                let res = self.0.lock().unwrap().write(buf);
+                let res = unsafe { &mut *self.0.get() }.write(buf);
 
                 match res {
                     Err(e) => self.wait(e).await?,
@@ -939,35 +940,42 @@ mod esptls {
             Ok(())
         }
 
-        async fn wait(&self, error: EspError) -> Result<(), EspError> {
-            const EWOULDBLOCK_I32: i32 = EWOULDBLOCK as i32;
+        fn wait(
+            &self,
+            error: EspError,
+        ) -> impl core::future::Future<Output = Result<(), EspError>> + '_ {
+            // Don't copy &self inside the future, since it is not Sync.
+            let this = unsafe { &mut *self.0.get() };
 
-            match error.code() {
-                // EWOULDBLOCK models the "0" return code of esp_mbedtls_handshake() which does not allow us
-                // to figure out whether we need the socket to become readable or writable
-                // The code below is therefore a hack which just waits with a timeout for the socket to (eventually)
-                // become readable as we actually don't even know if that's what esp_tls wants
-                EWOULDBLOCK_I32 => {
-                    core::future::poll_fn(|ctx| self.0.lock().unwrap().socket.poll_writable(ctx))
-                        .await?;
-                    crate::hal::delay::FreeRtos::delay_ms(0);
+            async move {
+                const EWOULDBLOCK_I32: i32 = EWOULDBLOCK as i32;
+
+                match error.code() {
+                    // EWOULDBLOCK models the "0" return code of esp_mbedtls_handshake() which does not allow us
+                    // to figure out whether we need the socket to become readable or writable
+                    // The code below is therefore a hack which just waits with a timeout for the socket to (eventually)
+                    // become readable as we actually don't even know if that's what esp_tls wants
+                    EWOULDBLOCK_I32 => {
+                        core::future::poll_fn(|ctx| this.socket.poll_writable(ctx)).await?;
+                        crate::hal::delay::FreeRtos::delay_ms(0);
+                    }
+                    ESP_TLS_ERR_SSL_WANT_READ => {
+                        core::future::poll_fn(|ctx| this.socket.poll_readable(ctx)).await?
+                    }
+
+                    ESP_TLS_ERR_SSL_WANT_WRITE => {
+                        core::future::poll_fn(|ctx| this.socket.poll_writable(ctx)).await?
+                    }
+
+                    _ => Err(error)?,
                 }
-                ESP_TLS_ERR_SSL_WANT_READ => {
-                    core::future::poll_fn(|ctx| self.0.lock().unwrap().socket.poll_readable(ctx))
-                        .await?
-                }
-                ESP_TLS_ERR_SSL_WANT_WRITE => {
-                    core::future::poll_fn(|ctx| self.0.lock().unwrap().socket.poll_writable(ctx))
-                        .await?
-                }
-                _ => Err(error)?,
+
+                Ok(())
             }
-
-            Ok(())
         }
 
         pub fn context_handle(&self) -> *mut sys::esp_tls {
-            self.0.lock().unwrap().context_handle()
+            unsafe { &*self.0.get() }.context_handle()
         }
     }
 
