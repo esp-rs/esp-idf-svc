@@ -959,7 +959,6 @@ mod esptls {
                 ESP_TLS_ERR_SSL_WANT_WRITE => {
                     core::future::poll_fn(|ctx| self.0.lock().socket.poll_writable(ctx)).await?
                 }
-
                 _ => Err(error)?,
             }
 
