@@ -1,4 +1,5 @@
 //! Example of a BLE GATT server using the ESP IDF Bluedroid BLE bindings.
+//! Build with `--features experimental` (for now).
 //!
 //! You can test it with any "GATT Browser" app, like e.g.
 //! the "GATTBrowser" mobile app available on Android.
@@ -27,17 +28,21 @@
 //! CONFIG_BT_BTC_TASK_STACK_SIZE=15000
 //! CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 
-#[cfg(not(esp32s2))]
+#[cfg(all(not(esp32s2), feature = "experimental"))]
 fn main() -> anyhow::Result<()> {
     example::main()
 }
 
-#[cfg(esp32s2)]
+#[cfg(any(esp32s2, not(feature = "experimental")))]
 fn main() -> anyhow::Result<()> {
+    #[cfg(esp32s2)]
     panic!("ESP32-S2 does not have a BLE radio");
+
+    #[cfg(not(feature = "experimental"))]
+    panic!("Use `--features experimental` when building this example");
 }
 
-#[cfg(not(esp32s2))]
+#[cfg(all(not(esp32s2), feature = "experimental"))]
 mod example {
     use std::sync::{Arc, Condvar, Mutex};
 
