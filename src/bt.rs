@@ -407,6 +407,7 @@ pub fn reduce_bt_memory<'d, B: BluetoothModemPeripheral>(
     Ok(())
 }
 
+#[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 pub fn free_bt_memory<B: BluetoothModemPeripheral>(_modem: B) -> Result<(), EspError> {
     let mut mem_freed = MEM_FREED.lock();
 
