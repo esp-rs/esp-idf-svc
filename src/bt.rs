@@ -50,6 +50,16 @@ impl BdAddr {
     }
 }
 
+impl fmt::Display for BdAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
+        )
+    }
+}
+
 impl From<BdAddr> for esp_bd_addr_t {
     fn from(value: BdAddr) -> Self {
         value.0
@@ -224,7 +234,8 @@ pub trait BtClassicEnabled: BtMode {}
 
 #[cfg(esp32)]
 #[cfg(not(esp_idf_btdm_ctrl_mode_ble_only))]
-pub struct BtClassic;
+#[derive(Clone)]
+pub struct BtClassic(());
 #[cfg(esp32)]
 #[cfg(not(esp_idf_btdm_ctrl_mode_ble_only))]
 impl BtClassicEnabled for BtClassic {}
@@ -244,7 +255,8 @@ impl BtMode for BtClassic {
 }
 
 #[cfg(not(esp_idf_btdm_ctrl_mode_br_edr_only))]
-pub struct Ble;
+#[derive(Clone)]
+pub struct Ble(());
 #[cfg(not(esp_idf_btdm_ctrl_mode_br_edr_only))]
 impl BleEnabled for Ble {}
 
@@ -263,7 +275,8 @@ impl BtMode for Ble {
 
 #[cfg(esp32)]
 #[cfg(esp_idf_btdm_ctrl_mode_btdm)]
-pub struct BtDual;
+#[derive(Clone)]
+pub struct BtDual(());
 #[cfg(esp32)]
 #[cfg(esp_idf_btdm_ctrl_mode_btdm)]
 impl BtClassicEnabled for BtDual {}
