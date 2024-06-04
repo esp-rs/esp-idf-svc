@@ -10,6 +10,22 @@
 //! The example is relatively sophisticated as it demonstrates not only how to receive data from clients
 //! but also how to broadcast data to all clients that have subscribed to a characteristic, including
 //! handling indication confirmations.
+//!
+//! Note that the Buedroid stack consumes a lot of memory, so `sdkconfig.defaults` should be carefully configured
+//! to avoid running out of memory.
+//!
+//! Here's a working configuration, but you might need to adjust further to your concrete use-case:
+//!
+//! CONFIG_BT_ENABLED=y
+//! CONFIG_BT_BLUEDROID_ENABLED=y
+//! CONFIG_BT_CLASSIC_ENABLED=n
+//! CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+//! CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+//! CONFIG_BTDM_CTRL_MODE_BTDM=n
+//! CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+//! CONFIG_BT_BLE_50_FEATURES_SUPPORTED=y
+//! CONFIG_BT_BTC_TASK_STACK_SIZE=15000
+//! CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 
 #[cfg(not(esp32s2))]
 fn main() -> anyhow::Result<()> {
