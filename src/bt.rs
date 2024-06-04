@@ -492,7 +492,7 @@ where
             ..Default::default()
         };
 
-        #[cfg(esp32c3)]
+        #[cfg(not(any(esp32, esp32s3)))]
         let mut bt_cfg = esp_bt_controller_config_t {
             magic: crate::sys::ESP_BT_CTRL_CONFIG_MAGIC_VAL,
             version: crate::sys::ESP_BT_CTRL_CONFIG_VERSION,
