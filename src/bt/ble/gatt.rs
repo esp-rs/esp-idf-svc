@@ -304,7 +304,7 @@ impl GattResponse {
         Self(esp_gatt_rsp_t {
             attr_value: esp_gatt_value_t {
                 len: 0,
-                value: [0; 600],
+                value: [0; ESP_GATT_MAX_ATTR_LEN as _],
                 handle: 0,
                 offset: 0,
                 auth_req: 0,
