@@ -7,11 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Removed
-* ESP-IDF v4.3 support, including mostly conditional compilations. (#431)
 ### Deprecated
 **ESP-IDF v4.4** Please start upgrading to ESP-IDF v5.
-### Changed (Breaking)
+### Breaking
+* **removed** ESP-IDF v4.3 support, including mostly conditional compilations. (#431)
 * wifi: now can use embedded-svc PmfConfiguration, ScanMethod, and ScanSortMethod in ClientConfiguration. (#381)
 * wifi: The WifiEvent's ApStaConnected and ApStaDisconnected were changed to include the idf's wifi_event. (#396)
 * eth: callbacks now use newly added EthFrames instead of &[u8]. (#406)
