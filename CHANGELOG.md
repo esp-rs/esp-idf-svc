@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 * ESP-IDF v4.3 support, including mostly conditional compilations. (#431)
-### Changed
-* **ESP-IDF v4.4 is now considered deprecated.** Please start upgrading to ESP-IDF v5.
+### Deprecated
+**ESP-IDF v4.4** Please start upgrading to ESP-IDF v5.
+### Changed (Breaking)
 * wifi: now can use embedded-svc PmfConfiguration, ScanMethod, and ScanSortMethod in ClientConfiguration. (#381)
 * wifi: The WifiEvent's ApStaConnected and ApStaDisconnected were changed to include the idf's wifi_event. (#396)
 * eth: callbacks now use newly added EthFrames instead of &[u8]. (#406)
@@ -35,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * eth: missing error return inside the rx_callback function. (#414)
 * wifi: AccessPointConfiguration now correctly limits max_connections. (#426)
 * wifi: Fix WPS regression around null termination of ssid/password. (#379)
-* esp-idf-v5.3 and master: various fixes such that esp-idf-svc can be used against the latest esp-idf versions. (#434)
+* Compatibility with ESP-IDF v5.3 (pre-release): various fixes such that esp-idf-svc can be used against the latest esp-idf versions. (#434)
 
 ## [0.48.1] - 2024-02-21
 * Disable the `esp_idf_svc::io::vfs` module if the ESP IDF VFS component is not enabled either
