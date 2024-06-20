@@ -3,13 +3,53 @@ use core::{ffi, mem, ptr, time::Duration};
 
 use ::log::*;
 
-use embedded_svc::ipv4;
-use embedded_svc::ping::*;
-
-use esp_idf_sys::*;
-
+use crate::ipv4;
 use crate::private::common::*;
 use crate::private::waitable::*;
+use crate::sys::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Configuration {
+    pub count: u32,
+    pub interval: Duration,
+    pub timeout: Duration,
+    pub data_size: u32,
+    pub tos: u8,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration {
+            count: 5,
+            interval: Duration::from_secs(1),
+            timeout: Duration::from_secs(1),
+            data_size: 56,
+            tos: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Info {
+    pub addr: ipv4::Ipv4Addr,
+    pub seqno: u32,
+    pub ttl: u8,
+    pub elapsed_time: Duration,
+    pub recv_len: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reply {
+    Timeout,
+    Success(Info),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Summary {
+    pub transmitted: u32,
+    pub received: u32,
+    pub time: Duration,
+}
 
 #[derive(Debug, Default)]
 pub struct EspPing(u32);
@@ -28,18 +68,18 @@ impl EspPing {
             ip, conf
         );
 
-        let mut tracker = Tracker::new(Some(&nop_callback));
+        let mut tracker = Tracker::new(Some(nop_callback));
 
         self.run_ping(ip, conf, &mut tracker)?;
 
         Ok(tracker.summary)
     }
 
-    pub fn ping_details<F: Fn(&Summary, &Reply)>(
+    pub fn ping_details<F: FnMut(&Summary, &Reply) + Send>(
         &mut self,
         ip: ipv4::Ipv4Addr,
         conf: &Configuration,
-        reply_callback: &F,
+        reply_callback: F,
     ) -> Result<Summary, EspError> {
         info!(
             "About to run a detailed ping {} with configuration {:?}",
@@ -53,7 +93,7 @@ impl EspPing {
         Ok(tracker.summary)
     }
 
-    fn run_ping<F: Fn(&Summary, &Reply)>(
+    fn run_ping<F: FnMut(&Summary, &Reply) + Send>(
         &self,
         ip: ipv4::Ipv4Addr,
         conf: &Configuration,
@@ -76,6 +116,7 @@ impl EspPing {
             task_stack_size: 4096,
             task_prio: 2,
             interface: self.0,
+            ttl: 64,
             ..Default::default()
         };
 
@@ -121,7 +162,7 @@ impl EspPing {
         Ok(())
     }
 
-    unsafe extern "C" fn on_ping_success<F: Fn(&Summary, &Reply)>(
+    unsafe extern "C" fn on_ping_success<F: FnMut(&Summary, &Reply) + Send>(
         handle: esp_ping_handle_t,
         args: *mut ffi::c_void,
     ) {
@@ -179,7 +220,7 @@ impl EspPing {
             addr, seqno, ttl, elapsed_time, recv_len
         );
 
-        if let Some(reply_callback) = tracker.reply_callback {
+        if let Some(reply_callback) = tracker.reply_callback.as_mut() {
             Self::update_summary(handle, &mut tracker.summary);
 
             reply_callback(
@@ -195,7 +236,7 @@ impl EspPing {
         }
     }
 
-    unsafe extern "C" fn on_ping_timeout<F: Fn(&Summary, &Reply)>(
+    unsafe extern "C" fn on_ping_timeout<F: FnMut(&Summary, &Reply) + Send>(
         handle: esp_ping_handle_t,
         args: *mut ffi::c_void,
     ) {
@@ -224,7 +265,7 @@ impl EspPing {
 
         info!("From {} icmp_seq={} timeout", "???", seqno);
 
-        if let Some(reply_callback) = tracker.reply_callback {
+        if let Some(reply_callback) = tracker.reply_callback.as_mut() {
             Self::update_summary(handle, &mut tracker.summary);
 
             reply_callback(&tracker.summary, &Reply::Timeout);
@@ -232,7 +273,7 @@ impl EspPing {
     }
 
     #[allow(clippy::mutex_atomic)]
-    unsafe extern "C" fn on_ping_end<F: Fn(&Summary, &Reply)>(
+    unsafe extern "C" fn on_ping_end<F: FnMut(&Summary, &Reply) + Send>(
         handle: esp_ping_handle_t,
         args: *mut ffi::c_void,
     ) {
@@ -287,32 +328,15 @@ impl EspPing {
     }
 }
 
-impl Ping for EspPing {
-    type Error = EspError;
-
-    fn ping(&mut self, ip: ipv4::Ipv4Addr, conf: &Configuration) -> Result<Summary, Self::Error> {
-        EspPing::ping(self, ip, conf)
-    }
-
-    fn ping_details<F: Fn(&Summary, &Reply)>(
-        &mut self,
-        ip: ipv4::Ipv4Addr,
-        conf: &Configuration,
-        reply_callback: &F,
-    ) -> Result<Summary, Self::Error> {
-        EspPing::ping_details(self, ip, conf, reply_callback)
-    }
-}
-
-struct Tracker<'a, F: Fn(&Summary, &Reply)> {
+struct Tracker<F: FnMut(&Summary, &Reply) + Send> {
     summary: Summary,
     waitable: Waitable<bool>,
-    reply_callback: Option<&'a F>,
+    reply_callback: Option<F>,
 }
 
-impl<'a, F: Fn(&Summary, &Reply)> Tracker<'a, F> {
+impl<F: FnMut(&Summary, &Reply) + Send> Tracker<F> {
     #[allow(clippy::mutex_atomic)]
-    pub fn new(reply_callback: Option<&'a F>) -> Self {
+    pub fn new(reply_callback: Option<F>) -> Self {
         Self {
             summary: Default::default(),
             waitable: Waitable::new(false),

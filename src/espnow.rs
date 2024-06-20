@@ -6,26 +6,26 @@
 //! another without connection. CTR with CBC-MAC Protocol(CCMP) is used to
 //! protect the action frame for security. ESP-NOW is widely used in smart
 //! light, remote controlling, sensor, etc.
+use core::marker::PhantomData;
+
 use ::log::info;
 
 use alloc::boxed::Box;
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
-use crate::private::mutex::{Mutex, RawMutex};
+use crate::private::mutex::Mutex;
 
 type Singleton<T> = Mutex<Option<Box<T>>>;
 
 pub const BROADCAST: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 
 #[allow(clippy::type_complexity)]
-static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send> =
-    Mutex::wrap(RawMutex::new(), None);
+static RECV_CALLBACK: Singleton<dyn FnMut(&[u8], &[u8]) + Send + 'static> = Mutex::new(None);
 #[allow(clippy::type_complexity)]
-static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send> =
-    Mutex::wrap(RawMutex::new(), None);
+static SEND_CALLBACK: Singleton<dyn FnMut(&[u8], SendStatus) + Send + 'static> = Mutex::new(None);
 
-static TAKEN: Mutex<bool> = Mutex::wrap(RawMutex::new(), false);
+static TAKEN: Mutex<bool> = Mutex::new(false);
 
 #[derive(Debug)]
 pub enum SendStatus {
@@ -45,10 +45,43 @@ impl From<u32> for SendStatus {
 
 pub type PeerInfo = esp_now_peer_info_t;
 
-pub struct EspNow(());
+pub struct EspNow<'a>(PhantomData<&'a ()>);
 
-impl EspNow {
+impl EspNow<'static> {
     pub fn take() -> Result<Self, EspError> {
+        Self::internal_take()
+    }
+}
+
+impl<'a> EspNow<'a> {
+    /// # Safety
+    ///
+    /// This method - in contrast to method `take` - allows the user to set
+    /// non-static callbacks/closures into the returned `EspNow` service. This enables users to borrow
+    /// - in the closure - variables that live on the stack - or more generally - in the same
+    /// scope where the service is created.
+    ///
+    /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+    /// as that would immediately lead to an UB (crash).
+    /// Also note that forgetting the service might happen with `Rc` and `Arc`
+    /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+    ///
+    /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+    /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+    /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+    ///
+    /// The destructor of the service takes care - prior to the service being dropped and e.g.
+    /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+    /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+    /// and invalid references are left dangling.
+    ///
+    /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+    /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
+    pub unsafe fn take_nonstatic() -> Result<Self, EspError> {
+        Self::internal_take()
+    }
+
+    fn internal_take() -> Result<Self, EspError> {
         let mut taken = TAKEN.lock();
 
         if *taken {
@@ -65,11 +98,11 @@ impl EspNow {
 
         *taken = true;
 
-        Ok(Self(()))
+        Ok(Self(PhantomData))
     }
 
     pub fn send(&self, peer_addr: [u8; 6], data: &[u8]) -> Result<(), EspError> {
-        esp!(unsafe { esp_idf_sys::esp_now_send(peer_addr.as_ptr(), data.as_ptr(), data.len(),) })?;
+        esp!(unsafe { crate::sys::esp_now_send(peer_addr.as_ptr(), data.as_ptr(), data.len(),) })?;
 
         Ok(())
     }
@@ -114,6 +147,13 @@ impl EspNow {
         Ok((num.total_num as usize, num.encrypt_num as usize))
     }
 
+    pub fn fetch_peer(&self, from_head: bool) -> Result<PeerInfo, EspError> {
+        let mut peer_info = PeerInfo::default();
+        esp!(unsafe { esp_now_fetch_peer(from_head, &mut peer_info as *mut esp_now_peer_info_t) })?;
+
+        Ok(peer_info)
+    }
+
     pub fn set_pmk(&self, pmk: &[u8]) -> Result<(), EspError> {
         esp!(unsafe { esp_now_set_pmk(pmk.as_ptr()) })?;
 
@@ -126,10 +166,16 @@ impl EspNow {
         Ok(version)
     }
 
-    pub fn register_recv_cb(
-        &self,
-        callback: impl for<'b, 'c> FnMut(&'b [u8], &'c [u8]) + 'static + Send,
-    ) -> Result<(), EspError> {
+    pub fn register_recv_cb<F>(&self, callback: F) -> Result<(), EspError>
+    where
+        F: FnMut(&[u8], &[u8]) + Send + 'a,
+    {
+        #[allow(clippy::type_complexity)]
+        let callback: Box<dyn FnMut(&[u8], &[u8]) + Send + 'a> = Box::new(callback);
+        #[allow(clippy::type_complexity)]
+        let callback: Box<dyn FnMut(&[u8], &[u8]) + Send + 'static> =
+            unsafe { core::mem::transmute(callback) };
+
         *RECV_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_recv_cb(Some(Self::recv_callback)) })?;
 
@@ -143,10 +189,16 @@ impl EspNow {
         Ok(())
     }
 
-    pub fn register_send_cb(
-        &self,
-        callback: impl for<'b, 'c> FnMut(&'b [u8], SendStatus) + 'static + Send,
-    ) -> Result<(), EspError> {
+    pub fn register_send_cb<F>(&self, callback: F) -> Result<(), EspError>
+    where
+        F: FnMut(&[u8], SendStatus) + Send + 'a,
+    {
+        #[allow(clippy::type_complexity)]
+        let callback: Box<dyn FnMut(&[u8], SendStatus) + Send + 'a> = Box::new(callback);
+        #[allow(clippy::type_complexity)]
+        let callback: Box<dyn FnMut(&[u8], SendStatus) + Send + 'static> =
+            unsafe { core::mem::transmute(callback) };
+
         *SEND_CALLBACK.lock() = Some(Box::new(callback));
         esp!(unsafe { esp_now_register_send_cb(Some(Self::send_callback)) })?;
 
@@ -171,8 +223,8 @@ impl EspNow {
     }
 
     extern "C" fn recv_callback(
-        #[cfg(any(esp_idf_version_major = "4"))] mac_addr: *const u8,
-        #[cfg(not(any(esp_idf_version_major = "4")))] esp_now_info: *const esp_now_recv_info_t,
+        #[cfg(esp_idf_version_major = "4")] mac_addr: *const u8,
+        #[cfg(not(esp_idf_version_major = "4"))] esp_now_info: *const esp_now_recv_info_t,
         data: *const u8,
         data_len: core::ffi::c_int,
     ) {
@@ -189,21 +241,17 @@ impl EspNow {
     }
 }
 
-impl Drop for EspNow {
+impl<'a> Drop for EspNow<'a> {
     fn drop(&mut self) {
         let mut taken = TAKEN.lock();
 
         esp!(unsafe { esp_now_deinit() }).unwrap();
 
         let send_cb = &mut *SEND_CALLBACK.lock();
-        if send_cb.is_some() {
-            *send_cb = None;
-        }
+        *send_cb = None;
 
         let recv_cb = &mut *RECV_CALLBACK.lock();
-        if recv_cb.is_some() {
-            *recv_cb = None;
-        }
+        *recv_cb = None;
 
         *taken = false;
     }

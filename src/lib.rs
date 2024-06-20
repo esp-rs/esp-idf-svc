@@ -4,27 +4,35 @@
 //!
 //! ## Features
 //!
-//! This crates specifies a few cargo features, including:
+//! This crate specifies a few cargo features, including:
 //!
 //! - `std`: Enable the use of std. Enabled by default.
 //! - `experimental`: Enable the use of experimental features.
-//! - `embassy-time-driver`
-//! - `embassy-time-isr-queue`
-#![cfg_attr(not(feature = "std"), no_std)]
-#![feature(cfg_version)]
-#![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
-#![cfg_attr(
-    all(feature = "nightly", version("1.70")),
-    feature(impl_trait_in_assoc_type)
-)]
-#![allow(clippy::unused_unit)] // enumset
+//! - `embassy-time-driver`: Implement an embassy time driver.
+#![no_std]
+#![allow(async_fn_in_trait)]
+#![allow(unknown_lints)]
+#![allow(renamed_and_removed_lints)]
+#![warn(clippy::large_futures)]
 
-#[cfg(any(feature = "alloc"))]
+#[cfg(feature = "std")]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate std;
+
+#[cfg(feature = "alloc")]
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
 
-pub mod errors;
+#[cfg(not(esp32s2))]
+#[cfg(all(
+    esp_idf_bt_enabled,
+    esp_idf_bt_bluedroid_enabled,
+    feature = "alloc",
+    feature = "experimental"
+))]
+pub mod bt;
 #[cfg(all(
     not(esp32h2),
     feature = "alloc",
@@ -49,14 +57,18 @@ pub mod espnow;
 pub mod eth;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_event_enabled))]
 pub mod eventloop;
+pub mod hal;
 pub mod handle;
 #[cfg(feature = "alloc")]
 pub mod http;
-#[cfg(all(feature = "std", esp_idf_comp_esp_http_server_enabled))]
-pub mod httpd;
+pub mod io;
+pub mod ipv4;
 #[cfg(feature = "alloc")]
 pub mod log;
-#[cfg(all(feature = "alloc", esp_idf_comp_mdns_enabled))]
+#[cfg(all(
+    feature = "alloc",
+    any(esp_idf_comp_mdns_enabled, esp_idf_comp_espressif__mdns_enabled)
+))]
 pub mod mdns;
 #[cfg(all(
     feature = "alloc",
@@ -68,8 +80,6 @@ pub mod mqtt;
 pub mod napt;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_netif_enabled))]
 pub mod netif;
-#[cfg(feature = "alloc")]
-pub mod notify;
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 pub mod nvs;
 #[cfg(all(esp_idf_comp_app_update_enabled, esp_idf_comp_spi_flash_enabled))]
@@ -78,6 +88,7 @@ pub mod ota;
 pub mod ping;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_netif_enabled))]
 pub mod sntp;
+pub mod sys;
 pub mod systime;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 pub mod timer;

@@ -1,29 +1,32 @@
 //! Simple HTTP client example.
 
+use core::convert::TryInto;
+
 use embedded_svc::{
     http::{client::Client as HttpClient, Method},
     io::Write,
     utils::io,
     wifi::{AuthMethod, ClientConfiguration, Configuration},
 };
-use esp_idf_hal::prelude::Peripherals;
+
+use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::http::client::EspHttpConnection;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::wifi::{BlockingWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
-use esp_idf_sys::{self as _}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 
 use log::{error, info};
 
-const SSID: &'static str = env!("WIFI_SSID");
-const PASSWORD: &'static str = env!("WIFI_PASS");
+const SSID: &str = env!("WIFI_SSID");
+const PASSWORD: &str = env!("WIFI_PASS");
 
 fn main() -> anyhow::Result<()> {
+    esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
 
     // Setup Wifi
 
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
@@ -43,28 +46,30 @@ fn main() -> anyhow::Result<()> {
     // POST
     post_request(&mut client)?;
 
+    // POST chunked
+    post_chunked_request(&mut client)?;
+
     Ok(())
 }
 
-/// Send a HTTP GET request.
+/// Send an HTTP GET request.
 fn get_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
     // Prepare headers and URL
-    let headers = [("accept", "text/plain"), ("connection", "close")];
+    let headers = [("accept", "text/plain")];
     let url = "http://ifconfig.net/";
 
     // Send request
     //
     // Note: If you don't want to pass in any headers, you can also use `client.get(url, headers)`.
-    let request = client.request(Method::Get, &url, &headers)?;
+    let request = client.request(Method::Get, url, &headers)?;
     info!("-> GET {}", url);
     let mut response = request.submit()?;
 
     // Process response
     let status = response.status();
     info!("<- {}", status);
-    let (_headers, mut body) = response.split();
     let mut buf = [0u8; 1024];
-    let bytes_read = io::try_read_full(&mut body, &mut buf).map_err(|e| e.0)?;
+    let bytes_read = io::try_read_full(&mut response, &mut buf).map_err(|e| e.0)?;
     info!("Read {} bytes", bytes_read);
     match std::str::from_utf8(&buf[0..bytes_read]) {
         Ok(body_string) => info!(
@@ -76,12 +81,12 @@ fn get_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()>
     };
 
     // Drain the remaining response bytes
-    while body.read(&mut buf)? > 0 {}
+    while response.read(&mut buf)? > 0 {}
 
     Ok(())
 }
 
-/// Send a HTTP POST request.
+/// Send an HTTP POST request.
 fn post_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
     // Prepare payload
     let payload = b"Hello world!";
@@ -89,15 +94,13 @@ fn post_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()
     // Prepare headers and URL
     let content_length_header = format!("{}", payload.len());
     let headers = [
-        ("accept", "text/plain"),
         ("content-type", "text/plain"),
-        ("connection", "close"),
         ("content-length", &*content_length_header),
     ];
-    let url = "http://example.org/";
+    let url = "http://httpbin.org/post";
 
     // Send request
-    let mut request = client.post(&url, &headers)?;
+    let mut request = client.post(url, &headers)?;
     request.write_all(payload)?;
     request.flush()?;
     info!("-> POST {}", url);
@@ -106,9 +109,8 @@ fn post_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()
     // Process response
     let status = response.status();
     info!("<- {}", status);
-    let (_headers, mut body) = response.split();
     let mut buf = [0u8; 1024];
-    let bytes_read = io::try_read_full(&mut body, &mut buf).map_err(|e| e.0)?;
+    let bytes_read = io::try_read_full(&mut response, &mut buf).map_err(|e| e.0)?;
     info!("Read {} bytes", bytes_read);
     match std::str::from_utf8(&buf[0..bytes_read]) {
         Ok(body_string) => info!(
@@ -120,17 +122,56 @@ fn post_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()
     };
 
     // Drain the remaining response bytes
-    while body.read(&mut buf)? > 0 {}
+    while response.read(&mut buf)? > 0 {}
+
+    Ok(())
+}
+
+/// Send an HTTP POST request using chunked transfer encoding.
+fn post_chunked_request(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
+    // Prepare payload
+    let payload1 = b"Hello world!";
+    let payload2 = b"From Rust!";
+
+    // Prepare headers and URL
+    let headers = [("content-type", "text/plain")];
+    let url = "http://httpbin.org/post";
+
+    // Send request
+    let mut request = client.post(url, &headers)?;
+    request.write_all(payload1)?;
+    request.write_all(payload2)?;
+    request.flush()?;
+    info!("-> CHUNKED POST {}", url);
+    let mut response = request.submit()?;
+
+    // Process response
+    let status = response.status();
+    info!("<- {}", status);
+    let mut buf = [0u8; 1024];
+    let bytes_read = io::try_read_full(&mut response, &mut buf).map_err(|e| e.0)?;
+    info!("Read {} bytes", bytes_read);
+    match std::str::from_utf8(&buf[0..bytes_read]) {
+        Ok(body_string) => info!(
+            "Response body (truncated to {} bytes): {:?}",
+            buf.len(),
+            body_string
+        ),
+        Err(e) => error!("Error decoding response body: {}", e),
+    };
+
+    // Drain the remaining response bytes
+    while response.read(&mut buf)? > 0 {}
 
     Ok(())
 }
 
 fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
     let wifi_configuration: Configuration = Configuration::Client(ClientConfiguration {
-        ssid: SSID.into(),
+        ssid: SSID.try_into().unwrap(),
         bssid: None,
         auth_method: AuthMethod::WPA2Personal,
-        password: PASSWORD.into(),
+        password: PASSWORD.try_into().unwrap(),
         channel: None,
     });
 

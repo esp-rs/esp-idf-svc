@@ -1,10 +1,12 @@
 //! SNTP Time Synchronization
 
 use core::cmp::min;
+use core::marker::PhantomData;
 use core::time::Duration;
 
 use ::log::*;
 
+use crate::private::cstr::to_cstring_arg;
 use crate::private::cstr::CString;
 use crate::private::mutex;
 
@@ -14,7 +16,7 @@ extern crate alloc;
 #[cfg(not(any(esp_idf_version_major = "4", esp_idf_version_minor = "0")))]
 mod esp_sntp {
     use super::OperatingMode;
-    pub use esp_idf_sys::*;
+    pub use crate::sys::*;
 
     impl From<esp_sntp_operatingmode_t> for OperatingMode {
         #[allow(non_upper_case_globals)]
@@ -46,7 +48,7 @@ mod esp_sntp {
 #[cfg(any(esp_idf_version_major = "4", esp_idf_version_minor = "0"))]
 mod esp_sntp {
     use super::OperatingMode;
-    pub use esp_idf_sys::*;
+    pub use crate::sys::*;
 
     impl From<u8_t> for OperatingMode {
         fn from(from: u8_t) -> Self {
@@ -81,7 +83,6 @@ const DEFAULT_SERVERS: [&str; 4] = [
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Hash))]
-#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
 pub enum OperatingMode {
     Poll,
     ListenOnly,
@@ -89,7 +90,6 @@ pub enum OperatingMode {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Hash))]
-#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
 pub enum SyncMode {
     Smooth,
     Immediate,
@@ -117,7 +117,6 @@ impl From<SyncMode> for sntp_sync_mode_t {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Hash))]
-#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
 pub enum SyncStatus {
     Reset,
     Completed,
@@ -160,16 +159,16 @@ impl<'a> Default for SntpConf<'a> {
 #[cfg(feature = "alloc")]
 type SyncCallback = alloc::boxed::Box<dyn FnMut(Duration) + Send + 'static>;
 #[cfg(feature = "alloc")]
-static SYNC_CB: mutex::Mutex<Option<SyncCallback>> =
-    mutex::Mutex::wrap(mutex::RawMutex::new(), None);
-static TAKEN: mutex::Mutex<bool> = mutex::Mutex::wrap(mutex::RawMutex::new(), false);
+static SYNC_CB: mutex::Mutex<Option<SyncCallback>> = mutex::Mutex::new(None);
+static TAKEN: mutex::Mutex<bool> = mutex::Mutex::new(false);
 
-pub struct EspSntp {
+pub struct EspSntp<'a> {
     // Needs to be kept around because the C bindings only have a pointer.
     _sntp_servers: [CString; SNTP_SERVER_NUM],
+    _ref: PhantomData<&'a ()>,
 }
 
-impl EspSntp {
+impl EspSntp<'static> {
     pub fn new_default() -> Result<Self, EspError> {
         Self::new(&Default::default())
     }
@@ -192,13 +191,64 @@ impl EspSntp {
     where
         F: FnMut(Duration) + Send + 'static,
     {
+        Self::internal_new_with_callback(conf, callback)
+    }
+}
+
+impl<'a> EspSntp<'a> {
+    /// # Safety
+    ///
+    /// This method - in contrast to method `new_with_callback` - allows the user to set
+    /// a non-static callback/closure into the returned `EspSntp` service. This enables users to borrow
+    /// - in the closure - variables that live on the stack - or more generally - in the same
+    /// scope where the service is created.
+    ///
+    /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+    /// as that would immediately lead to an UB (crash).
+    /// Also note that forgetting the service might happen with `Rc` and `Arc`
+    /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+    ///
+    /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+    /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+    /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+    ///
+    /// The destructor of the service takes care - prior to the service being dropped and e.g.
+    /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+    /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+    /// and invalid references are left dangling.
+    ///
+    /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+    /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
+    #[cfg(feature = "alloc")]
+    pub unsafe fn new_nonstatic_with_callback<F>(
+        conf: &SntpConf,
+        callback: F,
+    ) -> Result<Self, EspError>
+    where
+        F: FnMut(Duration) + Send + 'a,
+    {
+        Self::internal_new_with_callback(conf, callback)
+    }
+
+    #[cfg(feature = "alloc")]
+    fn internal_new_with_callback<F>(conf: &SntpConf, callback: F) -> Result<Self, EspError>
+    where
+        F: FnMut(Duration) + Send + 'a,
+    {
         let mut taken = TAKEN.lock();
 
         if *taken {
             esp!(ESP_ERR_INVALID_STATE)?;
         }
 
-        *SYNC_CB.lock() = Some(alloc::boxed::Box::new(callback));
+        #[allow(clippy::type_complexity)]
+        let callback: alloc::boxed::Box<dyn FnMut(Duration) + Send + 'a> =
+            alloc::boxed::Box::new(callback);
+        #[allow(clippy::type_complexity)]
+        let callback: alloc::boxed::Box<dyn FnMut(Duration) + Send + 'static> =
+            unsafe { core::mem::transmute(callback) };
+
+        *SYNC_CB.lock() = Some(callback);
         let sntp = Self::init(conf)?;
 
         *taken = true;
@@ -213,7 +263,7 @@ impl EspSntp {
 
         let mut c_servers: [CString; SNTP_SERVER_NUM] = Default::default();
         for (i, s) in conf.servers.iter().enumerate() {
-            let c_server = CString::new(*s).unwrap();
+            let c_server = to_cstring_arg(s)?;
             unsafe { sntp_setservername(i as u8, c_server.as_ptr()) };
             c_servers[i] = c_server;
         }
@@ -228,6 +278,7 @@ impl EspSntp {
 
         Ok(Self {
             _sntp_servers: c_servers,
+            _ref: PhantomData,
         })
     }
 
@@ -257,7 +308,7 @@ impl EspSntp {
     }
 }
 
-impl Drop for EspSntp {
+impl<'a> Drop for EspSntp<'a> {
     fn drop(&mut self) {
         {
             let mut taken = TAKEN.lock();

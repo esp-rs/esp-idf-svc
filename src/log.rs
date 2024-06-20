@@ -3,22 +3,59 @@ use core::fmt::Write;
 
 use ::log::{Level, LevelFilter, Metadata, Record};
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
 use crate::private::common::*;
 use crate::private::cstr::*;
 
 /// Exposes the newlib stdout file descriptor to allow writing formatted
 /// messages to stdout without a std dependency or allocation
-struct EspStdout;
+///
+/// Does lock the `stdout` file descriptor on `new` and does release the lock on `drop`,
+/// so that the logging does not get interleaved with other output due to multithreading
+struct EspStdout(*mut FILE);
+
+impl EspStdout {
+    fn new() -> Self {
+        let stdout = unsafe { __getreent().as_mut() }.unwrap()._stdout;
+
+        let file = unsafe { stdout.as_mut() }.unwrap();
+
+        // Copied from here:
+        // https://github.com/bminor/newlib/blob/master/newlib/libc/stdio/local.h#L80
+        // https://github.com/bminor/newlib/blob/3bafe2fae7a0878598a82777c623edb2faa70b74/newlib/libc/include/sys/stdio.h#L13
+        if (file._flags2 & __SNLK as i32) == 0 && (file._flags & __SSTR as i16) == 0 {
+            unsafe {
+                _lock_acquire_recursive(&mut file._lock);
+            }
+        }
+
+        Self(stdout)
+    }
+}
+
+impl Drop for EspStdout {
+    fn drop(&mut self) {
+        let file = unsafe { self.0.as_mut() }.unwrap();
+
+        // Copied from here:
+        // https://github.com/bminor/newlib/blob/master/newlib/libc/stdio/local.h#L85
+        // https://github.com/bminor/newlib/blob/3bafe2fae7a0878598a82777c623edb2faa70b74/newlib/libc/include/sys/stdio.h#L21
+        if (file._flags2 & __SNLK as i32) == 0 && (file._flags & __SSTR as i16) == 0 {
+            unsafe {
+                _lock_release_recursive(&mut file._lock);
+            }
+        }
+    }
+}
 
 impl core::fmt::Write for EspStdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let stdout = unsafe { __getreent().as_mut() }.unwrap()._stdout;
         let slice = s.as_bytes();
         unsafe {
-            fwrite(slice.as_ptr() as *const _, 1, slice.len() as u32, stdout);
+            fwrite(slice.as_ptr() as *const _, 1, slice.len() as u32, self.0);
         }
+
         Ok(())
     }
 }
@@ -99,15 +136,21 @@ impl EspLogger {
         LevelFilter::from(Newtype(CONFIG_LOG_MAXIMUM_LEVEL))
     }
 
-    pub fn set_target_level(&self, target: impl AsRef<str>, level_filter: LevelFilter) {
-        let ctarget = CString::new(target.as_ref()).unwrap();
+    pub fn set_target_level(
+        &self,
+        target: impl AsRef<str>,
+        level_filter: LevelFilter,
+    ) -> Result<(), EspError> {
+        let ctarget = to_cstring_arg(target.as_ref())?;
 
         unsafe {
             esp_log_level_set(
                 ctarget.as_c_str().as_ptr(),
                 Newtype::<esp_log_level_t>::from(level_filter).0,
-            )
-        };
+            );
+        }
+
+        Ok(())
     }
 
     fn get_marker(level: Level) -> &'static str {
@@ -139,20 +182,31 @@ impl EspLogger {
 
     #[cfg(not(all(esp_idf_version_major = "4", esp_idf_version_minor = "3")))]
     fn should_log(record: &Record) -> bool {
-        use crate::private::mutex::{Mutex, RawMutex};
+        use crate::private::mutex::Mutex;
         use alloc::collections::BTreeMap;
 
         // esp-idf function `esp_log_level_get` builds a cache using the address
         // of the target and not doing a string compare.  This means we need to
-        // build a cache of our own mapping the string value to a consistant
-        // c-string value.
+        // build a cache of our own mapping the str value to a consistant
+        // Cstr value.
         static TARGET_CACHE: Mutex<BTreeMap<alloc::string::String, CString>> =
-            Mutex::wrap(RawMutex::new(), BTreeMap::new());
+            Mutex::new(BTreeMap::new());
         let level = Newtype::<esp_log_level_t>::from(record.level()).0;
+
         let mut cache = TARGET_CACHE.lock();
-        let ctarget = cache
-            .entry(record.target().into())
-            .or_insert_with(|| CString::new(record.target()).unwrap());
+
+        let ctarget = loop {
+            if let Some(ctarget) = cache.get(record.target()) {
+                break ctarget;
+            }
+
+            if let Ok(ctarget) = to_cstring_arg(record.target()) {
+                cache.insert(record.target().into(), ctarget);
+            } else {
+                return true;
+            }
+        };
+
         let max_level = unsafe { esp_log_level_get(ctarget.as_c_str().as_ptr()) };
         level <= max_level
     }
@@ -170,28 +224,26 @@ impl ::log::Log for EspLogger {
     }
 
     fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) && Self::should_log(record) {
-            if let Some(color) = Self::get_color(record.level()) {
+        let metadata = record.metadata();
+
+        if self.enabled(metadata) && Self::should_log(record) {
+            let marker = Self::get_marker(metadata.level());
+            let timestamp = unsafe { esp_log_timestamp() };
+            let target = record.metadata().target();
+            let args = record.args();
+            let color = Self::get_color(record.level());
+
+            let mut stdout = EspStdout::new();
+
+            if let Some(color) = color {
                 writeln!(
-                    EspStdout,
+                    stdout,
                     "\x1b[0;{}m{} ({}) {}: {}\x1b[0m",
-                    color,
-                    Self::get_marker(record.metadata().level()),
-                    unsafe { esp_log_timestamp() },
-                    record.metadata().target(),
-                    record.args()
+                    color, marker, timestamp, target, args
                 )
                 .unwrap();
             } else {
-                writeln!(
-                    EspStdout,
-                    "{} ({}) {}: {}",
-                    Self::get_marker(record.metadata().level()),
-                    unsafe { esp_log_timestamp() },
-                    record.metadata().target(),
-                    record.args()
-                )
-                .unwrap();
+                writeln!(stdout, "{} ({}) {}: {}", marker, timestamp, target, args).unwrap();
             }
         }
     }
@@ -199,6 +251,9 @@ impl ::log::Log for EspLogger {
     fn flush(&self) {}
 }
 
-pub fn set_target_level(target: impl AsRef<str>, level_filter: LevelFilter) {
+pub fn set_target_level(
+    target: impl AsRef<str>,
+    level_filter: LevelFilter,
+) -> Result<(), EspError> {
     LOGGER.set_target_level(target, level_filter)
 }

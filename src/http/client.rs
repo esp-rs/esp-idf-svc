@@ -6,6 +6,7 @@
 //! [`examples/http_request.rs`](https://github.com/esp-rs/esp-idf-svc/blob/master/examples/http_request.rs).
 
 use core::cell::UnsafeCell;
+use core::fmt::Write as _;
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -16,18 +17,21 @@ use alloc::string::ToString;
 use ::log::*;
 
 use embedded_svc::http::client::*;
-use embedded_svc::http::*;
-use embedded_svc::io::{Io, Read, Write};
+use embedded_svc::io::{ErrorType, Read, Write};
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
 use uncased::{Uncased, UncasedStr};
 
-use crate::errors::EspIOError;
 use crate::handle::RawHandle;
+use crate::io::EspIOError;
 use crate::private::common::Newtype;
 use crate::private::cstr::*;
 use crate::tls::X509;
+
+pub use embedded_svc::http::client::{Connection, Request, Response};
+
+pub use super::*;
 
 impl From<Method> for Newtype<(esp_http_client_method_t, ())> {
     fn from(method: Method) -> Self {
@@ -79,10 +83,10 @@ pub struct Configuration {
     pub follow_redirects_policy: FollowRedirectsPolicy,
     pub client_certificate: Option<X509<'static>>,
     pub private_key: Option<X509<'static>>,
-
     pub use_global_ca_store: bool,
     #[cfg(not(esp_idf_version = "4.3"))]
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut core::ffi::c_void) -> esp_err_t>,
+    pub raw_request_body: bool,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -96,9 +100,10 @@ enum State {
 pub struct EspHttpConnection {
     raw_client: esp_http_client_handle_t,
     follow_redirects_policy: FollowRedirectsPolicy,
+    raw_request_body: bool,
     event_handler: Box<Option<Box<dyn Fn(&esp_http_client_event_t) -> esp_err_t>>>,
     state: State,
-    request_content_len: u64,
+    request_content_len: i64,
     follow_redirects: bool,
     headers: BTreeMap<Uncased<'static>, String>,
     content_len_header: UnsafeCell<Option<Option<String>>>,
@@ -151,9 +156,10 @@ impl EspHttpConnection {
             Ok(Self {
                 raw_client,
                 follow_redirects_policy: configuration.follow_redirects_policy,
+                raw_request_body: configuration.raw_request_body,
                 event_handler,
                 state: State::New,
-                request_content_len: 0,
+                request_content_len: -1,
                 follow_redirects: false,
                 headers: BTreeMap::new(),
                 content_len_header: UnsafeCell::new(None),
@@ -204,7 +210,7 @@ impl EspHttpConnection {
     ) -> Result<(), EspError> {
         self.assert_initial();
 
-        let c_uri = CString::new(uri).unwrap();
+        let c_uri = to_cstring_arg(uri)?;
 
         esp!(unsafe { esp_http_client_set_url(self.raw_client, c_uri.as_ptr() as _) })?;
         esp!(unsafe {
@@ -218,23 +224,23 @@ impl EspHttpConnection {
 
         for (name, value) in headers {
             if name.eq_ignore_ascii_case("Content-Length") {
-                if let Ok(len) = value.parse::<u64>() {
+                if let Ok(len) = value.parse::<i64>() {
                     content_len = Some(len);
                 }
+            } else {
+                let c_name = to_cstring_arg(name)?;
+
+                // TODO: Replace with a proper conversion from UTF8 to ISO-8859-1
+                let c_value = to_cstring_arg(value)?;
+
+                esp!(unsafe {
+                    esp_http_client_set_header(
+                        self.raw_client,
+                        c_name.as_ptr() as _,
+                        c_value.as_ptr() as _,
+                    )
+                })?;
             }
-
-            let c_name = CString::new(*name).unwrap();
-
-            // TODO: Replace with a proper conversion from UTF8 to ISO-8859-1
-            let c_value = CString::new(*value).unwrap();
-
-            esp!(unsafe {
-                esp_http_client_set_header(
-                    self.raw_client,
-                    c_name.as_ptr() as _,
-                    c_value.as_ptr() as _,
-                )
-            })?;
         }
 
         self.follow_redirects = match self.follow_redirects_policy {
@@ -243,9 +249,13 @@ impl EspHttpConnection {
             _ => false,
         };
 
-        self.request_content_len = content_len.unwrap_or(0);
+        // No Content-Length for POST requests means chunked encoding
+        // This is indicated to the ESP IDF client by setting the
+        // content length param of `esp_http_client_open` to -1
+        self.request_content_len =
+            content_len.unwrap_or(if method == Method::Post { -1 } else { 0 });
 
-        esp!(unsafe { esp_http_client_open(self.raw_client, self.request_content_len as _) })?;
+        esp!(unsafe { esp_http_client_open(self.raw_client, self.request_content_len as i32) })?;
 
         self.state = State::Request;
 
@@ -259,6 +269,7 @@ impl EspHttpConnection {
     pub fn initiate_response(&mut self) -> Result<(), EspError> {
         self.assert_request();
 
+        self.flush()?;
         self.fetch_headers()?;
 
         self.state = State::Response;
@@ -306,6 +317,45 @@ impl EspHttpConnection {
     }
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, EspError> {
+        if buf.is_empty() {
+            Ok(0)
+        } else if !self.raw_request_body && self.request_content_len == -1 {
+            // Assume chunked encoding and send the buffer as the next chunk
+            let mut len_buf = heapless::String::<8>::new();
+            write!(&mut len_buf, "{:x}", buf.len()).unwrap();
+
+            self.raw_write_all(len_buf.as_bytes())?;
+            self.raw_write_all(b"\r\n")?;
+
+            self.raw_write_all(buf)?;
+            self.raw_write_all(b"\r\n")?;
+
+            Ok(buf.len())
+        } else {
+            self.raw_write(buf)
+        }
+    }
+
+    pub fn write_all(&mut self, data: &[u8]) -> Result<(), EspError> {
+        let mut offset = 0;
+
+        while offset < data.len() {
+            offset += self.write(&data[offset..])?;
+        }
+
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), EspError> {
+        if !self.raw_request_body && self.request_content_len == -1 {
+            // Finish the chunked-encoded stream
+            self.raw_write_all(b"0\r\n\r\n")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn raw_write(&mut self, buf: &[u8]) -> Result<usize, EspError> {
         self.assert_request();
 
         Self::check(unsafe {
@@ -313,8 +363,12 @@ impl EspHttpConnection {
         })
     }
 
-    pub fn flush(&mut self) -> Result<(), EspError> {
-        self.assert_request();
+    fn raw_write_all(&mut self, data: &[u8]) -> Result<(), EspError> {
+        let mut offset = 0;
+
+        while offset < data.len() {
+            offset += self.raw_write(&data[offset..])?;
+        }
 
         Ok(())
     }
@@ -392,7 +446,7 @@ impl EspHttpConnection {
                     })?;
                     esp!(unsafe { esp_http_client_set_redirection(self.raw_client) })?;
                     esp!(unsafe {
-                        esp_http_client_open(self.raw_client, self.request_content_len as _)
+                        esp_http_client_open(self.raw_client, self.request_content_len as i32)
                     })?;
 
                     self.headers.clear();
@@ -462,13 +516,13 @@ impl Status for EspHttpConnection {
     }
 }
 
-impl Headers for EspHttpConnection {
+impl embedded_svc::http::Headers for EspHttpConnection {
     fn header(&self, name: &str) -> Option<&str> {
         EspHttpConnection::header(self, name)
     }
 }
 
-impl Io for EspHttpConnection {
+impl ErrorType for EspHttpConnection {
     type Error = EspIOError;
 }
 
@@ -488,7 +542,9 @@ impl Write for EspHttpConnection {
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        EspHttpConnection::flush(self).map_err(EspIOError)
+        self.assert_request();
+
+        Ok(())
     }
 }
 

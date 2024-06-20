@@ -1,23 +1,25 @@
 //! WebSocket client
 
-use core::convert::{TryFrom, TryInto};
 use core::{ffi, time};
 
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use embedded_svc::ws::{ErrorType, FrameType, Sender};
+use embedded_svc::ws::{ErrorType, Sender};
 
-use esp_idf_hal::delay::TickType;
+use crate::hal::delay::TickType;
 
-use esp_idf_sys::*;
+use crate::sys::*;
 
-use crate::errors::EspIOError;
 use crate::handle::RawHandle;
+use crate::io::EspIOError;
 use crate::private::common::Newtype;
 use crate::private::cstr::RawCstrs;
 use crate::private::mutex::{Condvar, Mutex};
+use crate::tls::X509;
+
+pub use embedded_svc::ws::{Final, Fragmented, FrameType};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum EspWebSocketTransport {
@@ -112,6 +114,7 @@ impl WebSocketClosingReason {
 
 #[derive(Debug)]
 pub enum WebSocketEventType<'a> {
+    BeforeConnect,
     Connected,
     Disconnected,
     Close(Option<WebSocketClosingReason>),
@@ -165,6 +168,8 @@ impl<'a> WebSocketEventType<'a> {
                 }
             }
             esp_websocket_event_id_t_WEBSOCKET_EVENT_CLOSED => Ok(Self::Closed),
+            #[cfg(esp_idf_version_major = "5")]
+            esp_websocket_event_id_t_WEBSOCKET_EVENT_BEFORE_CONNECT => Ok(Self::BeforeConnect),
             _ => Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>().into()),
         }
     }
@@ -195,9 +200,9 @@ pub struct EspWebSocketClientConfig<'a> {
     pub ping_interval_sec: time::Duration,
     #[cfg(esp_idf_version = "4.4")]
     pub if_name: Option<&'a str>,
-    pub cert_pem: Option<&'a str>,
-    pub client_cert: Option<&'a str>,
-    pub client_key: Option<&'a str>,
+    pub server_cert: Option<X509<'static>>,
+    pub client_cert: Option<X509<'static>>,
+    pub client_key: Option<X509<'static>>,
 }
 
 impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_config_t, RawCstrs) {
@@ -207,8 +212,8 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
         let mut cstrs = RawCstrs::new();
 
         let mut c_conf = esp_websocket_client_config_t {
-            username: cstrs.as_nptr(conf.username),
-            password: cstrs.as_nptr(conf.password),
+            username: cstrs.as_nptr(conf.username)?,
+            password: cstrs.as_nptr(conf.password)?,
             disable_auto_reconnect: conf.disable_auto_reconnect,
             // TODO user_context: *mut ffi::c_void,
             user_context: core::ptr::null_mut(),
@@ -219,9 +224,9 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
 
             transport: Newtype::<esp_websocket_transport_t>::from(conf.transport).0,
 
-            subprotocol: cstrs.as_nptr(conf.subprotocol) as _,
-            user_agent: cstrs.as_nptr(conf.user_agent) as _,
-            headers: cstrs.as_nptr(conf.headers) as _,
+            subprotocol: cstrs.as_nptr(conf.subprotocol)? as _,
+            user_agent: cstrs.as_nptr(conf.user_agent)? as _,
+            headers: cstrs.as_nptr(conf.headers)? as _,
 
             pingpong_timeout_sec: conf.pingpong_timeout_sec.as_secs() as _,
             disable_pingpong_discon: conf.disable_pingpong_discon,
@@ -231,12 +236,30 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
 
             ping_interval_sec: conf.ping_interval_sec.as_secs() as _,
 
-            cert_pem: cstrs.as_nptr(conf.cert_pem),
-            cert_len: conf.cert_pem.map(|c| c.len()).unwrap_or(0) as _,
-            client_cert: cstrs.as_nptr(conf.client_cert),
-            client_cert_len: conf.client_cert.map(|c| c.len()).unwrap_or(0) as _,
-            client_key: cstrs.as_nptr(conf.client_key),
-            client_key_len: conf.client_key.map(|c| c.len()).unwrap_or(0) as _,
+            cert_pem: conf
+                .server_cert
+                .map(|cert| cert.as_esp_idf_raw_ptr() as _)
+                .unwrap_or(core::ptr::null_mut()),
+            cert_len: conf
+                .server_cert
+                .map(|cert| cert.as_esp_idf_raw_len())
+                .unwrap_or(0),
+            client_cert: conf
+                .client_cert
+                .map(|cert| cert.as_esp_idf_raw_ptr() as _)
+                .unwrap_or(core::ptr::null_mut()),
+            client_cert_len: conf
+                .client_cert
+                .map(|cert| cert.as_esp_idf_raw_len())
+                .unwrap_or(0),
+            client_key: conf
+                .client_key
+                .map(|cert| cert.as_esp_idf_raw_ptr() as _)
+                .unwrap_or(core::ptr::null_mut()),
+            client_key_len: conf
+                .client_key
+                .map(|cert| cert.as_esp_idf_raw_len())
+                .unwrap_or(0),
 
             // NOTE: default keep_alive_* values are set below, so they are not explicitly listed
             // here
@@ -285,10 +308,12 @@ impl<'a> TryFrom<&'a EspWebSocketClientConfig<'a>> for (esp_websocket_client_con
     }
 }
 
-struct UnsafeCallback(*mut Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>);
+struct UnsafeCallback<'a>(*mut Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>);
 
-impl UnsafeCallback {
-    fn from(boxed: &mut Box<Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>>) -> Self {
+impl<'a> UnsafeCallback<'a> {
+    fn from(
+        boxed: &mut Box<Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>>,
+    ) -> Self {
         Self(boxed.as_mut())
     }
 
@@ -306,6 +331,8 @@ impl UnsafeCallback {
         (reference)(event_id, data);
     }
 }
+
+// TODO: Migrate to zerocopy
 
 #[allow(suspicious_auto_trait_impls)]
 unsafe impl Send for Newtype<*mut esp_websocket_event_data_t> {}
@@ -370,17 +397,17 @@ impl EspWebSocketPostbox {
     }
 }
 
-pub struct EspWebSocketClient {
+pub struct EspWebSocketClient<'a> {
     handle: esp_websocket_client_handle_t,
     // used for the timeout in every call to a send method in the c lib as the
     // `send` method in the `Sender` trait in embedded_svc::ws does not take a timeout itself
     timeout: TickType_t,
-    _callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t)>,
+    _callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>,
 }
 
-impl EspWebSocketClient {
+impl EspWebSocketClient<'static> {
     pub fn new_with_conn(
-        uri: impl AsRef<str>,
+        uri: &str,
         config: &EspWebSocketClientConfig,
         timeout: time::Duration,
     ) -> Result<(Self, EspWebSocketConnection), EspIOError> {
@@ -399,11 +426,60 @@ impl EspWebSocketClient {
         Ok((client, EspWebSocketConnection(connection_state)))
     }
 
-    pub fn new(
-        uri: impl AsRef<str>,
+    pub fn new<F>(
+        uri: &str,
         config: &EspWebSocketClientConfig,
         timeout: time::Duration,
-        mut callback: impl for<'a> FnMut(&'a Result<WebSocketEvent<'a>, EspIOError>) + Send + 'static,
+        callback: F,
+    ) -> Result<Self, EspIOError>
+    where
+        F: for<'r> FnMut(&'r Result<WebSocketEvent<'r>, EspIOError>) + Send + 'static,
+    {
+        Self::internal_new(uri, config, timeout, callback)
+    }
+}
+
+impl<'a> EspWebSocketClient<'a> {
+    /// # Safety
+    ///
+    /// This method - in contrast to method `new` - allows the user to pass
+    /// a non-static callback/closure. This enables users to borrow
+    /// - in the closure - variables that live on the stack - or more generally - in the same
+    /// scope where the service is created.
+    ///
+    /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+    /// as that would immediately lead to an UB (crash).
+    /// Also note that forgetting the service might happen with `Rc` and `Arc`
+    /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+    ///
+    /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+    /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+    /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+    ///
+    /// The destructor of the service takes care - prior to the service being dropped and e.g.
+    /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+    /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+    /// and invalid references are left dangling.
+    ///
+    /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+    /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
+    pub unsafe fn new_nonstatic<F>(
+        uri: &str,
+        config: &EspWebSocketClientConfig,
+        timeout: time::Duration,
+        callback: F,
+    ) -> Result<Self, EspIOError>
+    where
+        F: for<'r> FnMut(&'r Result<WebSocketEvent<'r>, EspIOError>) + Send + 'a,
+    {
+        Self::internal_new(uri, config, timeout, callback)
+    }
+
+    fn internal_new(
+        uri: &str,
+        config: &EspWebSocketClientConfig,
+        timeout: time::Duration,
+        mut callback: impl for<'r> FnMut(&'r Result<WebSocketEvent<'r>, EspIOError>) + Send + 'a,
     ) -> Result<Self, EspIOError> {
         Self::new_raw(
             uri,
@@ -420,10 +496,10 @@ impl EspWebSocketClient {
     }
 
     fn new_raw(
-        uri: impl AsRef<str>,
+        uri: &str,
         config: &EspWebSocketClientConfig,
         timeout: time::Duration,
-        raw_callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + 'static>,
+        raw_callback: Box<dyn FnMut(i32, *mut esp_websocket_event_data_t) + Send + 'a>,
     ) -> Result<Self, EspIOError> {
         let mut boxed_raw_callback = Box::new(raw_callback);
         let unsafe_callback = UnsafeCallback::from(&mut boxed_raw_callback);
@@ -431,7 +507,7 @@ impl EspWebSocketClient {
         let t: TickType = timeout.into();
 
         let (mut conf, mut cstrs): (esp_websocket_client_config_t, RawCstrs) = config.try_into()?;
-        conf.uri = cstrs.as_ptr(uri);
+        conf.uri = cstrs.as_ptr(uri)?;
 
         let handle = unsafe { esp_websocket_client_init(&conf) };
 
@@ -485,6 +561,10 @@ impl EspWebSocketClient {
         Ok(())
     }
 
+    pub fn is_connected(&self) -> bool {
+        unsafe { esp_websocket_client_is_connected(self.handle) }
+    }
+
     extern "C" fn handle(
         event_handler_arg: *mut ffi::c_void,
         _event_base: esp_event_base_t,
@@ -531,7 +611,7 @@ impl EspWebSocketClient {
     }
 }
 
-impl Drop for EspWebSocketClient {
+impl<'a> Drop for EspWebSocketClient<'a> {
     fn drop(&mut self) {
         esp!(unsafe { esp_websocket_client_close(self.handle, self.timeout) }).unwrap();
         esp!(unsafe { esp_websocket_client_destroy(self.handle) }).unwrap();
@@ -540,7 +620,7 @@ impl Drop for EspWebSocketClient {
     }
 }
 
-impl RawHandle for EspWebSocketClient {
+impl<'a> RawHandle for EspWebSocketClient<'a> {
     type Handle = esp_websocket_client_handle_t;
 
     fn handle(&self) -> Self::Handle {
@@ -548,14 +628,14 @@ impl RawHandle for EspWebSocketClient {
     }
 }
 
-impl ErrorType for EspWebSocketClient {
+impl<'a> ErrorType for EspWebSocketClient<'a> {
     type Error = EspIOError;
 }
 
-impl Sender for EspWebSocketClient {
+impl<'a> Sender for EspWebSocketClient<'a> {
     fn send(&mut self, frame_type: FrameType, frame_data: &[u8]) -> Result<(), Self::Error> {
         EspWebSocketClient::send(self, frame_type, frame_data).map_err(EspIOError)
     }
 }
 
-unsafe impl Send for EspWebSocketClient {}
+unsafe impl<'a> Send for EspWebSocketClient<'a> {}
