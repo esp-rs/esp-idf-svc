@@ -686,6 +686,13 @@ pub trait EspHttpTraversableChain<'a> {
     fn accept(self, server: &mut EspHttpServer<'a>) -> Result<(), EspError>;
 }
 
+/// # Safety
+///
+/// Implementing this trait means that the chain can contain non-`'static` handlers
+/// and that the chain can be used with method `EspHttpServer::handler_chain_nonstatic`.
+///
+/// Consult the documentation of `EspHttpServer::handler_chain_nonstatic` for more
+/// information on how to use non-static handler chains.
 pub unsafe trait EspHttpTraversableChainNonstatic<'a>: EspHttpTraversableChain<'a> {}
 
 impl<'a> EspHttpTraversableChain<'a> for ChainRoot {
