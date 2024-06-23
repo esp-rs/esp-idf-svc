@@ -1,6 +1,6 @@
 [package]
 name = "esp-idf-svc"
-version = "0.48.1"
+version = "0.49.0"
 authors = ["Ivan Markov <ivan.markov@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -13,7 +13,7 @@ readme = "README.md"
 links = "esp_idf_svc"
 build = "build.rs"
 documentation = "https://docs.esp-rs.org/esp-idf-svc/"
-rust-version = "1.75"
+rust-version = "1.77"
 
 [features]
 default = ["std", "binstart"]
@@ -43,17 +43,17 @@ enumset = { version = "1", default-features = false }
 log = { version = "0.4", default-features = false }
 uncased = { version = "0.9.7", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
-embedded-svc = { version = "0.27", default-features = false }
-esp-idf-hal = { version = "0.43", default-features = false }
+embedded-svc = { version = "0.28", default-features = false }
+esp-idf-hal = { version = "0.44", default-features = false }
 embassy-time-driver = { version = "0.1", optional = true, features = ["tick-hz-1_000_000"] }
 embassy-futures = "0.1"
 
 [build-dependencies]
-embuild = "0.31.3"
+embuild = "0.32"
 
 [dev-dependencies]
 anyhow = "1"
-esp-idf-sys = { version = "0.34", features = ["binstart"] }
+esp-idf-sys = { version = "0.35", features = ["binstart"] }
 futures = "0.3"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
@@ -61,7 +61,4 @@ postcard = "1"
 async-io = "2"
 
 [patch.crates-io]
-embuild ={ git = "https://github.com/esp-rs/embuild"}
-esp-idf-sys ={ git = "https://github.com/esp-rs/esp-idf-sys"}
-esp-idf-hal ={ git = "https://github.com/esp-rs/esp-idf-hal"}
 embedded-svc ={ git = "https://github.com/esp-rs/embedded-svc"}
