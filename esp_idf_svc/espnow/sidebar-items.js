@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BROADCAST"],"enum":["SendStatus"],"struct":["EspNow"],"type":["PeerInfo"]};
