@@ -109,3 +109,7 @@ pub mod fs;
 pub mod sd;
 
 mod private;
+
+mod fatfs;
+mod sdspi;
+mod vfs;
