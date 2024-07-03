@@ -911,7 +911,80 @@ impl asynch::Connection for EspAsyncMqttConnection {
     }
 }
 
-static ERROR: EspError = EspError::from_infallible::<ESP_FAIL>();
+/// Enumeration representing different types of MQTT client errors.
+///
+/// `MqttClientError` is used to encapsulate various error conditions
+/// that can occur during MQTT operations, providing a more Rust-friendly
+/// way to handle and debug these errors. This enum can be resolved
+/// from raw error codes using the `EspMqttEventErrorWrapper`.
+///
+/// Ref: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/protocols/mqtt.html#_CPPv420esp_mqtt_error_codes
+#[derive(Debug)]
+pub enum MqttClientError {
+    None,
+    TcpTransport {
+        esp_tls_last_esp_err: i32,
+        esp_tls_stack_err: i32,
+        esp_tls_cert_verify_flags: i32,
+    },
+    ConnectionRefused {
+        code: u32,
+    },
+    SubscribeFailed,
+    /// An unknown error occurred, it is likely that a new type of error has been introduced into the library.
+    UnknownError {
+        code: u32,
+    },
+}
+
+/// Wrapper struct for MQTT event error codes.
+///
+/// `EspMqttEventErrorWrapper` is a transparent wrapper around the
+/// `esp_mqtt_error_codes_t` type, providing methods to interpret and
+/// resolve the underlying error codes into Rust-friendly types.
+///
+/// This struct exists to handle the lifetime constraints and provide
+/// a way to translate raw error codes from the ESP-IDF MQTT client
+/// into Rust-typed errors.
+#[repr(transparent)]
+pub struct EspMqttEventErrorWrapper(esp_mqtt_error_codes_t);
+
+impl EspMqttEventErrorWrapper {
+    /// Returns the error type of the MQTT event.
+    pub fn error_type(&self) -> esp_mqtt_error_type_t {
+        self.0.error_type
+    }
+
+    /// Resolves the raw MQTT error codes into a `MqttClientError`.
+    pub fn resolve_error(&self) -> MqttClientError {
+        #[allow(non_upper_case_globals)]
+        match self.error_type() {
+            esp_mqtt_error_type_t_MQTT_ERROR_TYPE_NONE => MqttClientError::None,
+            esp_mqtt_error_type_t_MQTT_ERROR_TYPE_TCP_TRANSPORT => MqttClientError::TcpTransport {
+                esp_tls_last_esp_err: self.0.esp_tls_last_esp_err,
+                esp_tls_stack_err: self.0.esp_tls_stack_err,
+                esp_tls_cert_verify_flags: self.0.esp_tls_cert_verify_flags,
+            },
+            esp_mqtt_error_type_t_MQTT_ERROR_TYPE_CONNECTION_REFUSED => {
+                MqttClientError::ConnectionRefused {
+                    code: self.0.connect_return_code,
+                }
+            }
+            esp_mqtt_error_type_t_MQTT_ERROR_TYPE_SUBSCRIBE_FAILED => {
+                MqttClientError::SubscribeFailed
+            }
+            _ => MqttClientError::UnknownError {
+                code: self.error_type(),
+            },
+        }
+    }
+}
+
+impl std::fmt::Debug for EspMqttEventErrorWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.resolve_error(), f)
+    }
+}
 
 pub struct EspMqttEvent<'a>(&'a esp_mqtt_event_t);
 
@@ -921,9 +994,25 @@ impl<'a> EspMqttEvent<'a> {
     }
 
     #[allow(non_upper_case_globals)]
-    pub fn payload(&self) -> EventPayload<'_, EspError> {
+    pub fn payload(&self) -> EventPayload<'_, EspMqttEventErrorWrapper> {
         match self.0.event_id {
-            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => EventPayload::Error(&ERROR), // TODO
+            esp_mqtt_event_id_t_MQTT_EVENT_ERROR => {
+                if let Some(err) = unsafe { self.0.error_handle.as_ref() } {
+                    let wrapped = unsafe {
+                        &*(err as *const esp_mqtt_error_codes_t as *const EspMqttEventErrorWrapper)
+                    };
+                    EventPayload::Error(wrapped)
+                } else {
+                    EventPayload::Error(&EspMqttEventErrorWrapper(esp_mqtt_error_codes_t {
+                        error_type: esp_mqtt_error_type_t_MQTT_ERROR_TYPE_NONE,
+                        esp_tls_last_esp_err: 0,
+                        esp_tls_stack_err: 0,
+                        esp_tls_cert_verify_flags: 0,
+                        connect_return_code: 0,
+                        esp_transport_sock_errno: 0,
+                    }))
+                }
+            }
             esp_mqtt_event_id_t_MQTT_EVENT_BEFORE_CONNECT => EventPayload::BeforeConnect,
             esp_mqtt_event_id_t_MQTT_EVENT_CONNECTED => {
                 EventPayload::Connected(self.0.session_present != 0)
@@ -990,7 +1079,7 @@ impl<'a> EspMqttEvent<'a> {
 unsafe impl<'a> Send for EspMqttEvent<'a> {}
 
 impl<'a> ErrorType for EspMqttEvent<'a> {
-    type Error = EspError;
+    type Error = EspMqttEventErrorWrapper;
 }
 
 impl<'a> Event for EspMqttEvent<'a> {
