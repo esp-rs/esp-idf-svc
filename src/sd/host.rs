@@ -1,3 +1,7 @@
+use core::borrow::BorrowMut;
+
+use esp_idf_hal::spi::SpiDriver;
+
 use crate::sys::*;
 
 #[cfg(esp_idf_soc_sdmmc_host_supported)]
@@ -5,14 +9,20 @@ use super::mmc::SlotConfiguration;
 
 use super::{config::Configuration, spi::SpiDevice};
 
-pub enum SdDevice<'d> {
-    Spi(SpiDevice<'d>),
+pub enum SdDevice<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
+    Spi(SpiDevice<'d, T>),
     #[cfg(esp_idf_soc_sdmmc_host_supported)]
     Mmc(SlotConfiguration<'d>),
 }
 
-pub struct SdHost<'d> {
-    device: SdDevice<'d>,
+pub struct SdHost<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
+    device: SdDevice<'d, T>,
     host: sdmmc_host_t,
 }
 
@@ -27,7 +37,10 @@ const _SDMMC_HOST_FLAG_4BIT: u32 = 1 << 1;
 const _SDMMC_HOST_FLAG_8BIT: u32 = 1 << 2;
 const _SDMMC_HOST_FLAG_DDR: u32 = 1 << 3;
 
-impl<'d> SdHost<'d> {
+impl<'d, T> SdHost<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
     fn set_from_configuration(mut self, configuration: &Configuration) -> Self {
         self.host.command_timeout_ms = configuration.command_timeout_ms as i32;
         self.host.io_voltage = configuration.io_voltage;
@@ -49,7 +62,7 @@ impl<'d> SdHost<'d> {
         self
     }
 
-    pub fn new_with_spi(configuration: &Configuration, device: SpiDevice<'d>) -> Self {
+    pub fn new_with_spi(configuration: &Configuration, device: SpiDevice<'d, T>) -> Self {
         let host = sdmmc_host_t {
             flags: _HOST_FLAG_SPI | _HOST_FLAG_DEINIT_ARG,
             slot: device.get_host() as i32,
@@ -190,7 +203,7 @@ impl<'d> SdHost<'d> {
         &self.host
     }
 
-    pub(crate) fn get_device(&self) -> &SdDevice {
+    pub(crate) fn get_device(&self) -> &'d SdDevice<T> {
         &self.device
     }
 }

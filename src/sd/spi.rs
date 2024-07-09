@@ -1,20 +1,27 @@
 use crate::sys::*;
 
-use core::{marker::PhantomData, ops::Deref};
+use core::{borrow::BorrowMut, marker::PhantomData, ops::Deref};
 
 use esp_idf_hal::{
-    gpio::{InputPin, OutputPin},
+    gpio::{AnyOutputPin, InputPin, OutputPin},
     peripheral::Peripheral,
-    spi::SpiDriver,
+    spi::{config::Config, SpiDeviceDriver, SpiDriver},
 };
 
-pub struct SpiDevice<'d> {
+pub struct SpiDevice<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
     configuration: sdspi_device_config_t,
-    driver: SpiDriver<'d>,
+    _driver: SpiDeviceDriver<'d, T>,
+    host: spi_host_device_t,
     _p: PhantomData<&'d mut ()>,
 }
 
-impl Drop for SpiDevice<'_> {
+impl<'d, T> Drop for SpiDevice<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
     fn drop(&mut self) {
         let result = unsafe { spi_bus_free(self.get_host()) };
 
@@ -24,9 +31,12 @@ impl Drop for SpiDevice<'_> {
     }
 }
 
-impl<'d> SpiDevice<'d> {
+impl<'d, T> SpiDevice<'d, T>
+where
+    T: BorrowMut<SpiDriver<'d>>,
+{
     pub fn new(
-        driver: SpiDriver<'d>,
+        driver: T,
         cs: impl Peripheral<P = impl OutputPin> + 'd,
         cd: Option<impl Peripheral<P = impl InputPin> + 'd>,
         wp: Option<impl Peripheral<P = impl InputPin> + 'd>,
@@ -37,9 +47,11 @@ impl<'d> SpiDevice<'d> {
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
         wp_polarity: Option<bool>,
-    ) -> Self {
+    ) -> Result<Self, EspError> {
+        let host = driver.borrow().host();
+
         let configuration = sdspi_device_config_t {
-            host_id: driver.host(),
+            host_id: host,
             gpio_cs: cs.into_ref().deref().pin(),
             gpio_cd: cd.map(|cd| cd.into_ref().deref().pin()).unwrap_or(-1),
             gpio_wp: wp.map(|wp| wp.into_ref().deref().pin()).unwrap_or(-1),
@@ -52,15 +64,20 @@ impl<'d> SpiDevice<'d> {
             gpio_wp_polarity: wp_polarity.unwrap_or(false), // Active when low
         };
 
-        Self {
+        let device_configuration = Config::default();
+        let device =
+            SpiDeviceDriver::new(driver, Option::<AnyOutputPin>::None, &device_configuration)?;
+
+        Ok(Self {
             configuration,
-            driver,
+            host,
+            _driver: device,
             _p: PhantomData,
-        }
+        })
     }
 
     pub fn get_host(&self) -> spi_host_device_t {
-        self.driver.host()
+        self.host
     }
 
     pub fn set_clock(&mut self, clock: u32) -> Result<(), EspError> {
