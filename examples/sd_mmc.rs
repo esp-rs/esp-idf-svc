@@ -10,7 +10,10 @@ fn main() -> anyhow::Result<()> {
         sd::{host::SdHost, mmc::SlotConfiguration, SdConfiguration},
     };
 
-    use std::{fs::File, io::Write};
+    use std::{
+        fs::{read_dir, File},
+        io::{Read, Seek, Write},
+    };
 
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
@@ -39,11 +42,35 @@ fn main() -> anyhow::Result<()> {
 
     let fat_config = FatConfiguration::new();
 
-    let _fat = Fat::mount(fat_config, host, "/");
+    let _fat = Fat::mount(fat_config, host, "/sdmmc");
 
-    let mut file = File::create("/test.txt")?;
+    let content = b"Hello, world!";
 
-    file.write_all(b"Hello, world!")?;
+    {
+        let mut file = File::create("/sdmmc/test.txt")?;
+
+        file.write_all(content).expect("Write failed");
+
+        file.seek(std::io::SeekFrom::Start(0)).expect("Seek failed");
+    }
+
+    {
+        let mut file = File::open("/sdmmc/test.txt")?;
+
+        let mut file_content = String::new();
+
+        file.read_to_string(&mut file_content).expect("Read failed");
+
+        assert_eq!(file_content.as_bytes(), content);
+    }
+
+    {
+        let directory = read_dir("/sdmmc")?;
+
+        for entry in directory {
+            log::info!("Entry: {:?}", entry?.file_name());
+        }
+    }
 
     Ok(())
 }

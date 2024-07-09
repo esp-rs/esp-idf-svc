@@ -3,40 +3,21 @@ use crate::sys::*;
 use core::{borrow::BorrowMut, marker::PhantomData, ops::Deref};
 
 use esp_idf_hal::{
-    gpio::{AnyOutputPin, InputPin, OutputPin},
+    gpio::{InputPin, OutputPin},
     peripheral::Peripheral,
-    spi::{config::Config, SpiDeviceDriver, SpiDriver},
+    spi::{SpiDeviceDriver, SpiDriver},
 };
 
-pub struct SpiDevice<'d, T>
-where
-    T: BorrowMut<SpiDriver<'d>>,
-{
+pub struct SpiDevice<'d> {
     configuration: sdspi_device_config_t,
-    _driver: SpiDeviceDriver<'d, T>,
     host: spi_host_device_t,
     _p: PhantomData<&'d mut ()>,
 }
 
-impl<'d, T> Drop for SpiDevice<'d, T>
-where
-    T: BorrowMut<SpiDriver<'d>>,
-{
-    fn drop(&mut self) {
-        let result = unsafe { spi_bus_free(self.get_host()) };
-
-        if result != ESP_OK {
-            panic!("Failed to remove SPI device");
-        }
-    }
-}
-
-impl<'d, T> SpiDevice<'d, T>
-where
-    T: BorrowMut<SpiDriver<'d>>,
-{
-    pub fn new(
-        driver: T,
+impl<'d> SpiDevice<'d> {
+    pub fn new<T>(
+        host: spi_host_device_t,
+        _: &mut SpiDeviceDriver<'d, T>,
         cs: impl Peripheral<P = impl OutputPin> + 'd,
         cd: Option<impl Peripheral<P = impl InputPin> + 'd>,
         wp: Option<impl Peripheral<P = impl InputPin> + 'd>,
@@ -47,9 +28,10 @@ where
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
         wp_polarity: Option<bool>,
-    ) -> Result<Self, EspError> {
-        let host = driver.borrow().host();
-
+    ) -> Result<Self, EspError>
+    where
+        T: BorrowMut<SpiDriver<'d>>,
+    {
         let configuration = sdspi_device_config_t {
             host_id: host,
             gpio_cs: cs.into_ref().deref().pin(),
@@ -64,14 +46,9 @@ where
             gpio_wp_polarity: wp_polarity.unwrap_or(false), // Active when low
         };
 
-        let device_configuration = Config::default();
-        let device =
-            SpiDeviceDriver::new(driver, Option::<AnyOutputPin>::None, &device_configuration)?;
-
         Ok(Self {
             configuration,
             host,
-            _driver: device,
             _p: PhantomData,
         })
     }

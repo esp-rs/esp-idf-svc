@@ -1,5 +1,9 @@
 #[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
+    use esp_idf_hal::{
+        gpio::AnyOutputPin,
+        spi::{config::Config, SpiDeviceDriver},
+    };
     use esp_idf_svc::{
         fs::{Fat, FatConfiguration},
         hal::{
@@ -29,8 +33,14 @@ fn main() -> anyhow::Result<()> {
         &DriverConfig::default().dma(Dma::Auto(4092)),
     )?;
 
+    let host = spi_driver.host();
+
+    let mut device_driver =
+        SpiDeviceDriver::new(spi_driver, Option::<AnyOutputPin>::None, &Config::default())?;
+
     let spi_device = SpiDevice::new(
-        spi_driver,
+        host,
+        &mut device_driver,
         pins.gpio5,
         Option::<gpio::AnyInputPin>::None,
         Option::<gpio::AnyInputPin>::None,
@@ -49,7 +59,7 @@ fn main() -> anyhow::Result<()> {
 
     let fat_configuration = FatConfiguration::new();
 
-    let _fat = Fat::mount(fat_configuration, &host, "/sdspi")?;
+    let _fat = Fat::mount(fat_configuration, host, "/sdspi")?;
 
     let content = b"Hello, world!";
 

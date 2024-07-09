@@ -8,10 +8,6 @@ use crate::{sd::host::SdHost, sys::*};
 
 use super::config::Configuration;
 
-use core::borrow::BorrowMut;
-
-use esp_idf_hal::spi::SpiDriver;
-
 pub struct Fat {
     base_path: CString,
     card: *mut sdmmc_card_t,
@@ -30,14 +26,11 @@ impl Drop for Fat {
 }
 
 impl Fat {
-    pub fn mount<'d, T>(
+    pub fn mount(
         config: Configuration,
-        host: &'d SdHost<'d, T>,
+        host: SdHost<'_>,
         base_path: &str,
-    ) -> Result<Self, EspError>
-    where
-        T: BorrowMut<SpiDriver<'d>> + 'd,
-    {
+    ) -> Result<Self, EspError> {
         let mut card: *mut sdmmc_card_t = core::ptr::null_mut();
 
         let base_path = CString::new(base_path).unwrap();
