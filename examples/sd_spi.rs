@@ -10,7 +10,10 @@ fn main() -> anyhow::Result<()> {
         log::EspLogger,
         sd::{host::SdHost, spi::SpiDevice, SdConfiguration},
     };
-    use std::{fs::{File, read_dir}, io::{Write, Read, Seek}};
+    use std::{
+        fs::{read_dir, File},
+        io::{Read, Seek, Write},
+    };
 
     esp_idf_svc::sys::link_patches();
     EspLogger::initialize_default();
