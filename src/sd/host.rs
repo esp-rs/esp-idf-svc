@@ -1,3 +1,7 @@
+use core::borrow::Borrow;
+
+use esp_idf_hal::spi::SpiDriver;
+
 use crate::sys::*;
 
 #[cfg(esp_idf_soc_sdmmc_host_supported)]
@@ -5,14 +9,11 @@ use super::mmc::SlotConfiguration;
 
 use super::{config::Configuration, spi::SpiDevice};
 
-pub enum SdDevice<'d> {
-    Spi(SpiDevice<'d>),
-    #[cfg(esp_idf_soc_sdmmc_host_supported)]
-    Mmc(SlotConfiguration<'d>),
-}
-
-pub struct SdHost<'d> {
-    device: SdDevice<'d>,
+/// SD host.
+///
+/// This struct is an abstraction used by [`crate::fs::Fat`] to mount SD cards containing FAT partition on the VFS.
+pub struct SdHost<T> {
+    device: T,
     host: sdmmc_host_t,
 }
 
@@ -27,7 +28,7 @@ const _SDMMC_HOST_FLAG_4BIT: u32 = 1 << 1;
 const _SDMMC_HOST_FLAG_8BIT: u32 = 1 << 2;
 const _SDMMC_HOST_FLAG_DDR: u32 = 1 << 3;
 
-impl<'d> SdHost<'d> {
+impl<T> SdHost<T> {
     fn set_from_configuration(mut self, configuration: &Configuration) -> Self {
         self.host.command_timeout_ms = configuration.command_timeout_ms as i32;
         self.host.io_voltage = configuration.io_voltage;
@@ -38,7 +39,7 @@ impl<'d> SdHost<'d> {
         };
 
         #[cfg(not(any(
-            esp_idf_version_major = "4",
+            esp_idf_verdevicesion_major = "4",
             all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
@@ -49,7 +50,21 @@ impl<'d> SdHost<'d> {
         self
     }
 
-    pub fn new_with_spi(configuration: &Configuration, device: SpiDevice<'d>) -> Self {
+    pub(crate) fn get_device(&self) -> &T {
+        &self.device
+    }
+
+    pub(crate) fn get_inner_handle(&self) -> &sdmmc_host_t {
+        &self.host
+    }
+}
+
+impl<'d, T> SdHost<SpiDevice<'d, T>>
+where
+    T: Borrow<SpiDriver<'d>>,
+{
+    /// Create a new SD host with the provided SPI device.
+    pub fn new_with_spi(configuration: &Configuration, device: SpiDevice<'d, T>) -> Self {
         let host = sdmmc_host_t {
             flags: _HOST_FLAG_SPI | _HOST_FLAG_DEINIT_ARG,
             slot: device.get_host() as i32,
@@ -108,16 +123,14 @@ impl<'d> SdHost<'d> {
             pwr_ctrl_handle: core::ptr::null_mut() as _,
         };
 
-        Self {
-            device: SdDevice::Spi(device),
-            host,
-        }
-        .set_from_configuration(configuration)
+        Self { device, host }.set_from_configuration(configuration)
     }
+}
 
-    /// Create a new SD/MMC host with the default configuration.
+#[cfg(esp_idf_soc_sdmmc_host_supported)]
+impl<'d> SdHost<SlotConfiguration<'d>> {
+    /// Create a new SD/MMC host with the provided configuration.
     /// This host will use the MMC slot 1, with 4-bit mode enabled, and max frequency set to 20MHz
-    #[cfg(esp_idf_soc_sdmmc_host_supported)]
     pub fn new_with_mmc(
         configuration: &Configuration,
         mmc_configuration: SlotConfiguration<'d>,
@@ -180,17 +193,9 @@ impl<'d> SdHost<'d> {
         };
 
         Self {
-            device: SdDevice::Mmc(mmc_configuration),
+            device: mmc_configuration,
             host,
         }
         .set_from_configuration(configuration)
-    }
-
-    pub(crate) fn get_inner_handle(&self) -> &sdmmc_host_t {
-        &self.host
-    }
-
-    pub(crate) fn get_device(&self) -> &'d SdDevice {
-        &self.device
     }
 }

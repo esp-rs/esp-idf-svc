@@ -10,6 +10,7 @@ use esp_idf_hal::gpio;
 
 use crate::sys::*;
 
+/// Slot configuration for SDMMC host.
 pub struct SlotConfiguration<'d> {
     slot: Slot,
     configuration: sdmmc_slot_config_t,
@@ -32,6 +33,7 @@ pub(crate) enum Slot {
 }
 
 impl<'d> SlotConfiguration<'d> {
+    /// Create a new slot configuration for SDMMC host using GPIO matrix.
     #[cfg(esp_idf_soc_sdmmc_use_gpio_matrix)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -65,6 +67,7 @@ impl<'d> SlotConfiguration<'d> {
         )
     }
 
+    /// Create a new slot configuration for SDMMC host using slot 0.
     #[cfg(not(esp_idf_soc_sdmmc_use_gpio_matrix))]
     #[allow(clippy::too_many_arguments)]
     pub fn new_slot_0(
@@ -98,6 +101,7 @@ impl<'d> SlotConfiguration<'d> {
         )
     }
 
+    /// Create a new slot configuration for SDMMC host using slot 1.
     #[cfg(not(esp_idf_soc_sdmmc_use_gpio_matrix))]
     #[allow(clippy::too_many_arguments)]
     pub fn new_slot_1(

@@ -1,23 +1,34 @@
 use crate::sys::*;
 
-use core::{borrow::BorrowMut, marker::PhantomData, ops::Deref};
+use core::{borrow::Borrow, marker::PhantomData, ops::Deref};
 
 use esp_idf_hal::{
     gpio::{InputPin, OutputPin},
     peripheral::Peripheral,
-    spi::{SpiDeviceDriver, SpiDriver},
+    spi::SpiDriver,
 };
 
-pub struct SpiDevice<'d> {
+/// SPI device for SD card.
+pub struct SpiDevice<'d, T> {
     configuration: sdspi_device_config_t,
     host: spi_host_device_t,
+    _driver: T,
     _p: PhantomData<&'d mut ()>,
 }
 
-impl<'d> SpiDevice<'d> {
-    pub fn new<T>(
-        host: spi_host_device_t,
-        _: &mut SpiDeviceDriver<'d, T>,
+impl<'d, T> SpiDevice<'d, T>
+where
+    T: Borrow<SpiDriver<'d>>,
+{
+    /// Creates a new SPI device for SD card.
+    ///
+    /// # Arguments
+    /// driver: SPI driver.
+    /// cs: Chip select pin.
+    /// cd: Card detect pin.
+    /// int: Interrupt pin.
+    pub fn new(
+        driver: T,
         cs: impl Peripheral<P = impl OutputPin> + 'd,
         cd: Option<impl Peripheral<P = impl InputPin> + 'd>,
         wp: Option<impl Peripheral<P = impl InputPin> + 'd>,
@@ -30,8 +41,10 @@ impl<'d> SpiDevice<'d> {
         wp_polarity: Option<bool>,
     ) -> Result<Self, EspError>
     where
-        T: BorrowMut<SpiDriver<'d>>,
+        T: Borrow<SpiDriver<'d>>,
     {
+        let host = driver.borrow().host();
+
         let configuration = sdspi_device_config_t {
             host_id: host,
             gpio_cs: cs.into_ref().deref().pin(),
@@ -48,6 +61,7 @@ impl<'d> SpiDevice<'d> {
 
         Ok(Self {
             configuration,
+            _driver: driver,
             host,
             _p: PhantomData,
         })

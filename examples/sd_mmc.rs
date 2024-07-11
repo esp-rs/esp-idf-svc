@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
 
     let fat_config = FatConfiguration::new();
 
-    let _fat = Fat::mount(fat_config, host, "/sdmmc");
+    let _fat = Fat::mount_sdmmc(fat_config, host, "/sdmmc");
 
     let content = b"Hello, world!";
 
