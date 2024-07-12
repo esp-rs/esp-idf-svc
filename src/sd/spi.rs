@@ -11,8 +11,7 @@ use esp_idf_hal::{
 /// SPI device for SD card.
 pub struct SpiDevice<'d, T> {
     configuration: sdspi_device_config_t,
-    host: spi_host_device_t,
-    _driver: T,
+    driver: T,
     _p: PhantomData<&'d mut ()>,
 }
 
@@ -61,14 +60,13 @@ where
 
         Ok(Self {
             configuration,
-            _driver: driver,
-            host,
+            driver,
             _p: PhantomData,
         })
     }
 
     pub fn get_host(&self) -> spi_host_device_t {
-        self.host
+        self.driver.borrow().host()
     }
 
     pub fn set_clock(&mut self, clock: u32) -> Result<(), EspError> {
