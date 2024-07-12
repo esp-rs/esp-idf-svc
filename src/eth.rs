@@ -175,10 +175,10 @@ impl<'d> SpiEventSource<'d> {
             )
         ),
     )))]
-    pub fn polling(interval: Duration) -> Self {
-        let poll_interval_ms = interval.as_millis().try_into().unwrap();
+    pub fn polling(interval: Duration) -> Result<Self, core::num::TryFromIntError> {
+        let poll_interval_ms = interval.as_millis().try_into()?;
 
-        Self {
+        Ok(Self {
             #[cfg(not(any(
                 esp_idf_version_major = "4",
                 all(
@@ -196,7 +196,7 @@ impl<'d> SpiEventSource<'d> {
             poll_interval_ms,
             interrupt_pin: -1,
             _p: PhantomData,
-        }
+        })
     }
 
     /// Get status updates/changes from the emac by way of an interrupt pin.
@@ -582,7 +582,7 @@ where
         Ok(eth)
     }
 
-    #[allow(clippy::unnecessary_literal_unwrap)]
+    #[allow(clippy::unnecessary_literal_unwrap, clippy::too_many_arguments)]
     fn init_spi(
         host: spi_host_device_t,
         chipset: SpiEthChipset,
