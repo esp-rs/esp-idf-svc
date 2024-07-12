@@ -39,7 +39,7 @@ impl<T> SdHost<T> {
         };
 
         #[cfg(not(any(
-            esp_idf_verdevicesion_major = "4",
+            esp_idf_version_major = "4",
             all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
