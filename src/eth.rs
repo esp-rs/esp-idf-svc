@@ -117,6 +117,103 @@ pub enum SpiEthChipset {
     KSZ8851SNL,
 }
 
+/// Source/mechanism to use for getting notifications/events from the emac.
+///
+/// # Availability
+///
+/// Pre version `v5.1.4` of esp-idf, only an interupt pin could be used as source:
+///
+/// - v4.4: <https://github.com/espressif/esp-idf/blob/e499576efdb086551abe309a72899302f82077b7/components/esp_eth/include/esp_eth_mac.h#L461-L464>
+/// - v5.0: <https://github.com/espressif/esp-idf/blob/bcca689866db3dfda47f77670bf8df2a7ec94721/components/esp_eth/include/esp_eth_mac.h#L513-L517>
+/// - v5.1.3: <https://github.com/espressif/esp-idf/blob/e7771c75bd1dbbfb7b3c5381be7e063b197c9734/components/esp_eth/include/esp_eth_mac.h#L612-L617>
+///
+/// Starting with `v5.1.4` the option of `poll_period_ms` became available: <https://github.com/espressif/esp-idf/blob/d7b0a45ddbddbac53afb4fc28168f9f9259dbb79/components/esp_eth/include/esp_eth_mac.h#L614-L620>
+#[cfg(any(
+    esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_eth_spi_ethernet_w5500,
+    esp_idf_eth_spi_ethernet_ksz8851snl
+))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SpiEventSource<'d> {
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(
+            esp_idf_version_major = "5",
+            any(
+                esp_idf_version_minor = "0",
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+            )
+        ),
+    )))]
+    pub(crate) poll_interval_ms: u32,
+    pub(crate) interupt_pin: i32,
+    _p: PhantomData<&'d mut ()>,
+}
+
+impl<'d> SpiEventSource<'d> {
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(
+            esp_idf_version_major = "5",
+            any(
+                esp_idf_version_minor = "0",
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+            )
+        ),
+    )))]
+    pub fn polling(interval: Duration) -> Self {
+        let poll_interval_ms = interval.as_millis().try_into().unwrap();
+
+        Self {
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(
+                    esp_idf_version_major = "5",
+                    any(
+                        esp_idf_version_minor = "0",
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                    )
+                ),
+            )))]
+            poll_interval_ms,
+            interupt_pin: -1,
+            _p: PhantomData,
+        }
+    }
+
+    pub fn interupt(pin: impl Peripheral<P = impl gpio::InputPin> + 'd) -> Self {
+        crate::hal::into_ref!(pin);
+
+        Self {
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(
+                    esp_idf_version_major = "5",
+                    any(
+                        esp_idf_version_minor = "0",
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                    )
+                ),
+            )))]
+            poll_interval_ms: 0,
+            interupt_pin: pin.pin(),
+            _p: PhantomData,
+        }
+    }
+}
+
 type RawCallback<'a> = Box<dyn FnMut(&[u8]) + Send + 'a>;
 
 struct UnsafeCallback<'a>(*mut RawCallback<'a>);
@@ -366,7 +463,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         driver: T,
-        int: impl Peripheral<P = impl gpio::InputPin> + 'd,
+        event_source: SpiEventSource<'d>,
         cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         chipset: SpiEthChipset,
@@ -376,14 +473,22 @@ where
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
         Self::new_spi(
-            driver, int, cs, rst, chipset, baudrate, mac_addr, phy_addr, sysloop,
+            driver,
+            event_source,
+            cs,
+            rst,
+            chipset,
+            baudrate,
+            mac_addr,
+            phy_addr,
+            sysloop,
         )
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi(
         driver: T,
-        int: impl Peripheral<P = impl gpio::InputPin> + 'd,
+        event_source: SpiEventSource<'d>,
         cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         chipset: SpiEthChipset,
@@ -392,13 +497,25 @@ where
         phy_addr: Option<u32>,
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
-        crate::hal::into_ref!(int);
-
         let (mac, phy, device) = Self::init_spi(
             driver.borrow().host(),
             chipset,
             baudrate,
-            int.pin(),
+            event_source.interupt_pin,
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(
+                    esp_idf_version_major = "5",
+                    any(
+                        esp_idf_version_minor = "0",
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                        all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                    )
+                ),
+            )))]
+            event_source.poll_interval_ms,
             cs.map(|pin| pin.into_ref().pin()),
             rst.map(|pin| pin.into_ref().pin()),
             phy_addr,
@@ -423,7 +540,21 @@ where
         host: spi_host_device_t,
         chipset: SpiEthChipset,
         baudrate: Hertz,
-        int: i32,
+        int_gpio_num: i32,
+        #[cfg(not(any(
+            esp_idf_version_major = "4",
+            all(
+                esp_idf_version_major = "5",
+                any(
+                    esp_idf_version_minor = "0",
+                    all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                    all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                    all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                    all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                )
+            ),
+        )))]
+        poll_period_ms: u32,
         cs: Option<i32>,
         rst: Option<i32>,
         phy_addr: Option<u32>,
@@ -454,14 +585,28 @@ where
                 #[cfg(esp_idf_version_major = "4")]
                 let dm9051_cfg = eth_dm9051_config_t {
                     spi_hdl: spi_handle.unwrap() as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
                 };
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let dm9051_cfg = eth_dm9051_config_t {
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(
+                                esp_idf_version_minor = "0",
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                            )
+                        ),
+                    )))]
+                    poll_period_ms,
                     #[cfg(not(any(
                         esp_idf_version_major = "4",
                         all(
@@ -490,14 +635,28 @@ where
                 #[cfg(esp_idf_version_major = "4")]
                 let w5500_cfg = eth_w5500_config_t {
                     spi_hdl: spi_handle.unwrap() as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
                 };
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let w5500_cfg = eth_w5500_config_t {
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(
+                                esp_idf_version_minor = "0",
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                            )
+                        ),
+                    )))]
+                    poll_period_ms,
                     #[cfg(not(any(
                         esp_idf_version_major = "4",
                         all(
@@ -526,14 +685,28 @@ where
                 #[cfg(esp_idf_version_major = "4")]
                 let ksz8851snl_cfg = eth_ksz8851snl_config_t {
                     spi_hdl: spi_handle.unwrap() as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
                 };
 
                 #[cfg(not(esp_idf_version_major = "4"))]
                 let ksz8851snl_cfg = eth_ksz8851snl_config_t {
                     spi_host_id: host,
                     spi_devcfg: &spi_devcfg as *const _ as *mut _,
-                    int_gpio_num: int,
+                    int_gpio_num,
+                    #[cfg(not(any(
+                        esp_idf_version_major = "4",
+                        all(
+                            esp_idf_version_major = "5",
+                            any(
+                                esp_idf_version_minor = "0",
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "0"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
+                                all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                            )
+                        ),
+                    )))]
+                    poll_period_ms,
                     #[cfg(not(any(
                         esp_idf_version_major = "4",
                         all(
