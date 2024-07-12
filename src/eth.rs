@@ -121,7 +121,7 @@ pub enum SpiEthChipset {
 ///
 /// # Availability
 ///
-/// Pre version `v5.1.4` of esp-idf, only an interupt pin could be used as source:
+/// Pre version `v5.1.4` of esp-idf, only an interrupt pin could be used as source:
 ///
 /// - v4.4: <https://github.com/espressif/esp-idf/blob/e499576efdb086551abe309a72899302f82077b7/components/esp_eth/include/esp_eth_mac.h#L461-L464>
 /// - v5.0: <https://github.com/espressif/esp-idf/blob/bcca689866db3dfda47f77670bf8df2a7ec94721/components/esp_eth/include/esp_eth_mac.h#L513-L517>
@@ -149,7 +149,7 @@ pub struct SpiEventSource<'d> {
         ),
     )))]
     pub(crate) poll_interval_ms: u32,
-    pub(crate) interupt_pin: i32,
+    pub(crate) interrupt_pin: i32,
     _p: PhantomData<&'d mut ()>,
 }
 
@@ -185,12 +185,12 @@ impl<'d> SpiEventSource<'d> {
                 ),
             )))]
             poll_interval_ms,
-            interupt_pin: -1,
+            interrupt_pin: -1,
             _p: PhantomData,
         }
     }
 
-    pub fn interupt(pin: impl Peripheral<P = impl gpio::InputPin> + 'd) -> Self {
+    pub fn interrupt(pin: impl Peripheral<P = impl gpio::InputPin> + 'd) -> Self {
         crate::hal::into_ref!(pin);
 
         Self {
@@ -208,7 +208,7 @@ impl<'d> SpiEventSource<'d> {
                 ),
             )))]
             poll_interval_ms: 0,
-            interupt_pin: pin.pin(),
+            interrupt_pin: pin.pin(),
             _p: PhantomData,
         }
     }
@@ -501,7 +501,7 @@ where
             driver.borrow().host(),
             chipset,
             baudrate,
-            event_source.interupt_pin,
+            event_source.interrupt_pin,
             #[cfg(not(any(
                 esp_idf_version_major = "4",
                 all(
