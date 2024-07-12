@@ -154,6 +154,11 @@ pub struct SpiEventSource<'d> {
 }
 
 impl<'d> SpiEventSource<'d> {
+    /// Instead of getting informed by an interrupt pin about updates/changes from the emac, the
+    /// MCU polls the emac periodically for updates.
+    ///
+    /// In most cases, [`Self::polling`] should be used as it is more efficient.
+    /// But this source makes e.g. sense if the interrupt pin of the emac is not connected to the MCU.
     #[cfg(not(any(
         esp_idf_version_major = "4",
         all(
@@ -190,6 +195,9 @@ impl<'d> SpiEventSource<'d> {
         }
     }
 
+    /// Get status updates/changes from the emac by way of an interrupt pin.
+    ///
+    /// If the interrupt pin is not connected, see [`Self::polling`] for an alternative.
     pub fn interrupt(pin: impl Peripheral<P = impl gpio::InputPin> + 'd) -> Self {
         crate::hal::into_ref!(pin);
 
@@ -463,7 +471,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         driver: T,
-        event_source: SpiEventSource<'d>,
+        int: impl Peripheral<P = impl gpio::InputPin> + 'd,
         cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
         chipset: SpiEthChipset,
@@ -473,8 +481,25 @@ where
         sysloop: EspSystemEventLoop,
     ) -> Result<Self, EspError> {
         Self::new_spi(
+            driver, int, cs, rst, chipset, baudrate, mac_addr, phy_addr, sysloop,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_spi(
+        driver: T,
+        int: impl Peripheral<P = impl gpio::InputPin> + 'd,
+        cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
+        rst: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
+        chipset: SpiEthChipset,
+        baudrate: Hertz,
+        mac_addr: Option<&[u8; 6]>,
+        phy_addr: Option<u32>,
+        sysloop: EspSystemEventLoop,
+    ) -> Result<Self, EspError> {
+        Self::new_spi_with_event_source(
             driver,
-            event_source,
+            SpiEventSource::interrupt(int),
             cs,
             rst,
             chipset,
@@ -486,7 +511,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new_spi(
+    pub fn new_spi_with_event_source(
         driver: T,
         event_source: SpiEventSource<'d>,
         cs: Option<impl Peripheral<P = impl gpio::OutputPin> + 'd>,
