@@ -5,6 +5,9 @@ pub use esp_idf_hal::io::*;
 pub mod vfs {
     use crate::sys;
 
+    #[cfg(all(feature = "experimental", feature = "alloc"))]
+    extern crate alloc;
+
     /// Represents a mounted EventFD pseudo-filesystem.
     ///
     /// Operating on this filesystem is done only via the native, unsafe `sys::eventfd_*` function.
@@ -35,7 +38,7 @@ pub mod vfs {
     }
 
     /// Represents a mounted FAT filesystem.
-    #[cfg(feature = "experimental")]
+    #[cfg(all(feature = "experimental", feature = "alloc"))]
     pub struct MountedFatFs<T> {
         _handle: *mut sys::FATFS,
         _fatfs: T,
@@ -43,7 +46,7 @@ pub mod vfs {
         drive: u8,
     }
 
-    #[cfg(feature = "experimental")]
+    #[cfg(all(feature = "experimental", feature = "alloc"))]
     impl<T> MountedFatFs<T> {
         /// Mount a FAT filesystem.
         ///
@@ -84,7 +87,7 @@ pub mod vfs {
         }
     }
 
-    #[cfg(feature = "experimental")]
+    #[cfg(all(feature = "experimental", feature = "alloc"))]
     impl<T> Drop for MountedFatFs<T> {
         fn drop(&mut self) {
             let drive_path = crate::fs::fat::FatFs::<()>::drive_path_from(self.drive);
