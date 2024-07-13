@@ -34,12 +34,12 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Keep it around or else it will be dropped and unmounted
-    let _mounted_fat_fs = MountedFatFs::mount(FatFs::new_sdcard(0, sd_card_driver)?, "/sdspi", 4)?;
+    let _mounted_fat_fs = MountedFatFs::mount(FatFs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
 
     let content = b"Hello, world!";
 
     {
-        let mut file = File::create("/sdspi/test.txt")?;
+        let mut file = File::create("/sdcard/test.txt")?;
 
         file.write_all(content).expect("Write failed");
 
@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     {
-        let mut file = File::open("/sdspi/test.txt")?;
+        let mut file = File::open("/sdcard/test.txt")?;
 
         let mut file_content = String::new();
 
@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     {
-        let directory = read_dir("/sdspi")?;
+        let directory = read_dir("/sdcard")?;
 
         for entry in directory {
             log::info!("Entry: {:?}", entry?.file_name());
