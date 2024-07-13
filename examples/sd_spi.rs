@@ -1,27 +1,24 @@
 #[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
-    use esp_idf_svc::{
-        fs::{Fat, FatConfiguration},
-        hal::{
-            gpio,
-            prelude::*,
-            spi::{config::DriverConfig, Dma, SpiDriver, SPI3},
-        },
-        log::EspLogger,
-        sd::{host::SdHost, spi::SpiDevice, SdConfiguration},
-    };
-    use std::{
-        fs::{read_dir, File},
-        io::{Read, Seek, Write},
-    };
+    use std::fs::{read_dir, File};
+    use std::io::{Read, Seek, Write};
+
+    use esp_idf_svc::fs::fat::FatFs;
+    use esp_idf_svc::hal::gpio::AnyIOPin;
+    use esp_idf_svc::hal::prelude::*;
+    use esp_idf_svc::hal::sd::{spi::SdSpiHostDriver, SdCardDriver};
+    use esp_idf_svc::hal::spi::{config::DriverConfig, Dma, SpiDriver};
+    use esp_idf_svc::io::vfs::MountedFatFs;
+    use esp_idf_svc::log::EspLogger;
 
     esp_idf_svc::sys::link_patches();
+
     EspLogger::initialize_default();
 
     let peripherals = Peripherals::take()?;
     let pins = peripherals.pins;
 
-    let spi_driver = SpiDriver::new::<SPI3>(
+    let spi_driver = SpiDriver::new(
         peripherals.spi3,
         pins.gpio18,
         pins.gpio23,
@@ -29,27 +26,22 @@ fn main() -> anyhow::Result<()> {
         &DriverConfig::default().dma(Dma::Auto(4096)),
     )?;
 
-    let spi_device = SpiDevice::new(
+    let sd_card_driver = SdCardDriver::new_spi(SdSpiHostDriver::new(
         spi_driver,
-        pins.gpio5,
-        Option::<gpio::AnyInputPin>::None,
-        Option::<gpio::AnyInputPin>::None,
-        Option::<gpio::AnyInputPin>::None,
+        Some(pins.gpio5),
+        AnyIOPin::none(),
+        AnyIOPin::none(),
+        AnyIOPin::none(),
         #[cfg(not(any(
             esp_idf_version_major = "4",
             all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
             all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
         )))] // For ESP-IDF v5.2 and later
-        Option::<bool>::None,
-    )?;
+        None,
+    )?)?;
 
-    let host_config = SdConfiguration::new();
-
-    let host = SdHost::new_with_spi(&host_config, spi_device);
-
-    let fat_configuration = FatConfiguration::new();
-
-    let _fat = Fat::mount_spi(fat_configuration, host, "/sdspi")?;
+    // Keep it around or else it will be dropped and unmounted
+    let _mounted_fat_fs = MountedFatFs::mount(FatFs::new_sdcard(0, sd_card_driver)?, "/sdspi", 4)?;
 
     let content = b"Hello, world!";
 
