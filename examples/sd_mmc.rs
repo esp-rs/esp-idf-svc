@@ -1,11 +1,11 @@
 #[cfg(all(esp32, esp_idf_soc_sdmmc_host_supported))]
 fn main() -> anyhow::Result<()> {
     use esp_idf_hal::sd::SdMmcConfiguration;
-    use esp_idf_svc::fs::fat::FatFs;
+    use esp_idf_svc::fs::fatfs::Fatfs;
     use esp_idf_svc::hal::gpio;
     use esp_idf_svc::hal::prelude::*;
     use esp_idf_svc::hal::sd::{mmc::SdMmcHostDriver, SdCardDriver};
-    use esp_idf_svc::io::vfs::MountedFatFs;
+    use esp_idf_svc::io::vfs::MountedFatfs;
     use esp_idf_svc::log::EspLogger;
 
     use std::fs::{read_dir, File};
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Keep it around or else it will be dropped and unmounted
-    let _mounted_fat_fs = MountedFatFs::mount(FatFs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
+    let _mounted_fatfs = MountedFatfs::mount(Fatfs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
 
     let content = b"Hello, world!";
 

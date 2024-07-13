@@ -73,12 +73,12 @@ enum Partition<T> {
 ///
 /// The interaction happens via the native, unsafe FATFS library API (i.e. `crate::sys::f_open`, `crate::sys::f_read` and so on).
 /// An alternative way to mount the filesystem is to use the VFS API, which is more high-level and abstracts the underlying filesystem.
-pub struct MountedFatFs<'a, T> {
-    fs: &'a mut FatFs<T>,
+pub struct MountedFatfs<'a, T> {
+    fs: &'a mut Fatfs<T>,
     fatfs: Box<FATFS>,
 }
 
-impl<'a, T> MountedFatFs<'a, T> {
+impl<'a, T> MountedFatfs<'a, T> {
     /// Get the underlying FATFS instance.
     pub fn fatfs(&self) -> &FATFS {
         &self.fatfs
@@ -87,7 +87,7 @@ impl<'a, T> MountedFatFs<'a, T> {
     // TODO: Add safe methods to interact with the filesystem
 }
 
-impl<'a, T> Drop for MountedFatFs<'a, T> {
+impl<'a, T> Drop for MountedFatfs<'a, T> {
     fn drop(&mut self) {
         let drive_path = self.fs.drive_path();
 
@@ -98,12 +98,12 @@ impl<'a, T> Drop for MountedFatFs<'a, T> {
 }
 
 /// Represents a FAT filesystem.
-pub struct FatFs<T> {
+pub struct Fatfs<T> {
     drive: u8,
     _partition: Partition<T>,
 }
 
-impl<T> FatFs<T> {
+impl<T> Fatfs<T> {
     /// Create a new FAT filesystem instance for a given SD card driver.
     ///
     /// # Arguments
@@ -190,7 +190,7 @@ impl<T> FatFs<T> {
     }
 
     /// Mount the filesystem and return a handle to it.
-    pub fn mount(&mut self) -> Result<MountedFatFs<'_, T>, EspError> {
+    pub fn mount(&mut self) -> Result<MountedFatfs<'_, T>, EspError> {
         let mut fatfs: Box<FATFS> = Box::default(); // TODO: Large stack size
 
         let drive_path = self.drive_path();
@@ -199,7 +199,7 @@ impl<T> FatFs<T> {
             f_mount(&mut *fatfs, drive_path.as_ptr(), 0);
         }
 
-        Ok(MountedFatFs { fs: self, fatfs })
+        Ok(MountedFatfs { fs: self, fatfs })
     }
 
     pub(crate) fn drive_path_from(drive: u8) -> [core::ffi::c_char; 2] {
@@ -211,7 +211,7 @@ impl<T> FatFs<T> {
     }
 }
 
-impl FatFs<()> {
+impl Fatfs<()> {
     /// Create a new - readonly - FAT filesystem instance for a given raw partition in the internal flash.
     /// This API is unsafe because currently `esp-idf-hal` does not have a safe way to
     /// represent a flash partition - neither a raw one, nor a wear-leveling one.
@@ -260,7 +260,7 @@ impl FatFs<()> {
     }
 }
 
-impl<T> Drop for FatFs<T> {
+impl<T> Drop for Fatfs<T> {
     fn drop(&mut self) {
         unsafe {
             ff_diskio_register(self.drive, core::ptr::null_mut());

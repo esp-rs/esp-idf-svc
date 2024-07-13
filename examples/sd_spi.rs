@@ -3,12 +3,12 @@ fn main() -> anyhow::Result<()> {
     use std::fs::{read_dir, File};
     use std::io::{Read, Seek, Write};
 
-    use esp_idf_svc::fs::fat::FatFs;
+    use esp_idf_svc::fs::fatfs::Fatfs;
     use esp_idf_svc::hal::gpio::AnyIOPin;
     use esp_idf_svc::hal::prelude::*;
     use esp_idf_svc::hal::sd::{spi::SdSpiHostDriver, SdCardDriver};
     use esp_idf_svc::hal::spi::{config::DriverConfig, Dma, SpiDriver};
-    use esp_idf_svc::io::vfs::MountedFatFs;
+    use esp_idf_svc::io::vfs::MountedFatfs;
     use esp_idf_svc::log::EspLogger;
 
     esp_idf_svc::sys::link_patches();
@@ -41,7 +41,7 @@ fn main() -> anyhow::Result<()> {
     )?)?;
 
     // Keep it around or else it will be dropped and unmounted
-    let _mounted_fat_fs = MountedFatFs::mount(FatFs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
+    let _mounted_fatfs = MountedFatfs::mount(Fatfs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
 
     let content = b"Hello, world!";
 
