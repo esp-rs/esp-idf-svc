@@ -112,3 +112,19 @@ impl From<Newtype<esp_netif_ip_info_t>> for ipv4::IpInfo {
         }
     }
 }
+
+impl From<Newtype<esp_ip6_addr_t>> for core::net::Ipv6Addr {
+    fn from(value: Newtype<esp_ip6_addr_t>) -> Self {
+        let mut out = [0; 16];
+        value
+            .0
+            .addr
+            .into_iter()
+            .map(u32::from_be)
+            .flat_map(u32::to_be_bytes)
+            .zip(out.iter_mut())
+            .for_each(|(i, o)| *o = i);
+
+        core::net::Ipv6Addr::from(out)
+    }
+}

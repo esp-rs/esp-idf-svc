@@ -602,6 +602,10 @@ impl<'a> DhcpIp6Assignment<'a> {
         self.0.esp_netif
     }
 
+    pub fn addr(&self) -> core::net::Ipv6Addr {
+        Newtype(self.0.ip6_info.ip).into()
+    }
+
     pub fn ip(&self) -> [u32; 4] {
         self.0.ip6_info.ip.addr
     }
@@ -619,7 +623,7 @@ impl<'a> fmt::Debug for DhcpIp6Assignment<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DhcpIp6Assignment")
             .field("netif_handle", &self.netif_handle())
-            .field("ip", &self.ip())
+            .field("addr", &self.addr())
             .field("ip_zone", &self.ip_zone())
             .field("ip_index", &self.ip_index())
             .finish()
