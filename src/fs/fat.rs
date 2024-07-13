@@ -10,8 +10,6 @@ use crate::sys::*;
 extern crate alloc;
 
 pub mod config {
-    use core::num::NonZeroU16;
-
     /// Type of FAT filesystem to create when formatting the partition.
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub enum FatFsType {
@@ -34,10 +32,10 @@ pub mod config {
         pub fat_backup_copy: bool,
         /// Volume data alignment in number of sectors.
         #[cfg(not(esp_idf_version_major = "4"))]
-        pub volume_data_alignment: NonZeroU16,
+        pub volume_data_alignment: core::num::NonZeroU16,
         /// Number of root directory entries.
         #[cfg(not(esp_idf_version_major = "4"))]
-        pub root_dir_entries: NonZeroU16,
+        pub root_dir_entries: core::num::NonZeroU16,
         /// Cluster size in bytes.
         pub cluster_size: u32,
     }
@@ -50,9 +48,9 @@ pub mod config {
                 #[cfg(not(esp_idf_version_major = "4"))]
                 fat_backup_copy: false,
                 #[cfg(not(esp_idf_version_major = "4"))]
-                volume_data_alignment: unsafe { NonZeroU16::new_unchecked(1) },
+                volume_data_alignment: unsafe { core::num::NonZeroU16::new_unchecked(1) },
                 #[cfg(not(esp_idf_version_major = "4"))]
-                root_dir_entries: unsafe { NonZeroU16::new_unchecked(512) },
+                root_dir_entries: unsafe { core::num::NonZeroU16::new_unchecked(512) },
                 cluster_size: 4096,
             }
         }
