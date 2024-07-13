@@ -212,9 +212,9 @@ impl<T> FatFs<T> {
 }
 
 impl FatFs<()> {
-    /// Create a new FAT filesystem instance for a given raw partition in the internal flash.
-    /// This API is unsafe because current `esp-idf-hal` does not have a safe way to
-    /// represent a flash partition.
+    /// Create a new - readonly - FAT filesystem instance for a given raw partition in the internal flash.
+    /// This API is unsafe because currently `esp-idf-hal` does not have a safe way to
+    /// represent a flash partition - neither a raw one, nor a wear-leveling one.
     ///
     /// # Arguments
     /// - Drive number to assign to the filesystem.
@@ -222,13 +222,35 @@ impl FatFs<()> {
     ///
     /// # Safety
     ///
-    /// While the filesystem object is alive, the partition should not be used elsewhere
+    /// While the filesystem object is alive, the partition should not be modified elsewhere
     pub unsafe fn new_raw_part(
         drive: u8,
         partition: *const esp_partition_t,
     ) -> Result<Self, EspError> {
         unsafe {
             ff_diskio_register_raw_partition(drive, partition);
+        }
+
+        Ok(Self {
+            drive,
+            _partition: Partition::RawPartition,
+        })
+    }
+
+    /// Create a new FAT filesystem instance for a given raw partition in the internal flash.
+    /// This API is unsafe because currently `esp-idf-hal` does not have a safe way to
+    /// represent a flash partition - neither a raw one, nor a wear-leveling one.
+    ///
+    /// # Arguments
+    /// - Drive number to assign to the filesystem.
+    /// - A handle to a wear-leveling partition.
+    ///
+    /// # Safety
+    ///
+    /// While the filesystem object is alive, the partition should not be modified elsewhere
+    pub unsafe fn new_wl_part(drive: u8, partition: wl_handle_t) -> Result<Self, EspError> {
+        unsafe {
+            ff_diskio_register_wl_partition(drive, partition);
         }
 
         Ok(Self {
