@@ -12,56 +12,31 @@ extern crate alloc;
 pub mod config {
     use core::num::NonZeroU16;
 
-    /// Number of File Allocation Tables copies to create when formatting the partition.
-    #[derive(Default, Copy, Clone, Eq, PartialEq)]
-    pub enum FatCopies {
-        /// A single copy of the FAT table.
-        #[default]
-        Single,
-        /// Two copies of the FAT table.
-        Two,
-    }
-
-    impl FatCopies {
-        pub(crate) const fn copies(&self) -> u8 {
-            match self {
-                Self::Single => 1,
-                Self::Two => 2,
-            }
-        }
-    }
-
     /// Type of FAT filesystem to create when formatting the partition.
     #[derive(Copy, Clone, Eq, PartialEq)]
     pub enum FatFsType {
         /// Automatically choose the best FAT type depending on volume and cluster size.
-        Auto(FatCopies),
+        Auto,
         /// FAT12 filesystem.
-        Fat(FatCopies),
+        Fat,
         /// FAT32 filesystem.
-        Fat32(FatCopies),
+        Fat32,
         /// ExFAT filesystem.
         ExFat,
-    }
-
-    impl FatFsType {
-        pub(crate) const fn copies(&self) -> u8 {
-            match self {
-                Self::Auto(c) => c.copies(),
-                Self::Fat(c) => c.copies(),
-                Self::Fat32(c) => c.copies(),
-                Self::ExFat => 1,
-            }
-        }
     }
 
     /// Configuration for formatting a FAT partition.
     pub struct FormatConfiguration {
         /// Type of FAT filesystem to create.
         pub fs_type: FatFsType,
+        /// Whether to create a backup copy of the FAT table.
+        #[cfg(not(esp_idf_version_major = "4"))]
+        pub fat_backup_copy: bool,
         /// Volume data alignment in number of sectors.
+        #[cfg(not(esp_idf_version_major = "4"))]
         pub volume_data_alignment: NonZeroU16,
         /// Number of root directory entries.
+        #[cfg(not(esp_idf_version_major = "4"))]
         pub root_dir_entries: NonZeroU16,
         /// Cluster size in bytes.
         pub cluster_size: u32,
@@ -71,8 +46,12 @@ pub mod config {
         /// Create a new default configuration
         pub const fn new() -> Self {
             Self {
-                fs_type: FatFsType::Auto(FatCopies::Single),
+                fs_type: FatFsType::Auto,
+                #[cfg(not(esp_idf_version_major = "4"))]
+                fat_backup_copy: false,
+                #[cfg(not(esp_idf_version_major = "4"))]
                 volume_data_alignment: unsafe { NonZeroU16::new_unchecked(1) },
+                #[cfg(not(esp_idf_version_major = "4"))]
                 root_dir_entries: unsafe { NonZeroU16::new_unchecked(512) },
                 cluster_size: 4096,
             }
@@ -166,26 +145,47 @@ impl<T> FatFs<T> {
     ) -> Result<(), EspError> {
         let drive_path = self.drive_path();
 
-        let opt = MKFS_PARM {
-            fmt: match configuration.fs_type {
-                FatFsType::Auto(_) => FM_ANY,
-                FatFsType::Fat(_) => FM_FAT,
-                FatFsType::Fat32(_) => FM_FAT32,
-                FatFsType::ExFat => FM_EXFAT,
-            } as _,
-            au_size: configuration.cluster_size,
-            n_fat: configuration.fs_type.copies(),
-            n_root: configuration.root_dir_entries.get() as _,
-            align: configuration.volume_data_alignment.get() as _,
-        };
+        #[cfg(not(esp_idf_version_major = "4"))]
+        {
+            let opt = MKFS_PARM {
+                fmt: match configuration.fs_type {
+                    FatFsType::Auto => FM_ANY,
+                    FatFsType::Fat => FM_FAT,
+                    FatFsType::Fat32 => FM_FAT32,
+                    FatFsType::ExFat => FM_EXFAT,
+                } as _,
+                au_size: configuration.cluster_size,
+                n_fat: if configuration.fat_backup_copy { 2 } else { 1 },
+                n_root: configuration.root_dir_entries.get() as _,
+                align: configuration.volume_data_alignment.get() as _,
+            };
 
-        unsafe {
-            f_mkfs(
-                drive_path.as_ptr(),
-                &opt,
-                buf.as_mut_ptr() as *mut _,
-                buf.len() as _,
-            );
+            unsafe {
+                f_mkfs(
+                    drive_path.as_ptr(),
+                    &opt,
+                    buf.as_mut_ptr() as *mut _,
+                    buf.len() as _,
+                );
+            }
+        }
+
+        #[cfg(esp_idf_version_major = "4")]
+        {
+            unsafe {
+                f_mkfs(
+                    drive_path.as_ptr(),
+                    match configuration.fs_type {
+                        FatFsType::Auto => FM_ANY,
+                        FatFsType::Fat => FM_FAT,
+                        FatFsType::Fat32 => FM_FAT32,
+                        FatFsType::ExFat => FM_EXFAT,
+                    } as _,
+                    configuration.cluster_size,
+                    buf.as_mut_ptr() as *mut _,
+                    buf.len() as _,
+                );
+            }
         }
 
         Ok(())
