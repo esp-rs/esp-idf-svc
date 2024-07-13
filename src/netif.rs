@@ -518,6 +518,10 @@ impl RawHandle for EspNetif {
 pub struct ApStaIpAssignment<'a>(&'a ip_event_ap_staipassigned_t);
 
 impl ApStaIpAssignment<'_> {
+    pub fn netif_handle(&self) -> *mut esp_netif_t {
+        self.0.esp_netif
+    }
+
     pub fn ip(&self) -> ipv4::Ipv4Addr {
         ipv4::Ipv4Addr::from(Newtype(self.0.ip))
     }
@@ -653,7 +657,7 @@ impl<'a> IpEvent<'a> {
 
     pub fn handle(&self) -> Option<*mut esp_netif_t> {
         match self {
-            Self::ApStaIpAssigned(_) => None,
+            Self::ApStaIpAssigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIpAssigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIp6Assigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIpDeassigned(handle) => Some(*handle),
