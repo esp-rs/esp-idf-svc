@@ -44,6 +44,7 @@ impl Spiffs {
     }
 
     /// Garbage collect the filesystem.
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub fn gc(&mut self, size_to_gc: usize) -> Result<(), EspError> {
         esp!(unsafe { esp_spiffs_gc(self.partition.as_ptr(), size_to_gc) })
     }
