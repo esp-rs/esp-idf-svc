@@ -1942,6 +1942,7 @@ impl StaConnectedRef {
         Option::<AuthMethod>::from(Newtype(self.0.authmode)).unwrap()
     }
 
+    #[cfg(not(esp_idf_version_major = "4"))]
     /// Association ID given by the AP
     pub fn aid(&self) -> u16 {
         self.0.aid
@@ -1950,13 +1951,18 @@ impl StaConnectedRef {
 
 impl fmt::Debug for StaConnectedRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StaConnectedRef")
+        let mut d = f.debug_struct("StaConnectedRef");
+
+        let d = d
             .field("ssid", &alloc::string::String::from_utf8_lossy(self.ssid()))
             .field("bssid", &self.bssid())
             .field("channel", &self.channel())
-            .field("authmode", &self.authmode())
-            .field("aid", &self.aid())
-            .finish()
+            .field("authmode", &self.authmode());
+
+        #[cfg(not(esp_idf_version_major = "4"))]
+        let d = d.field("aid", &self.aid());
+
+        d.finish()
     }
 }
 
