@@ -126,8 +126,12 @@ pub enum SpiEthChipset {
 /// - v4.4: <https://github.com/espressif/esp-idf/blob/e499576efdb086551abe309a72899302f82077b7/components/esp_eth/include/esp_eth_mac.h#L461-L464>
 /// - v5.0: <https://github.com/espressif/esp-idf/blob/bcca689866db3dfda47f77670bf8df2a7ec94721/components/esp_eth/include/esp_eth_mac.h#L513-L517>
 /// - v5.1.3: <https://github.com/espressif/esp-idf/blob/e7771c75bd1dbbfb7b3c5381be7e063b197c9734/components/esp_eth/include/esp_eth_mac.h#L612-L617>
+/// - V5.2.0: <https://github.com/espressif/esp-idf/blob/11eaf41b37267ad7709c0899c284e3683d2f0b5e/components/esp_eth/include/esp_eth_mac.h#L612-L617>
 ///
-/// Starting with `v5.1.4` the option of `poll_period_ms` became available: <https://github.com/espressif/esp-idf/blob/d7b0a45ddbddbac53afb4fc28168f9f9259dbb79/components/esp_eth/include/esp_eth_mac.h#L614-L620>
+/// Starting with `v5.1.4`, `v5.2.1` and `>= v5.3` the option of `poll_period_ms` became available:
+/// - v5.1.4: <https://github.com/espressif/esp-idf/blob/d7b0a45ddbddbac53afb4fc28168f9f9259dbb79/components/esp_eth/include/esp_eth_mac.h#L614-L620>
+/// - v5.2.1: <https://github.com/espressif/esp-idf/blob/a322e6bdad4b6675d4597fb2722eea2851ba88cb/components/esp_eth/include/esp_eth_mac.h#L614-L620>
+/// - v5.3-dev: <https://github.com/espressif/esp-idf/blob/ea010f84ef878dda07146244e166930738c1c103/components/esp_eth/include/esp_eth_mac.h#L694-L700>
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
     esp_idf_eth_spi_ethernet_w5500,
@@ -145,6 +149,7 @@ pub struct SpiEventSource<'d> {
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
             )
         ),
     )))]
@@ -169,13 +174,14 @@ impl<'d> SpiEventSource<'d> {
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
             )
         ),
     )))]
-    pub fn polling(interval: Duration) -> Self {
-        let poll_interval_ms = interval.as_millis().try_into().unwrap();
+    pub fn polling(interval: Duration) -> Result<Self, core::num::TryFromIntError> {
+        let poll_interval_ms = interval.as_millis().try_into()?;
 
-        Self {
+        Ok(Self {
             #[cfg(not(any(
                 esp_idf_version_major = "4",
                 all(
@@ -186,13 +192,14 @@ impl<'d> SpiEventSource<'d> {
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                        all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                     )
                 ),
             )))]
             poll_interval_ms,
             interrupt_pin: -1,
             _p: PhantomData,
-        }
+        })
     }
 
     /// Get status updates/changes from the emac by way of an interrupt pin.
@@ -212,6 +219,7 @@ impl<'d> SpiEventSource<'d> {
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                        all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                     )
                 ),
             )))]
@@ -537,6 +545,7 @@ where
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                         all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                        all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                     )
                 ),
             )))]
@@ -560,7 +569,7 @@ where
         Ok(eth)
     }
 
-    #[allow(clippy::unnecessary_literal_unwrap)]
+    #[allow(clippy::unnecessary_literal_unwrap, clippy::too_many_arguments)]
     fn init_spi(
         host: spi_host_device_t,
         chipset: SpiEthChipset,
@@ -576,6 +585,7 @@ where
                     all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                     all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                     all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                    all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                 )
             ),
         )))]
@@ -628,6 +638,7 @@ where
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                                all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                             )
                         ),
                     )))]
@@ -678,6 +689,7 @@ where
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                                all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                             )
                         ),
                     )))]
@@ -728,6 +740,7 @@ where
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "1"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "2"),
                                 all(esp_idf_version_minor = "1", esp_idf_version_patch = "3"),
+                                all(esp_idf_version_minor = "2", esp_idf_version_patch = "0"),
                             )
                         ),
                     )))]
