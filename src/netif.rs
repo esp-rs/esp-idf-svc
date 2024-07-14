@@ -661,7 +661,7 @@ impl<'a> IpEvent<'a> {
             #[cfg(not(esp_idf_version_major = "4"))]
             Self::ApStaIpAssigned(assignment) => Some(assignment.netif_handle()),
             #[cfg(esp_idf_version_major = "4")]
-            Self::ApStaIpAssigned(assignment) => None,
+            Self::ApStaIpAssigned(_) => None,
             Self::DhcpIpAssigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIp6Assigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIpDeassigned(handle) => Some(*handle),
