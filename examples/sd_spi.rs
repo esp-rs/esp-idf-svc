@@ -6,10 +6,12 @@ fn main() -> anyhow::Result<()> {
     use esp_idf_svc::fs::fatfs::Fatfs;
     use esp_idf_svc::hal::gpio::AnyIOPin;
     use esp_idf_svc::hal::prelude::*;
-    use esp_idf_svc::hal::sd::{spi::SdSpiHostDriver, SdCardDriver};
+    use esp_idf_svc::hal::sd::{spi::SdSpiHostDriver, SdCardConfiguration, SdCardDriver};
     use esp_idf_svc::hal::spi::{config::DriverConfig, Dma, SpiDriver};
     use esp_idf_svc::io::vfs::MountedFatfs;
     use esp_idf_svc::log::EspLogger;
+
+    use log::info;
 
     esp_idf_svc::sys::link_patches();
 
@@ -26,19 +28,22 @@ fn main() -> anyhow::Result<()> {
         &DriverConfig::default().dma(Dma::Auto(4096)),
     )?;
 
-    let sd_card_driver = SdCardDriver::new_spi(SdSpiHostDriver::new(
-        spi_driver,
-        Some(pins.gpio5),
-        AnyIOPin::none(),
-        AnyIOPin::none(),
-        AnyIOPin::none(),
-        #[cfg(not(any(
-            esp_idf_version_major = "4",
-            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
-            all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
-        )))] // For ESP-IDF v5.2 and later
-        None,
-    )?)?;
+    let sd_card_driver = SdCardDriver::new_spi(
+        SdSpiHostDriver::new(
+            spi_driver,
+            Some(pins.gpio5),
+            AnyIOPin::none(),
+            AnyIOPin::none(),
+            AnyIOPin::none(),
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+                all(esp_idf_version_major = "5", esp_idf_version_minor = "1"),
+            )))] // For ESP-IDF v5.2 and later
+            None,
+        )?,
+        &SdCardConfiguration::new(),
+    )?;
 
     // Keep it around or else it will be dropped and unmounted
     let _mounted_fatfs = MountedFatfs::mount(Fatfs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
@@ -48,17 +53,27 @@ fn main() -> anyhow::Result<()> {
     {
         let mut file = File::create("/sdcard/test.txt")?;
 
+        info!("File {file:?} created");
+
         file.write_all(content).expect("Write failed");
 
+        info!("File {file:?} written with {content:?}");
+
         file.seek(std::io::SeekFrom::Start(0)).expect("Seek failed");
+
+        info!("File {file:?} seeked");
     }
 
     {
         let mut file = File::open("/sdcard/test.txt")?;
 
+        info!("File {file:?} opened");
+
         let mut file_content = String::new();
 
         file.read_to_string(&mut file_content).expect("Read failed");
+
+        info!("File {file:?} read: {file_content}");
 
         assert_eq!(file_content.as_bytes(), content);
     }
