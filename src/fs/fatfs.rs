@@ -4,6 +4,8 @@ use alloc::boxed::Box;
 
 use config::{FatFsType, FormatConfiguration};
 
+use log::warn;
+
 use crate::hal::sd::SdCardDriver;
 use crate::sys::*;
 
@@ -91,8 +93,10 @@ impl<'a, T> Drop for MountedFatfs<'a, T> {
     fn drop(&mut self) {
         let drive_path = self.fs.drive_path();
 
-        unsafe {
-            f_mount(core::ptr::null_mut(), drive_path.as_ptr(), 0);
+        let res = unsafe { f_mount(core::ptr::null_mut(), drive_path.as_ptr(), 0) };
+
+        if res != FRESULT_FR_OK {
+            panic!("Unmount failed: {res}");
         }
     }
 }
@@ -195,8 +199,11 @@ impl<T> Fatfs<T> {
 
         let drive_path = self.drive_path();
 
-        unsafe {
-            f_mount(&mut *fatfs, drive_path.as_ptr(), 0);
+        let res = unsafe { f_mount(&mut *fatfs, drive_path.as_ptr(), 0) };
+
+        if res != FRESULT_FR_OK {
+            warn!("Mount failed: {res}");
+            Err(EspError::from_infallible::<ESP_FAIL>())?
         }
 
         Ok(MountedFatfs { fs: self, fatfs })
