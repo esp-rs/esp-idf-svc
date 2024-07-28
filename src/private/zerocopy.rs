@@ -138,6 +138,14 @@ where
         (this, receiver)
     }
 
+    /// Share a mutable reference, that the receiver can read or write to.
+    ///
+    /// This will block until the receiver has processed the data, or the channel is closed.
+    ///
+    /// Returns `true` if the data has been processed by a receiver, and `false` if the channel was closed.
+    ///
+    /// This allows different threads to communicate without passing the data via the heap.
+    /// Instead, a sender can share a mutable reference *from its own stack* with a receiver.
     pub fn share(&self, mut data: &mut T) -> bool {
         self.set(State::Data(data))
     }
