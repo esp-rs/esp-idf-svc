@@ -86,6 +86,9 @@ where
 /// SAFETY: The receiver will be able to access mutable state from other threads (even from their stack),
 /// however, the channel will ensure that the state is only accessed by one receiver at a time,
 /// and that the mutable state does not disappear while the receiver is using it.
+///
+/// Even though Receiver<T> requires T: 'static, we need to implement this for all lifetimes.
+/// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
 unsafe impl<'a, T> Send for Receiver<T> where T: Send + 'a {}
 
 pub struct QuitOnDrop<T>(Arc<Channel<T>>)
@@ -196,11 +199,17 @@ where
 /// SAFETY: The channel uses a mutex to synchronize access to the shared state.
 /// The shared state also contain a raw pointer, which can point into the stack of the sender thread.
 /// Despite this, the channel is constructed to be safe to send between threads.
+///
+/// Even though Channel<T> requires T: 'static, we need to implement this for all lifetimes.
+/// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
 unsafe impl<'a, T> Send for Channel<T> where T: Send + 'a {}
 
 /// SAFETY: The channel uses a mutex to synchronize access to the shared state.
 /// The shared state also contain a raw pointer, which can point into the stack of the sender thread.
 /// Despite this, the channel is constructed to be safe to shared between threads.
+///
+/// Even though Channel<T> requires T: 'static, we need to implement this for all lifetimes.
+/// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
 unsafe impl<'a, T> Sync for Channel<T> where T: Send + 'a {}
 
 #[derive(Copy, Clone, Debug)]
