@@ -93,7 +93,7 @@ where
             // Fortunately, this function does not manage any memory at this point.
             // The scope above guarantees that all relevant variables are dropped at this point.
             // See https://www.freertos.org/implementing-a-FreeRTOS-task.html
-            task::destroy(std::ptr::null_mut());
+            task::destroy(core::ptr::null_mut());
         }
     }
 }
