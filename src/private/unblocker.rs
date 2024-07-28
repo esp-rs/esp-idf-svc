@@ -5,7 +5,6 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use esp_idf_hal::cpu::Core;
-use esp_idf_hal::sys::vTaskDelete;
 use esp_idf_hal::sys::{EspError, TaskHandle_t};
 use esp_idf_hal::task;
 use esp_idf_hal::task::asynch::Notification;
@@ -94,7 +93,7 @@ where
             // Fortunately, this function does not manage any memory at this point.
             // The scope above guarantees that all relevant variables are dropped at this point.
             // See https://www.freertos.org/implementing-a-FreeRTOS-task.html
-            vTaskDelete(std::ptr::null_mut());
+            task::destroy(std::ptr::null_mut());
         }
     }
 }
