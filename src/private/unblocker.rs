@@ -87,7 +87,7 @@ where
             worker();
         }
         unsafe {
-            // FreeRTOS tasks must delete themselves, returning from the task function
+            // FreeRTOS tasks must delete themselves. Returning from the task function
             // without deleting the task will cause a crash.
             // This function will immediately stop running. This means we have to ensure
             // that all memory is freed before calling vTaskDelete.
