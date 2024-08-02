@@ -63,7 +63,7 @@ where
 {
     Input(GPIO0),
     OutputGpio0(GPIO0),
-    /// This according to ESP-IDF is for "testing" only    
+    /// This according to ESP-IDF is for "testing" only
     OutputGpio16(GPIO16),
     OutputInvertedGpio17(GPIO17),
 }
@@ -428,7 +428,6 @@ impl<'d> EthDriver<'d, RmiiEth> {
         esp_idf_version = "5.0",
         esp_idf_version = "5.1",
         esp_idf_version = "5.2",
-        esp_idf_version = "5.3"
     ))]
     fn eth_esp32_emac_default_config(mdc: i32, mdio: i32) -> eth_esp32_emac_config_t {
         eth_esp32_emac_config_t {
@@ -444,7 +443,6 @@ impl<'d> EthDriver<'d, RmiiEth> {
         esp_idf_version = "5.0",
         esp_idf_version = "5.1",
         esp_idf_version = "5.2",
-        esp_idf_version = "5.3"
     )))]
     fn eth_esp32_emac_default_config(mdc: i32, mdio: i32) -> eth_esp32_emac_config_t {
         eth_esp32_emac_config_t {
