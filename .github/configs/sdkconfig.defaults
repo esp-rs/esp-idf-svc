@@ -17,6 +17,12 @@ CONFIG_ETH_SPI_ETHERNET_DM9051=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
 CONFIG_ETH_SPI_ETHERNET_KSZ8851SNL=y
 
+# GSM
+CONFIG_LWIP_PPP_SUPPORT=y
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=2048
+CONFIG_LWIP_PPP_ENABLE_IPV6=n
+
+
 # We don't have an example for classic BT - yet - we need to enable class BT
 # specifically to workaround this bug in ESP IDF v5.2 (fixed in ESP IDF v5.2.1+):
 # https://github.com/espressif/esp-idf/issues/13113
