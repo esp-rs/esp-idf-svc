@@ -873,20 +873,22 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::Borrow;
+    use core::marker::PhantomData;
 
     use crate::handle::RawHandle;
     use crate::sys::*;
 
     use super::EspNetif;
 
-    pub struct EspNetifDriver<T>
+    pub struct EspNetifDriver<'d, T>
     where
         T: Borrow<EspNetif>,
     {
-        inner: alloc::boxed::Box<EspNetifDriverInner<T>>,
+        inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
+        _d: PhantomData<&'d ()>,
     }
 
-    impl<T> EspNetifDriver<T>
+    impl<'d, T> EspNetifDriver<'d, T>
     where
         T: Borrow<EspNetif>,
     {
@@ -900,7 +902,7 @@ mod driver {
         #[cfg(esp_idf_lwip_ppp_support)]
         pub fn new_ppp<F>(netif: T, tx: F) -> Result<Self, EspError>
         where
-            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
+            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
         {
             Self::new(
                 netif,
@@ -950,7 +952,7 @@ mod driver {
             tx: F,
         ) -> Result<Self, EspError>
         where
-            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
+            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
             P: FnMut(&EspNetif) -> Result<(), EspError> + Send + 'static,
         {
             let mut inner = alloc::boxed::Box::new(EspNetifDriverInner {
@@ -1000,7 +1002,10 @@ mod driver {
                 );
             }
 
-            Ok(Self { inner })
+            Ok(Self {
+                inner,
+                _d: PhantomData,
+            })
         }
 
         /// Ingest a packet into the driver.
@@ -1018,7 +1023,7 @@ mod driver {
         }
     }
 
-    impl<T> Drop for EspNetifDriver<T>
+    impl<'d, T> Drop for EspNetifDriver<'d, T>
     where
         T: Borrow<EspNetif>,
     {
@@ -1057,7 +1062,7 @@ mod driver {
     }
 
     #[repr(C)]
-    struct EspNetifDriverInner<T>
+    struct EspNetifDriverInner<'d, T>
     where
         T: Borrow<EspNetif>,
     {
@@ -1066,12 +1071,12 @@ mod driver {
         got_ip_event_id: Option<i32>,
         lost_ip_event_id: Option<i32>,
         #[allow(clippy::type_complexity)]
-        tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError>>,
+        tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError> + 'd>,
         #[allow(clippy::type_complexity)]
         post_attach_cfg: alloc::boxed::Box<dyn FnMut(&EspNetif) -> Result<(), EspError>>,
     }
 
-    impl<T> EspNetifDriverInner<T>
+    impl<'d, T> EspNetifDriverInner<'d, T>
     where
         T: Borrow<EspNetif>,
     {

@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     let nvs = EspDefaultNvsPartition::take()?;
     let serial = peripherals.uart2;
     let tx = peripherals.pins.gpio17;
-    let rx = peripherals.pins.gpio16;
+    let rx = peripherals.pins.gpio18;
     let mut serial = UartDriver::new(
         serial,
         tx,
@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
     log::error!("Hello");
-    let mut modem = EspModem::new(&mut serial)?;
+    let mut modem = EspModem::new(&mut serial);
 
     match modem.setup_data_mode() {
         Err(x) => log::error!("Error: {:?}", x),

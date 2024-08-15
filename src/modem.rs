@@ -1,49 +1,16 @@
 use at_commands::{builder::CommandBuilder, parser::CommandParser};
 use atat::{self, AtatCmd};
 use core::{borrow::BorrowMut, ffi::c_void, marker::PhantomData};
-use esp_idf_hal::{delay::TickType, uart::UartDriver};
+use esp_idf_hal::{
+    delay::{TickType, BLOCK},
+    uart::{UartDriver, UartTxDriver},
+};
 
 use crate::{
     handle::RawHandle,
-    netif::{EspNetif, NetifStack},
+    netif::{EspNetif, EspNetifDriver, NetifStack},
     sys::*,
 };
-
-pub struct PppNetif<'d, T>
-where
-    T: BorrowMut<UartDriver<'d>>,
-{
-    serial: T,
-    base: esp_netif_driver_base_t,
-    netif: EspNetif,
-    _d: PhantomData<&'d ()>,
-}
-
-impl<'d, T> PppNetif<'d, T>
-where
-    T: BorrowMut<UartDriver<'d>>,
-{
-    pub fn new(serial: T) -> Result<Self, EspError> {
-        let netif = EspNetif::new(NetifStack::Ppp)?;
-        let mut base = esp_netif_driver_base_t {
-            netif: netif.handle(),
-            post_attach: Some(Self::post_attach),
-        };
-        let base_ptr: *mut c_void = &mut base as *mut _ as *mut c_void;
-        esp!(unsafe { esp_netif_attach(netif.handle(), base_ptr) })?;
-        Ok(Self {
-            serial,
-            netif,
-            base,
-            _d: PhantomData,
-        })
-    }
-
-    unsafe extern "C" fn post_attach(netif: *mut esp_netif_obj, args: *mut c_void) -> i32 {
-        let driver= unsafe{std::ptr::slice_from_raw_parts_mut(args, size_of::<ppp_netif_driver())}
-        let ifconfig = esp_netif_driver_ifconfig_t{handle}
-    }
-}
 
 pub struct EspModem<'d, T>
 where
@@ -56,7 +23,7 @@ where
 
 impl<'d, T> EspModem<'d, T>
 where
-    T: BorrowMut<UartDriver<'d>>,
+    T: BorrowMut<UartDriver<'d>> + Send,
 {
     pub fn new(serial: T) -> Self {
         Self {
@@ -107,8 +74,24 @@ where
         self.set_data_mode()?;
 
         // now in ppp mode.
-        // self.netif.
+        let netif = EspNetif::new(NetifStack::Ppp)?;
 
+        let (mut tx, rx) = self.serial.borrow_mut().split();
+        let driver = EspNetifDriver::new_ppp(netif, move |x| Self::tx(&mut tx, x))?;
+
+        let mut buff = [0u8; 64];
+        loop {
+            let len = rx.read(&mut buff, BLOCK)?;
+            if len > 0 {
+                driver.rx(&buff)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn tx(writer: &mut UartTxDriver, data: &[u8]) -> Result<(), EspError> {
+        writer.write(data)?;
         Ok(())
     }
 
@@ -142,7 +125,7 @@ where
         let cmd = CommandBuilder::create_execute(&mut buff, false)
             .named("ATZ0")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         self.serial.borrow_mut().write(cmd)?;
         let len = self
             .serial
@@ -153,7 +136,7 @@ where
             .expect_identifier(b"ATZ0\r")
             .expect_identifier(b"\r\nOK\r\n")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         Ok(())
     }
 
@@ -162,7 +145,7 @@ where
         let cmd = CommandBuilder::create_execute(&mut buff, false)
             .named(format!("ATE{}", i32::from(echo)))
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         self.serial.borrow_mut().write(cmd)?;
         let len = self
             .serial
@@ -174,7 +157,7 @@ where
             .expect_identifier(b"ATE0\r")
             .expect_identifier(b"\r\nOK\r\n")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         Ok(())
     }
 
@@ -183,7 +166,7 @@ where
         let cmd = CommandBuilder::create_query(&mut buff, true)
             .named("+CGREG")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         self.serial.borrow_mut().write(cmd)?;
         let len = self
             .serial
@@ -199,7 +182,7 @@ where
             .expect_optional_int_parameter()
             .expect_identifier(b"\r\n\r\nOK\r\n")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         log::info!(
             "CGREG: n: {}stat: {}, lac: {:?}, ci: {:?} ",
             n,
@@ -216,9 +199,9 @@ where
             .named("+CGDCONT")
             .with_int_parameter(1) // context id
             .with_string_parameter("IP") // pdp type
-            .with_string_parameter("internet")
+            .with_string_parameter("flowlive.net") // apn
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         self.serial.borrow_mut().write(cmd)?;
         let len = self
             .serial
@@ -229,8 +212,7 @@ where
         CommandParser::parse(&buff[..len])
             .expect_identifier(b"\r\nOK\r\n")
             .finish()
-            .unwrap();
-
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         Ok(())
     }
 
@@ -239,7 +221,7 @@ where
         let cmd = CommandBuilder::create_execute(&mut buff, false)
             .named("ATD*99#")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         self.serial.borrow_mut().write(cmd)?;
         let len = self
             .serial
@@ -252,7 +234,7 @@ where
             .expect_optional_raw_string()
             .expect_identifier(b"\r\n")
             .finish()
-            .unwrap();
+            .map_err(|_w| EspError::from_infallible::<ESP_FAIL>())?;
         log::info!("connect {:?}", connect_parm);
         Ok(())
     }
