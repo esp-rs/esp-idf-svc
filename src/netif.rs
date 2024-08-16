@@ -873,7 +873,7 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::Borrow;
-    use core::marker::PhantomData;
+    use log::info;
 
     use crate::handle::RawHandle;
     use crate::sys::*;
@@ -885,7 +885,6 @@ mod driver {
         T: Borrow<EspNetif>,
     {
         inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
-        _d: PhantomData<&'d ()>,
     }
 
     impl<'d, T> EspNetifDriver<'d, T>
@@ -1002,10 +1001,7 @@ mod driver {
                 );
             }
 
-            Ok(Self {
-                inner,
-                _d: PhantomData,
-            })
+            Ok(Self { inner })
         }
 
         /// Ingest a packet into the driver.
@@ -1071,9 +1067,10 @@ mod driver {
         got_ip_event_id: Option<i32>,
         lost_ip_event_id: Option<i32>,
         #[allow(clippy::type_complexity)]
-        tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError> + 'd>,
+        tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError> + Send + 'd>,
         #[allow(clippy::type_complexity)]
-        post_attach_cfg: alloc::boxed::Box<dyn FnMut(&EspNetif) -> Result<(), EspError>>,
+        post_attach_cfg:
+            alloc::boxed::Box<dyn FnMut(&EspNetif) -> Result<(), EspError> + Send + 'd>,
     }
 
     impl<'d, T> EspNetifDriverInner<'d, T>
@@ -1086,6 +1083,8 @@ mod driver {
                 handle: self as *mut _ as *mut core::ffi::c_void,
                 ..Default::default()
             };
+
+            info!("Post attach ifconfig: {:?}", driver_ifconfig);
 
             // d->base.netif = esp_netif; TODO: This is weird; the netif in base is already set on constructor?
 
@@ -1114,7 +1113,7 @@ mod driver {
 
             // TODO: Might not be necessary, but if I remember correctly, the Netif API
             // wanted that _we_ free the buffer; in any case needs to be compared with the C ESP Modem code
-            free(buffer);
+            // free(buffer);
 
             result
         }
@@ -1142,6 +1141,8 @@ mod driver {
             ppp_error_event_enabled: false, // Don't provide cfg getters so we enable both events
             ..Default::default()
         };
+
+        info!("Netif config: {:?}", ppp_config);
 
         #[cfg(not(esp_idf_version_major = "4"))]
         esp!(unsafe { esp_netif_ppp_get_params(netif.handle(), &mut ppp_config) })?;
