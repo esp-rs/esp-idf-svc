@@ -873,18 +873,32 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::Borrow;
+    use core::ffi;
     use log::info;
+    use std::sync::Arc;
 
+    use crate::eventloop::{
+        EspEvent, EspEventDeserializer, EspEventLoop, EspEventSource, EspSubscription,
+        EspSystemEventLoop, System,
+    };
     use crate::handle::RawHandle;
+    use crate::private::mutex;
     use crate::sys::*;
 
-    use super::EspNetif;
+    use super::{EspNetif, IpEvent};
+
+    pub enum DriverStatus {
+        Connected,
+        Disconnected,
+    }
 
     pub struct EspNetifDriver<'d, T>
     where
         T: Borrow<EspNetif>,
     {
         inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
+        status: Arc<mutex::Mutex<DriverStatus>>,
+        _subscription: EspSubscription<'static, System>,
     }
 
     impl<'d, T> EspNetifDriver<'d, T>
@@ -898,13 +912,42 @@ mod driver {
         ///   `EspNetif` instance is expected to be a PPP netif.
         /// * The `tx` callback implementation is simply expected to write the
         ///   PPP packet into e.g. UART
+        ///
+        ///  /// # Safety
+        ///
+        /// This method - in contrast to method `new_ppp` - allows the user to pass
+        /// non-static callbacks/closures. This enables users to borrow
+        /// - in the closure - variables that live on the stack - or more generally - in the same
+        ///   scope where the service is created.
+        ///
+        /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+        /// as that would immediately lead to an UB (crash).
+        /// Also note that forgetting the service might happen with `Rc` and `Arc`
+        /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+        ///
+        /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+        /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+        /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+        ///
+        /// The destructor of the service takes care - prior to the service being dropped and e.g.
+        /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+        /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+        /// and invalid references are left dangling.
+        ///
+        /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+        /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
         #[cfg(esp_idf_lwip_ppp_support)]
-        pub fn new_ppp<F>(netif: T, tx: F) -> Result<Self, EspError>
+        pub unsafe fn new_nonstatic_ppp<F>(
+            netif: T,
+            sysloop: EspSystemEventLoop,
+            tx: F,
+        ) -> Result<Self, EspError>
         where
             F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
         {
             Self::new(
                 netif,
+                sysloop,
                 Some(ip_event_t_IP_EVENT_PPP_GOT_IP as _),
                 Some(ip_event_t_IP_EVENT_PPP_LOST_IP as _),
                 ppp_config,
@@ -923,12 +966,39 @@ mod driver {
         // TODO: SLIP support seems experimental and incomplete.
         // For one, `_g_esp_netif_netstack_default_slip` seems not to be there (anymore?).
         // Shall we remove SLIP support?
+        /// /// # Safety
+        ///
+        /// This method - in contrast to method `new_slip` - allows the user to pass
+        /// non-static callbacks/closures. This enables users to borrow
+        /// - in the closure - variables that live on the stack - or more generally - in the same
+        ///   scope where the service is created.
+        ///
+        /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+        /// as that would immediately lead to an UB (crash).
+        /// Also note that forgetting the service might happen with `Rc` and `Arc`
+        /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+        ///
+        /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+        /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+        /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+        ///
+        /// The destructor of the service takes care - prior to the service being dropped and e.g.
+        /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+        /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+        /// and invalid references are left dangling.
+        ///
+        /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+        /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
         #[cfg(esp_idf_lwip_slip_support)]
-        pub fn new_slip<F>(netif: T, tx: F) -> Result<Self, EspError>
+        pub fn new_nonstatic_slip<F>(
+            netif: T,
+            sysloop: EspSystemEventLoop,
+            tx: F,
+        ) -> Result<Self, EspError>
         where
             F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
         {
-            Self::new(netif, None, None, |_| Ok(()), tx)
+            Self::new(netif, sysloop, None, None, |_| Ok(()), tx)
         }
 
         /// Create a new netif driver around the provided `EspNetif` instance
@@ -945,6 +1015,7 @@ mod driver {
         ///   post-attach configuration
         pub fn new<F, P>(
             netif: T,
+            sysloop: EspSystemEventLoop,
             got_ip_event_id: Option<i32>,
             lost_ip_event_id: Option<i32>,
             post_attach_cfg: P,
@@ -968,27 +1039,30 @@ mod driver {
 
             let inner_ptr = inner.as_mut() as *mut _ as *mut core::ffi::c_void;
 
-            if let Some(got_ip_event_id) = got_ip_event_id {
-                esp!(unsafe {
-                    esp_event_handler_register(
-                        IP_EVENT,
-                        got_ip_event_id,
-                        Some(esp_netif_action_connected),
-                        inner.netif.borrow().handle() as *mut core::ffi::c_void,
-                    )
-                })?;
-            }
+            // if let Some(got_ip_event_id) = got_ip_event_id {
+            //     esp!(unsafe {
+            //         esp_event_handler_register(
+            //             IP_EVENT,
+            //             got_ip_event_id,
+            //             Some(esp_netif_action_connected),
+            //             inner.netif.borrow().handle() as *mut core::ffi::c_void,
+            //         )
+            //     })?;
+            // }
 
-            if let Some(lost_ip_event_id) = lost_ip_event_id {
-                esp!(unsafe {
-                    esp_event_handler_register(
-                        IP_EVENT,
-                        lost_ip_event_id,
-                        Some(esp_netif_action_disconnected),
-                        inner.netif.borrow().handle() as *mut core::ffi::c_void,
-                    )
-                })?;
-            }
+            // if let Some(lost_ip_event_id) = lost_ip_event_id {
+            //     esp!(unsafe {
+            //         esp_event_handler_register(
+            //             IP_EVENT,
+            //             lost_ip_event_id,
+            //             Some(esp_netif_action_disconnected),
+            //             inner.netif.borrow().handle() as *mut core::ffi::c_void,
+            //         )
+            //     })?;
+            // }
+
+            let (status, subscription) =
+                Self::subscribe(&sysloop, got_ip_event_id, lost_ip_event_id)?;
 
             esp!(unsafe { esp_netif_attach(inner.netif.borrow().handle(), inner_ptr) })?;
 
@@ -1001,7 +1075,51 @@ mod driver {
                 );
             }
 
-            Ok(Self { inner })
+            Ok(Self {
+                inner,
+                status,
+                _subscription: subscription,
+            })
+        }
+
+        fn subscribe(
+            sysloop: &EspEventLoop<System>,
+            got_ip_event_id: Option<i32>,
+            lost_ip_event_id: Option<i32>,
+        ) -> Result<
+            (
+                Arc<mutex::Mutex<DriverStatus>>,
+                EspSubscription<'static, System>,
+            ),
+            EspError,
+        > {
+            let status = Arc::new(mutex::Mutex::new(DriverStatus::Disconnected));
+
+            let s_status = status.clone();
+
+            let subscription = sysloop.subscribe::<EspEvent<'d>, _>(move |event| {
+                let mut guard = s_status.lock();
+
+                let event_id = event.event_id;
+
+                match got_ip_event_id {
+                    Some(x) => {
+                        if x == event_id {
+                            *guard = DriverStatus::Connected
+                        }
+                    }
+                    _ => (),
+                }
+                match lost_ip_event_id {
+                    Some(x) => {
+                        if x == event_id {
+                            *guard = DriverStatus::Disconnected
+                        }
+                    }
+                    _ => (),
+                }
+            })?;
+            Ok((status, subscription))
         }
 
         /// Ingest a packet into the driver.
@@ -1154,6 +1272,31 @@ mod driver {
 
         Ok(())
     }
+
+    // #[derive(Copy, Clone, Debug)]
+    // pub enum DriverEvent {
+    //     GotIp,
+    //     LostIp,
+    // }
+    // pub struct DriverEvent(i32);
+
+    // unsafe impl EspEventSource for DriverEvent {
+    //     fn source() -> Option<&'static core::ffi::CStr> {
+    //         Some(unsafe { ffi::CStr::from_ptr(IP_EVENT) })
+    //     }
+    // }
+
+    // impl EspEventDeserializer for DriverEvent {
+    //     type Data<'a> = DriverEvent;
+    //     fn deserialize<'a>(data: &crate::eventloop::EspEvent<'a>) -> Self::Data<'a> {
+    //         DriverEvent(data.event_id)
+    //         // match event_id {
+    //         //     ip_event_t_IP_EVENT_PPP_GOT_IP => DriverEvent::GotIp,
+    //         //     ip_event_t_IP_EVENT_PPP_LOST_IP => DriverEvent::LostIp,
+    //         //     _ => panic!("Unknown event ID: {}", event_id),
+    //         // }
+    //     }
+    // }
 }
 
 pub mod asynch {

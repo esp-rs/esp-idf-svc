@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
     log::error!("Hello");
     let mut modem = EspModem::new(&mut serial);
 
-    match modem.setup_data_mode() {
+    match modem.setup_data_mode(sys_loop) {
         Err(x) => log::error!("Error: {:?}", x),
         Ok(x) => (),
     }

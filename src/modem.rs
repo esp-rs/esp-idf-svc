@@ -8,6 +8,7 @@ use esp_idf_hal::{
 };
 
 use crate::{
+    eventloop::EspSystemEventLoop,
     handle::RawHandle,
     netif::{EspNetif, EspNetifDriver, NetifStack},
     sys::*,
@@ -60,7 +61,7 @@ where
         cmd.parse(Ok(&buff[..len]))
     }
 
-    pub fn setup_data_mode(&mut self) -> Result<(), EspError> {
+    pub fn setup_data_mode(&mut self, sysloop: EspSystemEventLoop) -> Result<(), EspError> {
         self.reset()?;
         //disable echo
         self.set_echo(false)?;
@@ -79,7 +80,7 @@ where
 
         // now in ppp mode.
         let netif = EspNetif::new(NetifStack::Ppp)?;
-        /// subscribe to user event
+        // subscribe to user event
         esp!(unsafe {
             esp_event_handler_register(
                 IP_EVENT,
@@ -97,7 +98,9 @@ where
             )
         })?;
         let (mut tx, rx) = self.serial.borrow_mut().split();
-        let driver = EspNetifDriver::new_ppp(&netif, move |x| Self::tx(&mut tx, x))?;
+        let driver = unsafe {
+            EspNetifDriver::new_nonstatic_ppp(&netif, sysloop, move |x| Self::tx(&mut tx, x))?
+        };
 
         let mut buff = [0u8; 64];
         loop {
