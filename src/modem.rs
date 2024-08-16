@@ -122,9 +122,14 @@ where
         info!("Got event id: {}", event_id);
 
         if event_id == ip_event_t_IP_EVENT_PPP_GOT_IP {
-            let dns_info = esp_netif_dns_info_t::default();
-            let event_data = { (event_data as *const ip_event_got_ip_t) };
+            let mut dns_info = esp_netif_dns_info_t::default();
+            let event_data = unsafe { (event_data as *const ip_event_got_ip_t).as_ref() }.unwrap();
+            info!(" ip_info = {:?} ", event_data.ip_info);
             info!("modem connected to ppp server, info: {:?}", event_data);
+
+            let netif = event_data.esp_netif;
+            esp!(unsafe { esp_netif_get_dns_info(netif, 0, &mut dns_info) }).unwrap();
+            info!(" dns_info = {:?} ", unsafe { dns_info.ip.u_addr.ip4.addr });
         } else if event_id == ip_event_t_IP_EVENT_PPP_LOST_IP {
             info!("Modem disconnected from ppp server");
         }
