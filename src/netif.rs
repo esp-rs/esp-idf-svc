@@ -882,6 +882,7 @@ mod driver {
         EspSystemEventLoop, System,
     };
     use crate::handle::RawHandle;
+    use crate::netif::DhcpIpAssignment;
     use crate::private::mutex;
     use crate::sys::*;
 
@@ -1097,25 +1098,15 @@ mod driver {
 
             let s_status = status.clone();
 
-            let subscription = sysloop.subscribe::<EspEvent<'d>, _>(move |event| {
+            let subscription = sysloop.subscribe::<IpEvent, _>(move |event| {
                 let mut guard = s_status.lock();
 
-                let event_id = event.event_id;
-
-                match got_ip_event_id {
-                    Some(x) => {
-                        if x == event_id {
-                            *guard = DriverStatus::Connected
-                        }
+                match event {
+                    IpEvent::DhcpIpAssigned(x) => {
+                        info!("ip info = {:?}", x.ip_info());
+                        *guard = DriverStatus::Connected
                     }
-                    _ => (),
-                }
-                match lost_ip_event_id {
-                    Some(x) => {
-                        if x == event_id {
-                            *guard = DriverStatus::Disconnected
-                        }
-                    }
+                    IpEvent::DhcpIpDeassigned(x) => *guard = DriverStatus::Disconnected,
                     _ => (),
                 }
             })?;
