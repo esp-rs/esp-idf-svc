@@ -106,8 +106,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
-    // If instead of creating a new network you want to serve the page 
-    // on your local network, you can replace this configuration with 
+    // If instead of creating a new network you want to serve the page
+    // on your local network, you can replace this configuration with
     // the client configuration from the http_client example.
     let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
         ssid: SSID.try_into().unwrap(),
@@ -125,7 +125,7 @@ fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()>
 
     // If using a client configuration you need
     // to connect to the network with:
-    // 
+    //
     //  ```
     //  wifi.connect()?;
     //  info!("Wifi connected");
