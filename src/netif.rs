@@ -873,33 +873,56 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::Borrow;
-    use core::ffi;
     use log::info;
-    use std::sync::Arc;
 
-    use crate::eventloop::{
-        EspEvent, EspEventDeserializer, EspEventLoop, EspEventSource, EspSubscription,
-        EspSystemEventLoop, System,
-    };
     use crate::handle::RawHandle;
-    use crate::netif::DhcpIpAssignment;
-    use crate::private::mutex;
     use crate::sys::*;
 
-    use super::{EspNetif, IpEvent};
-
-    pub enum DriverStatus {
-        Connected,
-        Disconnected,
-    }
+    use super::EspNetif;
 
     pub struct EspNetifDriver<'d, T>
     where
         T: Borrow<EspNetif>,
     {
         inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
-        status: Arc<mutex::Mutex<DriverStatus>>,
-        _subscription: EspSubscription<'static, System>,
+    }
+
+    impl<T> EspNetifDriver<'static, T>
+    where
+        T: Borrow<EspNetif>,
+    {
+        /// Create a new PPP netif driver around the provided `EspNetif` instance
+        /// and the TX callback that the driver would call when it wants to ingest
+        /// a packet into the underlying transport:
+        /// * The transport will be a PPP transport, and therefore - the supplied
+        ///   `EspNetif` instance is expected to be a PPP netif.
+        /// * The `tx` callback implementation is simply expected to write the
+        ///   PPP packet into e.g. UART
+        pub fn new_ppp<F>(netif: T, tx: F) -> Result<Self, EspError>
+        where
+            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
+        {
+            unsafe { Self::new_nonstatic_ppp(netif, tx) }
+        }
+
+        /// Create a new SLIP netif driver around the provided `EspNetif` instance
+        /// and the TX callback that the driver would call when it wants to ingest
+        /// a packet into the underlying transport:
+        /// * The transport will be a SLIP transport, and therefore - the supplied
+        ///   `EspNetif` instance is expected to be a SLIP netif.
+        /// * The `tx` callback implementation is simply expected to write the
+        ///   SLIP packet into e.g. UART
+        ///
+        // TODO: SLIP support seems experimental and incomplete.
+        // For one, `_g_esp_netif_netstack_default_slip` seems not to be there (anymore?).
+        // Shall we remove SLIP support?
+        #[cfg(esp_idf_lwip_slip_support)]
+        pub fn new_slip<F>(netif: T, tx: F) -> Result<Self, EspError>
+        where
+            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
+        {
+            unsafe { Self::new_nonstatic_slip(netif, tx) }
+        }
     }
 
     impl<'d, T> EspNetifDriver<'d, T>
@@ -914,7 +937,7 @@ mod driver {
         /// * The `tx` callback implementation is simply expected to write the
         ///   PPP packet into e.g. UART
         ///
-        ///  /// # Safety
+        ///  # Safety
         ///
         /// This method - in contrast to method `new_ppp` - allows the user to pass
         /// non-static callbacks/closures. This enables users to borrow
@@ -938,17 +961,12 @@ mod driver {
         /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
         /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
         #[cfg(esp_idf_lwip_ppp_support)]
-        pub unsafe fn new_nonstatic_ppp<F>(
-            netif: T,
-            sysloop: EspSystemEventLoop,
-            tx: F,
-        ) -> Result<Self, EspError>
+        pub unsafe fn new_nonstatic_ppp<F>(netif: T, tx: F) -> Result<Self, EspError>
         where
             F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
         {
             Self::new(
                 netif,
-                sysloop,
                 Some(ip_event_t_IP_EVENT_PPP_GOT_IP as _),
                 Some(ip_event_t_IP_EVENT_PPP_LOST_IP as _),
                 ppp_config,
@@ -967,7 +985,7 @@ mod driver {
         // TODO: SLIP support seems experimental and incomplete.
         // For one, `_g_esp_netif_netstack_default_slip` seems not to be there (anymore?).
         // Shall we remove SLIP support?
-        /// /// # Safety
+        /// # Safety
         ///
         /// This method - in contrast to method `new_slip` - allows the user to pass
         /// non-static callbacks/closures. This enables users to borrow
@@ -991,15 +1009,11 @@ mod driver {
         /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
         /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
         #[cfg(esp_idf_lwip_slip_support)]
-        pub fn new_nonstatic_slip<F>(
-            netif: T,
-            sysloop: EspSystemEventLoop,
-            tx: F,
-        ) -> Result<Self, EspError>
+        pub fn new_nonstatic_slip<'d, F>(netif: T, tx: F) -> Result<Self, EspError>
         where
-            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
+            F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
         {
-            Self::new(netif, sysloop, None, None, |_| Ok(()), tx)
+            Self::new(netif, None, None, |_| Ok(()), tx)
         }
 
         /// Create a new netif driver around the provided `EspNetif` instance
@@ -1016,7 +1030,6 @@ mod driver {
         ///   post-attach configuration
         pub fn new<F, P>(
             netif: T,
-            sysloop: EspSystemEventLoop,
             got_ip_event_id: Option<i32>,
             lost_ip_event_id: Option<i32>,
             post_attach_cfg: P,
@@ -1032,38 +1045,34 @@ mod driver {
                     post_attach: Some(EspNetifDriverInner::<T>::raw_post_attach),
                 },
                 netif,
-                got_ip_event_id,
-                lost_ip_event_id,
                 post_attach_cfg: alloc::boxed::Box::new(post_attach_cfg),
                 tx: alloc::boxed::Box::new(tx),
             });
 
             let inner_ptr = inner.as_mut() as *mut _ as *mut core::ffi::c_void;
 
-            // if let Some(got_ip_event_id) = got_ip_event_id {
-            //     esp!(unsafe {
-            //         esp_event_handler_register(
-            //             IP_EVENT,
-            //             got_ip_event_id,
-            //             Some(esp_netif_action_connected),
-            //             inner.netif.borrow().handle() as *mut core::ffi::c_void,
-            //         )
-            //     })?;
-            // }
+            // TODO: use the event loop subscribe, these inner handlers do way more than expected
+            if let Some(got_ip_event_id) = got_ip_event_id {
+                esp!(unsafe {
+                    esp_event_handler_register(
+                        IP_EVENT,
+                        got_ip_event_id,
+                        Some(esp_netif_action_connected),
+                        inner.netif.borrow().handle() as *mut core::ffi::c_void,
+                    )
+                })?;
+            }
 
-            // if let Some(lost_ip_event_id) = lost_ip_event_id {
-            //     esp!(unsafe {
-            //         esp_event_handler_register(
-            //             IP_EVENT,
-            //             lost_ip_event_id,
-            //             Some(esp_netif_action_disconnected),
-            //             inner.netif.borrow().handle() as *mut core::ffi::c_void,
-            //         )
-            //     })?;
-            // }
-
-            let (status, subscription) =
-                Self::subscribe(&sysloop, got_ip_event_id, lost_ip_event_id)?;
+            if let Some(lost_ip_event_id) = lost_ip_event_id {
+                esp!(unsafe {
+                    esp_event_handler_register(
+                        IP_EVENT,
+                        lost_ip_event_id,
+                        Some(esp_netif_action_disconnected),
+                        inner.netif.borrow().handle() as *mut core::ffi::c_void,
+                    )
+                })?;
+            }
 
             esp!(unsafe { esp_netif_attach(inner.netif.borrow().handle(), inner_ptr) })?;
 
@@ -1076,41 +1085,7 @@ mod driver {
                 );
             }
 
-            Ok(Self {
-                inner,
-                status,
-                _subscription: subscription,
-            })
-        }
-
-        fn subscribe(
-            sysloop: &EspEventLoop<System>,
-            got_ip_event_id: Option<i32>,
-            lost_ip_event_id: Option<i32>,
-        ) -> Result<
-            (
-                Arc<mutex::Mutex<DriverStatus>>,
-                EspSubscription<'static, System>,
-            ),
-            EspError,
-        > {
-            let status = Arc::new(mutex::Mutex::new(DriverStatus::Disconnected));
-
-            let s_status = status.clone();
-
-            let subscription = sysloop.subscribe::<IpEvent, _>(move |event| {
-                let mut guard = s_status.lock();
-
-                match event {
-                    IpEvent::DhcpIpAssigned(x) => {
-                        info!("ip info = {:?}", x.ip_info());
-                        *guard = DriverStatus::Connected
-                    }
-                    IpEvent::DhcpIpDeassigned(x) => *guard = DriverStatus::Disconnected,
-                    _ => (),
-                }
-            })?;
-            Ok((status, subscription))
+            Ok(Self { inner })
         }
 
         /// Ingest a packet into the driver.
@@ -1125,6 +1100,10 @@ mod driver {
                     core::ptr::null_mut(),
                 )
             })
+        }
+
+        pub fn is_connected(&self) -> bool {
+            unsafe { esp_netif_is_netif_up(self.inner.netif.borrow().handle()) }
         }
     }
 
@@ -1141,28 +1120,6 @@ mod driver {
                     core::ptr::null_mut(),
                 );
             }
-
-            if let Some(got_ip_event_id) = self.inner.got_ip_event_id {
-                esp!(unsafe {
-                    esp_event_handler_unregister(
-                        IP_EVENT,
-                        got_ip_event_id,
-                        Some(esp_netif_action_connected),
-                    )
-                })
-                .unwrap();
-            }
-
-            if let Some(lost_ip_event_id) = self.inner.lost_ip_event_id {
-                esp!(unsafe {
-                    esp_event_handler_unregister(
-                        IP_EVENT,
-                        lost_ip_event_id,
-                        Some(esp_netif_action_disconnected),
-                    )
-                })
-                .unwrap();
-            }
         }
     }
 
@@ -1173,8 +1130,6 @@ mod driver {
     {
         base: esp_netif_driver_base_t,
         netif: T,
-        got_ip_event_id: Option<i32>,
-        lost_ip_event_id: Option<i32>,
         #[allow(clippy::type_complexity)]
         tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError> + Send + 'd>,
         #[allow(clippy::type_complexity)]
@@ -1263,31 +1218,6 @@ mod driver {
 
         Ok(())
     }
-
-    // #[derive(Copy, Clone, Debug)]
-    // pub enum DriverEvent {
-    //     GotIp,
-    //     LostIp,
-    // }
-    // pub struct DriverEvent(i32);
-
-    // unsafe impl EspEventSource for DriverEvent {
-    //     fn source() -> Option<&'static core::ffi::CStr> {
-    //         Some(unsafe { ffi::CStr::from_ptr(IP_EVENT) })
-    //     }
-    // }
-
-    // impl EspEventDeserializer for DriverEvent {
-    //     type Data<'a> = DriverEvent;
-    //     fn deserialize<'a>(data: &crate::eventloop::EspEvent<'a>) -> Self::Data<'a> {
-    //         DriverEvent(data.event_id)
-    //         // match event_id {
-    //         //     ip_event_t_IP_EVENT_PPP_GOT_IP => DriverEvent::GotIp,
-    //         //     ip_event_t_IP_EVENT_PPP_LOST_IP => DriverEvent::LostIp,
-    //         //     _ => panic!("Unknown event ID: {}", event_id),
-    //         // }
-    //     }
-    // }
 }
 
 pub mod asynch {
