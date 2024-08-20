@@ -1,13 +1,18 @@
-use core::{borrow::BorrowMut, marker::PhantomData};
+use crate::handle::RawHandle;
+use core::{borrow::BorrowMut, ffi, marker::PhantomData};
 use esp_idf_hal::{
     delay::BLOCK,
     uart::{UartDriver, UartTxDriver},
 };
+use std::sync::Arc;
 
 use crate::{
-    eventloop::EspSystemEventLoop,
-    handle::RawHandle,
+    eventloop::{
+        EspEventDeserializer, EspEventLoop, EspEventSource, EspSubscription, EspSystemEventLoop,
+        System,
+    },
     netif::{EspNetif, EspNetifDriver, NetifStack},
+    private::mutex,
     sys::*,
 };
 
@@ -16,9 +21,9 @@ where
     T: BorrowMut<UartDriver<'d>>,
 {
     serial: T,
-    sysloop: EspSystemEventLoop,
+    status: Arc<mutex::Mutex<ModemDriverStatus>>,
+    _subscription: EspSubscription<'static, System>,
     netif: EspNetif,
-    running: bool,
     _d: PhantomData<&'d ()>,
 }
 
@@ -27,17 +32,21 @@ where
     T: BorrowMut<UartDriver<'d>> + Send,
 {
     pub fn new(serial: T, sysloop: EspSystemEventLoop) -> Result<Self, EspError> {
+        let (status, subscription) = Self::subscribe(&sysloop)?;
+
         Ok(Self {
             serial,
-            sysloop,
+            status,
+            _subscription: subscription,
             netif: EspNetif::new(NetifStack::Ppp)?,
-            running: false,
             _d: PhantomData,
         })
     }
 
+    /// Run the modem network interface. Blocks until the PPP encounters an error.
     pub fn run(&mut self) -> Result<(), EspError> {
-        self.running = true;
+        self.status.lock().running = true;
+
         // now in ppp mode.
         // let netif = EspNetif::new(NetifStack::Ppp)?;
 
@@ -65,7 +74,7 @@ where
 
         let mut buff = [0u8; 64];
         loop {
-            if !self.running {
+            if !self.status.lock().running {
                 break;
             }
             let len = rx.read(&mut buff, BLOCK)?;
@@ -77,15 +86,89 @@ where
         Ok(())
     }
 
-    pub fn is_connected(&self) -> Result<bool, EspError> {
-        self.netif.is_up()
+    /// Returns the current [`ModemPPPError`] status, if any.
+    pub fn get_error(&self) -> Option<ModemPPPError> {
+        self.status.lock().error.clone()
     }
 
+    /// Returns the current [`ModemPhaseStatus`]
+    pub fn get_phase_status(&self) -> ModemPhaseStatus {
+        self.status.lock().phase.clone()
+    }
+
+    /// Returns the underlying [`EspNetif`]
+    pub fn netif(&self) -> &EspNetif {
+        &self.netif
+    }
+
+    /// Returns the underlying [`EspNetif`], as mutable
+    pub fn netif_mut(&mut self) -> &mut EspNetif {
+        &mut self.netif
+    }
+
+    /// Callback given to the LWIP API to write data to the PPP server.
     fn tx(writer: &mut UartTxDriver, data: &[u8]) -> Result<(), EspError> {
         esp_idf_hal::io::Write::write_all(writer, data).map_err(|w| w.0)?;
-        // writer.write_all(data).map_err(|w| w.0)?;
-        // writer.write(data)?;
+
         Ok(())
+    }
+
+    fn subscribe(
+        sysloop: &EspEventLoop<System>,
+    ) -> Result<
+        (
+            Arc<mutex::Mutex<ModemDriverStatus>>,
+            EspSubscription<'static, System>,
+        ),
+        EspError,
+    > {
+        let status = Arc::new(mutex::Mutex::new(ModemDriverStatus {
+            error: None,
+            phase: ModemPhaseStatus::Disconnect,
+            running: false,
+        }));
+
+        let s_status = status.clone();
+
+        let subscription = sysloop.subscribe::<ModemEvent, _>(move |event| {
+            let mut guard = s_status.lock();
+            log::info!("Got event PPP: {:?}", event);
+            match event {
+                ModemEvent::ErrorNone => guard.error = None,
+                ModemEvent::ErrorParameter => guard.error = Some(ModemPPPError::Parameter),
+                ModemEvent::ErrorOpen => guard.error = Some(ModemPPPError::Open),
+                ModemEvent::ErrorDevice => guard.error = Some(ModemPPPError::Device),
+                ModemEvent::ErrorAlloc => guard.error = Some(ModemPPPError::Alloc),
+                ModemEvent::ErrorUser => guard.error = Some(ModemPPPError::User),
+                ModemEvent::ErrorDisconnect => guard.error = Some(ModemPPPError::Disconnect),
+                ModemEvent::ErrorAuthFail => guard.error = Some(ModemPPPError::AuthFail),
+                ModemEvent::ErrorProtocol => guard.error = Some(ModemPPPError::Protocol),
+                ModemEvent::ErrorPeerDead => guard.error = Some(ModemPPPError::PeerDead),
+                ModemEvent::ErrorIdleTimeout => guard.error = Some(ModemPPPError::IdleTimeout),
+                ModemEvent::ErrorMaxConnectTimeout => {
+                    guard.error = Some(ModemPPPError::MaxConnectTimeout)
+                }
+                ModemEvent::ErrorLoopback => guard.error = Some(ModemPPPError::Loopback),
+                ModemEvent::PhaseDead => guard.phase = ModemPhaseStatus::Dead,
+                ModemEvent::PhaseMaster => guard.phase = ModemPhaseStatus::Master,
+                ModemEvent::PhaseHoldoff => guard.phase = ModemPhaseStatus::Holdoff,
+                ModemEvent::PhaseInitialize => guard.phase = ModemPhaseStatus::Initialize,
+                ModemEvent::PhaseSerialConnection => {
+                    guard.phase = ModemPhaseStatus::SerialConnection
+                }
+                ModemEvent::PhaseDormant => guard.phase = ModemPhaseStatus::Dormant,
+                ModemEvent::PhaseEstablish => guard.phase = ModemPhaseStatus::Establish,
+                ModemEvent::PhaseAuthenticate => guard.phase = ModemPhaseStatus::Authenticate,
+                ModemEvent::PhaseCallback => guard.phase = ModemPhaseStatus::Callback,
+                ModemEvent::PhaseNetwork => guard.phase = ModemPhaseStatus::Network,
+                ModemEvent::PhaseRunning => guard.phase = ModemPhaseStatus::Running,
+                ModemEvent::PhaseTerminate => guard.phase = ModemPhaseStatus::Terminate,
+                ModemEvent::PhaseDisconnect => guard.phase = ModemPhaseStatus::Disconnect,
+                ModemEvent::PhaseFailed => guard.phase = ModemPhaseStatus::Failed,
+            }
+        })?;
+
+        Ok((status, subscription))
     }
 
     fn on_ip_event(event_id: u32, event_data: *mut ::core::ffi::c_void) {
@@ -107,15 +190,15 @@ where
     }
 
     unsafe extern "C" fn raw_on_ip_event(
-        event_handler_arg: *mut ::core::ffi::c_void,
-        event_base: esp_event_base_t,
+        _event_handler_arg: *mut ::core::ffi::c_void,
+        _event_base: esp_event_base_t,
         event_id: i32,
         event_data: *mut ::core::ffi::c_void,
     ) {
         Self::on_ip_event(event_id as _, event_data)
     }
 
-    fn on_ppp_changed(event_id: u32, event_data: *mut ::core::ffi::c_void) {
+    fn on_ppp_changed(event_id: u32, _event_data: *mut ::core::ffi::c_void) {
         use log::info;
         info!("Got event id ppp changed: {}", event_id);
 
@@ -125,8 +208,8 @@ where
     }
 
     unsafe extern "C" fn raw_on_ppp_changed(
-        event_handler_arg: *mut ::core::ffi::c_void,
-        event_base: esp_event_base_t,
+        _event_handler_arg: *mut ::core::ffi::c_void,
+        _event_base: esp_event_base_t,
         event_id: i32,
         event_data: *mut ::core::ffi::c_void,
     ) {
@@ -134,11 +217,166 @@ where
     }
 }
 
-pub mod modem {
+#[derive(Clone, Debug)]
+pub enum ModemPPPError {
+    ///  Invalid parameter.
+    Parameter,
+    ///  Unable to open PPP session.
+    Open,
+    ///  Invalid I/O device for PPP.
+    Device,
+    ///  Unable to allocate resources.
+    Alloc,
+    ///  User interrupt.
+    User,
+    ///  Connection lost.
+    Disconnect,
+    ///  Failed authentication challenge.
+    AuthFail,
+    ///  Failed to meet protocol.
+    Protocol,
+    ///  Connection timeout
+    PeerDead,
+    ///  Idle Timeout
+    IdleTimeout,
+    ///  Max connect time reached
+    MaxConnectTimeout,
+    ///  Loopback detected
+    Loopback,
+}
+#[derive(Clone, Debug)]
+pub enum ModemPhaseStatus {
+    Dead,
+    Master,
+    Holdoff,
+    Initialize,
+    SerialConnection,
+    Dormant,
+    Establish,
+    Authenticate,
+    Callback,
+    Network,
+    Running,
+    Terminate,
+    Disconnect,
+    Failed,
+}
+
+#[derive(Clone, Debug)]
+pub struct ModemDriverStatus {
+    pub error: Option<ModemPPPError>,
+    pub phase: ModemPhaseStatus,
+    pub running: bool,
+}
+
+#[derive(Debug)]
+pub enum ModemEvent {
+    ErrorNone,
+    ErrorParameter,
+    ErrorOpen,
+    ErrorDevice,
+    ErrorAlloc,
+    ErrorUser,
+    ErrorDisconnect,
+    ErrorAuthFail,
+    ErrorProtocol,
+    ErrorPeerDead,
+    ErrorIdleTimeout,
+    ErrorMaxConnectTimeout,
+    ErrorLoopback,
+    PhaseDead,
+    PhaseMaster,
+    PhaseHoldoff,
+    PhaseInitialize,
+    PhaseSerialConnection,
+    PhaseDormant,
+    PhaseEstablish,
+    PhaseAuthenticate,
+    PhaseCallback,
+    PhaseNetwork,
+    PhaseRunning,
+    PhaseTerminate,
+    PhaseDisconnect,
+    PhaseFailed,
+}
+
+unsafe impl EspEventSource for ModemEvent {
+    fn source() -> Option<&'static core::ffi::CStr> {
+        Some(unsafe { ffi::CStr::from_ptr(NETIF_PPP_STATUS) })
+    }
+}
+
+impl EspEventDeserializer for ModemEvent {
+    type Data<'a> = ModemEvent;
+
+    #[allow(non_upper_case_globals, non_snake_case)]
+    fn deserialize<'a>(data: &crate::eventloop::EspEvent<'a>) -> Self::Data<'a> {
+        let event_id = data.event_id as u32;
+
+        match event_id {
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORNONE => ModemEvent::ErrorNone,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPARAM => ModemEvent::ErrorParameter,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERROROPEN => ModemEvent::ErrorOpen,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORDEVICE => ModemEvent::ErrorDevice,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORALLOC => ModemEvent::ErrorAlloc,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORUSER => ModemEvent::ErrorUser,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORCONNECT => ModemEvent::ErrorDisconnect,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORAUTHFAIL => ModemEvent::ErrorAuthFail,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPROTOCOL => ModemEvent::ErrorProtocol,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPEERDEAD => ModemEvent::ErrorPeerDead,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORIDLETIMEOUT => ModemEvent::ErrorIdleTimeout,
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORCONNECTTIME => {
+                ModemEvent::ErrorMaxConnectTimeout
+            }
+            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORLOOPBACK => ModemEvent::ErrorLoopback,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DEAD => ModemEvent::PhaseDead,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_MASTER => ModemEvent::PhaseMaster,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_HOLDOFF => ModemEvent::PhaseHoldoff,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_INITIALIZE => ModemEvent::PhaseInitialize,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_SERIALCONN => {
+                ModemEvent::PhaseSerialConnection
+            }
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DORMANT => ModemEvent::PhaseDormant,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_ESTABLISH => ModemEvent::PhaseEstablish,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_AUTHENTICATE => {
+                ModemEvent::PhaseAuthenticate
+            }
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_CALLBACK => ModemEvent::PhaseCallback,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_NETWORK => ModemEvent::PhaseNetwork,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_RUNNING => ModemEvent::PhaseRunning,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_TERMINATE => ModemEvent::PhaseTerminate,
+            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DISCONNECT => ModemEvent::PhaseDisconnect,
+            esp_netif_ppp_status_event_t_NETIF_PPP_CONNECT_FAILED => ModemEvent::PhaseFailed,
+            _ => panic!("Unknown event ID: {}", event_id),
+        }
+    }
+}
+
+pub mod sim {
+    //! SimModem
+    //!
+    //! Models a modem device with a sim card able to serve as a
+    //! network interface for the host.
     use esp_idf_hal::uart::UartDriver;
 
-    /// Models a modem and enables
+    /// The generic device trait. Implementations of this trait should provide
+    /// relevant AT commands and confirm the modem replies to drive the modem
+    /// into PPPoS (data mode).
+    pub trait SimModem {
+        /// The current mode of the sim modem.
+        fn get_mode(&self) -> &CommunicationMode;
 
+        /// Initialise the remote modem so that it is in PPPoS mode.
+        fn negotiate(&mut self, comm: &mut UartDriver) -> Result<(), ModemError>;
+    }
+
+    /// State of the modem.
+    ///
+    /// In [CommunicationMode::Command] mode, AT commands will function,
+    /// serving to put the modem into [CommunicationMode::Data].
+    ///
+    /// In [CommunicationMode::Data] the modem device will act as a Point-To-Point over Serial (PPPoS)
+    /// server.
     pub enum CommunicationMode {
         Command,
         Data,
@@ -159,14 +397,6 @@ pub mod modem {
 
     impl std::error::Error for ModemError {}
 
-    pub trait SimModem {
-        /// get the current mode of the sim modem
-        fn get_mode(&self) -> &CommunicationMode;
-
-        /// Initialise the remote modem so that it is in PPPoS mode.
-        fn negotiate(&mut self, comm: &mut UartDriver) -> Result<(), ModemError>;
-    }
-
     impl From<usize> for ModemError {
         fn from(value: usize) -> Self {
             ModemError::ATBuild(value)
@@ -180,6 +410,8 @@ pub mod modem {
     }
 
     pub mod sim7600 {
+        //! [super::SimModem] Implementation for the `SIMCOM 76XX` range of
+        //! modems.
 
         use core::time::Duration;
 
@@ -195,162 +427,22 @@ pub mod modem {
             }
         }
 
-        pub fn get_signal_quality<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<(i32, i32), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, true)
-                .named("+CSQ")
-                .finish()?;
-
-            comm.write(cmd).map_err(|_| ModemError::IO)?;
-
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-
-            log::info!("got response {:?}", &buff[..len]);
-
-            // \r\n+CSQ: 19,99\r\n\r\nOK\r\n
-            Ok(CommandParser::parse(&buff[..len])
-                .expect_identifier(b"\r\n+CSQ: ")
-                .expect_int_parameter()
-                .expect_int_parameter()
-                .expect_identifier(b"\r\n\r\nOK\r\n")
-                .finish()?)
-        }
-
-        fn get_iccid<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<heapless::String<22>, ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, true)
-                .named("+CICCID")
-                .finish()?;
-
-            comm.write(cmd).map_err(|_| ModemError::IO)?;
-
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-            log::info!("got response {:?}", &buff[..len]);
-
-            let (ccid,) = CommandParser::parse(&buff[..len])
-                .expect_identifier(b"\r\n+ICCID: ")
-                .expect_raw_string()
-                .expect_identifier(b"\r\n\r\nOK\r\n")
-                .finish()?;
-
-            Ok(heapless::String::try_from(ccid).unwrap())
-        }
-
-        fn reset(comm: &mut UartDriver) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
-                .named("ATZ0")
-                .finish()?;
-            log::info!("cmd={:?}", cmd);
-
-            comm.write(cmd).map_err(|_| ModemError::IO)?;
-            log::info!("wrote all");
-            std::thread::sleep(Duration::from_secs(1));
-
-            let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
-                .map_err(|_| ModemError::IO)?;
-            log::info!("len = {}", len);
-            log::info!("got response {:?}", &buff[..len]);
-            CommandParser::parse(&buff[..len])
-                .expect_identifier(b"ATZ0\r")
-                .expect_identifier(b"\r\nOK\r\n")
-                .finish()?;
-            Ok(())
-        }
-
-        fn set_echo<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-            echo: bool,
-        ) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
-                .named(format!("ATE{}", i32::from(echo)))
-                .finish()?;
-            comm.write_all(cmd).map_err(|_| ModemError::IO)?;
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-            log::info!("got response {:?}", &buff[..len]);
-
-            CommandParser::parse(&buff[..len])
-                .expect_identifier(b"ATE0\r")
-                .expect_identifier(b"\r\nOK\r\n")
-                .finish()?;
-            Ok(())
-        }
-
-        fn read_gprs_registration_status<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<(i32, i32, Option<i32>, Option<i32>), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_query(&mut buff, true)
-                .named("+CGREG")
-                .finish()?;
-            comm.write_all(cmd).map_err(|_| ModemError::IO)?;
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-            log::info!("got response {:?}", &buff[..len]);
-
-            Ok(CommandParser::parse(&buff[..len])
-                .expect_identifier(b"\r\n+CGREG: ")
-                .expect_int_parameter()
-                .expect_int_parameter()
-                .expect_optional_int_parameter()
-                .expect_optional_int_parameter()
-                .expect_identifier(b"\r\n\r\nOK\r\n")
-                .finish()?)
-        }
-
-        fn set_pdp_context<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_set(&mut buff, true)
-                .named("+CGDCONT")
-                .with_int_parameter(1) // context id
-                .with_string_parameter("IP") // pdp type
-                .with_string_parameter("flolive.net") // apn
-                .finish()?;
-            comm.write_all(cmd).map_err(|_| ModemError::IO)?;
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-            log::info!("got response {:?}", &buff[..len]);
-
-            CommandParser::parse(&buff[..len])
-                .expect_identifier(b"\r\nOK\r\n")
-                .finish()?;
-            Ok(())
-        }
-
-        fn set_data_mode<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
-                .named("ATD*99#")
-                .finish()?;
-            comm.write_all(cmd).map_err(|_| ModemError::IO)?;
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
-            log::info!("got response {:?}", &buff[..len]);
-
-            let (connect_parm,) = CommandParser::parse(&buff[..len])
-                .expect_identifier(b"\r\nCONNECT ")
-                .expect_optional_raw_string()
-                .expect_identifier(b"\r\n")
-                .finish()?;
-            log::info!("connect {:?}", connect_parm);
-            Ok(())
+        impl Default for SIM7600 {
+            fn default() -> Self {
+                Self::new()
+            }
         }
 
         impl SimModem for SIM7600 {
             fn negotiate(&mut self, comm: &mut UartDriver) -> Result<(), ModemError> {
                 reset(comm)?;
+
                 //disable echo
                 set_echo(comm, false)?;
 
                 // get iccid
-                get_iccid(comm)?;
+                let iccid = get_iccid(comm)?;
+                log::info!("ICCID = [{}]", iccid);
 
                 // check pdp network reg
                 read_gprs_registration_status(comm)?;
@@ -368,6 +460,156 @@ pub mod modem {
             fn get_mode(&self) -> &CommunicationMode {
                 &self.0
             }
+        }
+
+        pub fn get_signal_quality<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
+            comm: &mut IO,
+        ) -> Result<(i32, i32), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_execute(&mut buff, true)
+                .named("+CSQ")
+                .finish()?;
+
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+
+            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
+
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            // \r\n+CSQ: 19,99\r\n\r\nOK\r\n
+            Ok(CommandParser::parse(&buff[..len])
+                .expect_identifier(b"\r\n+CSQ: ")
+                .expect_int_parameter()
+                .expect_int_parameter()
+                .expect_identifier(b"\r\n\r\nOK\r\n")
+                .finish()?)
+        }
+
+        fn get_iccid(comm: &mut UartDriver) -> Result<heapless::String<22>, ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_execute(&mut buff, true)
+                .named("+CICCID")
+                .finish()?;
+
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            let (ccid,) = CommandParser::parse(&buff[..len])
+                .expect_identifier(b"\r\n+ICCID: ")
+                .expect_raw_string()
+                .expect_identifier(b"\r\n\r\nOK\r\n")
+                .finish()?;
+
+            Ok(heapless::String::try_from(ccid).unwrap())
+        }
+
+        fn reset(comm: &mut UartDriver) -> Result<(), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_execute(&mut buff, false)
+                .named("ATZ0")
+                .finish()?;
+            log::info!("Send Reset");
+
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+            CommandParser::parse(&buff[..len])
+                .expect_identifier(b"ATZ0\r")
+                .expect_identifier(b"\r\nOK\r\n")
+                .finish()?;
+            Ok(())
+        }
+
+        fn set_echo(comm: &mut UartDriver, echo: bool) -> Result<(), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_execute(&mut buff, false)
+                .named(format!("ATE{}", i32::from(echo)))
+                .finish()?;
+            log::info!("Set echo ");
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            CommandParser::parse(&buff[..len])
+                .expect_identifier(b"ATE0\r")
+                .expect_identifier(b"\r\nOK\r\n")
+                .finish()?;
+            Ok(())
+        }
+
+        fn read_gprs_registration_status(
+            comm: &mut UartDriver,
+        ) -> Result<(i32, i32, Option<i32>, Option<i32>), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_query(&mut buff, true)
+                .named("+CGREG")
+                .finish()?;
+            log::info!("Get Registration Status");
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            Ok(CommandParser::parse(&buff[..len])
+                .expect_identifier(b"\r\n+CGREG: ")
+                .expect_int_parameter()
+                .expect_int_parameter()
+                .expect_optional_int_parameter()
+                .expect_optional_int_parameter()
+                .expect_identifier(b"\r\n\r\nOK\r\n")
+                .finish()?)
+        }
+
+        fn set_pdp_context(comm: &mut UartDriver) -> Result<(), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_set(&mut buff, true)
+                .named("+CGDCONT")
+                .with_int_parameter(1) // context id
+                .with_string_parameter("IP") // pdp type
+                .with_string_parameter("flolive.net") // apn
+                .finish()?;
+            log::info!("Set PDP Context");
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            CommandParser::parse(&buff[..len])
+                .expect_identifier(b"\r\nOK\r\n")
+                .finish()?;
+            Ok(())
+        }
+
+        fn set_data_mode(comm: &mut UartDriver) -> Result<(), ModemError> {
+            let mut buff = [0u8; 64];
+            let cmd = CommandBuilder::create_execute(&mut buff, false)
+                .named("ATD*99#")
+                .finish()?;
+            log::info!("Set Data mode");
+            comm.write(cmd).map_err(|_| ModemError::IO)?;
+            let len = comm
+                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+
+            let (connect_parm,) = CommandParser::parse(&buff[..len])
+                .expect_identifier(b"\r\nCONNECT ")
+                .expect_optional_raw_string()
+                .expect_identifier(b"\r\n")
+                .finish()?;
+            log::info!("connect {:?}", connect_parm);
+            Ok(())
         }
     }
 }

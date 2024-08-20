@@ -2,7 +2,7 @@
 //!
 //! Add your own ssid and password
 
-use std::thread::ScopedJoinHandle;
+use std::{thread::ScopedJoinHandle, time::Duration};
 
 use embedded_svc::{
     http::{client::Client as HttpClient, Method},
@@ -14,8 +14,8 @@ use esp_idf_hal::gpio;
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_hal::units::Hertz;
 use esp_idf_svc::log::EspLogger;
-use esp_idf_svc::modem::modem::sim7600::SIM7600;
-use esp_idf_svc::modem::modem::SimModem;
+use esp_idf_svc::modem::sim::sim7600::SIM7600;
+use esp_idf_svc::modem::sim::SimModem;
 use esp_idf_svc::modem::EspModem;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 use esp_idf_svc::{hal::prelude::Peripherals, http::client::EspHttpConnection};
@@ -63,14 +63,21 @@ fn main() -> anyhow::Result<()> {
             };
             Ok(())
         });
+        std::thread::sleep(Duration::from_secs(10));
 
+        // while !modem.netif().is_up()? {}
         // while !(modem.is_connected()?) {}
 
         let mut client = HttpClient::wrap(EspHttpConnection::new(&Default::default())?);
 
         // GET
-        get_request(&mut client)?;
-
+        loop {
+            std::thread::sleep(Duration::from_secs(10));
+            match get_request(&mut client) {
+                Err(x) => log::error!("Failed, reason = {}", x),
+                Ok(_) => break,
+            }
+        }
         my_thread.join().unwrap()?;
         Ok(())
     });
