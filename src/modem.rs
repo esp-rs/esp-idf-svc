@@ -1,5 +1,5 @@
 use crate::handle::RawHandle;
-use core::{borrow::BorrowMut, ffi, marker::PhantomData};
+use core::{borrow::BorrowMut, ffi, marker::PhantomData, mem::MaybeUninit};
 use esp_idf_hal::{
     delay::BLOCK,
     uart::{UartDriver, UartTxDriver},
@@ -44,7 +44,7 @@ where
     }
 
     /// Run the modem network interface. Blocks until the PPP encounters an error.
-    pub fn run(&mut self) -> Result<(), EspError> {
+    pub fn run(&mut self, mut buffer: [u8; 64]) -> Result<(), EspError> {
         self.status.lock().running = true;
 
         // now in ppp mode.
@@ -72,14 +72,13 @@ where
             EspNetifDriver::new_nonstatic_ppp(&self.netif, move |x| Self::tx(&mut tx, x))?
         };
 
-        let mut buff = [0u8; 64];
         loop {
             if !self.status.lock().running {
                 break;
             }
-            let len = rx.read(&mut buff, BLOCK)?;
+            let len = rx.read(&mut buffer, BLOCK)?;
             if len > 0 {
-                driver.rx(&buff[..len])?;
+                driver.rx(&buffer[..len])?;
             }
         }
 
@@ -367,7 +366,7 @@ pub mod sim {
         fn get_mode(&self) -> &CommunicationMode;
 
         /// Initialise the remote modem so that it is in PPPoS mode.
-        fn negotiate(&mut self, comm: &mut UartDriver) -> Result<(), ModemError>;
+        fn negotiate(&mut self, comm: &mut UartDriver, buffer: [u8; 64]) -> Result<(), ModemError>;
     }
 
     /// State of the modem.
@@ -413,7 +412,7 @@ pub mod sim {
         //! [super::SimModem] Implementation for the `SIMCOM 76XX` range of
         //! modems.
 
-        use core::time::Duration;
+        use core::{fmt::Display, time::Duration};
 
         use at_commands::{builder::CommandBuilder, parser::CommandParser};
         use esp_idf_hal::{delay::TickType, uart::UartDriver};
@@ -427,6 +426,134 @@ pub mod sim {
             }
         }
 
+        pub enum BitErrorRate {
+            /// < 0.01%
+            LT001,
+            /// 0.01% - 0.1%
+            LT01,
+            /// 0.1% - 0.5%
+            LT05,
+            /// 0.5% - 1%
+            LT1,
+            /// 1% - 2%
+            LT2,
+            /// 2% - 4%
+            LT4,
+            /// 4% - 8%
+            LT8,
+            /// >=8%
+            GT8,
+            /// unknown or undetectable
+            Unknown,
+        }
+        impl Display for BitErrorRate {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                match *self {
+                    BitErrorRate::GT8 => write!(f, ">= 8%"),
+                    BitErrorRate::LT001 => write!(f, "< 0.01%"),
+                    BitErrorRate::LT01 => write!(f, "0.01% - 0.1%"),
+                    BitErrorRate::LT05 => write!(f, "0.1% - 0.5%"),
+                    BitErrorRate::LT1 => write!(f, "0.5% - 1%"),
+                    BitErrorRate::LT2 => write!(f, "1% - 2%"),
+                    BitErrorRate::LT4 => write!(f, "2% - 4%"),
+                    BitErrorRate::LT8 => write!(f, "4% - 8%"),
+                    BitErrorRate::Unknown => write!(f, "Unknown"),
+                }
+            }
+        }
+
+        impl From<i32> for BitErrorRate {
+            fn from(value: i32) -> Self {
+                match value {
+                    0 => Self::LT001,
+                    1 => Self::LT01,
+                    2 => Self::LT05,
+                    3 => Self::LT1,
+                    4 => Self::LT2,
+                    5 => Self::LT4,
+                    6 => Self::LT8,
+                    7 => Self::GT8,
+                    _ => Self::Unknown,
+                }
+            }
+        }
+
+        /// Received Signal Strength Indication
+        pub enum RSSI {
+            /// -113 dBm or less
+            DBMLT113,
+            /// -111 dBm
+            DBM111,
+            /// -109 to -53 dBm
+            DBM109_53(i32),
+            /// -51 dBm or greater
+            DBMGT51,
+            /// not known or not detectable
+            Unknown,
+            /// -116 dBm or less
+            DBMLT116,
+            /// -115 dBm
+            DBM115,
+            /// -114 to -26 dBm
+            DBM114_26(i32),
+            /// -25 dBm or greater
+            DBMGT25,
+        }
+
+        impl Display for RSSI {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                match *self {
+                    RSSI::DBMLT113 => write!(f, "<= -113 dBm"),
+                    RSSI::DBM111 => write!(f, "-111 dBm"),
+                    RSSI::DBM109_53(x) => write!(f, "{} dBm", x),
+                    RSSI::DBMGT51 => write!(f, ">= -51 dBm"),
+                    RSSI::DBM114_26(x) => write!(f, "{} dBm", x),
+                    RSSI::DBM115 => write!(f, "-115 dBm"),
+                    RSSI::DBMGT25 => write!(f, ">= -25 dBm"),
+                    RSSI::DBMLT116 => write!(f, "<= -116 dBm"),
+                    RSSI::Unknown => write!(f, "Unknown"),
+                }
+            }
+        }
+
+        impl RSSI {
+            pub fn parse(raw: i32) -> RSSI {
+                match raw {
+                    0 => Self::DBMLT113,
+                    1 => Self::DBM111,
+                    2..=30 => Self::DBM109_53(RSSI::map2_30_to_109_53(raw)),
+                    31 => Self::DBMGT51,
+                    99 => Self::Unknown,
+                    100 => Self::DBMLT116,
+                    101 => Self::DBM115,
+                    102..=191 => Self::DBM114_26(RSSI::map102_191_to_114_26(raw)),
+                    _ => Self::Unknown,
+                }
+            }
+
+            fn map2_30_to_109_53(raw: i32) -> i32 {
+                const X1: i32 = 2;
+                const Y1: i32 = -109;
+                const X2: i32 = 30;
+                const Y2: i32 = -53;
+                const GRAD: i32 = (Y2 - Y1) / (X2 - X1); // 56/28 = 2
+                const OFFSET: i32 = Y1 - (GRAD * X1); // -113
+                (GRAD * raw) + OFFSET
+            }
+
+            fn map102_191_to_114_26(raw: i32) -> i32 {
+                const X1: i32 = 102;
+                const Y1: i32 = -114;
+                // const X2: i32 = 191;
+                // const Y2: i32 = -26;
+                const GRAD: i32 = 1;
+                // requires #![feature(int_roundings)]
+                // const GRAD: i32 = (Y2 - Y1).div_ceil((X2 - X1)); // would be 88/89, so truncated to 0
+                const OFFSET: i32 = Y1 - (GRAD * X1); // -216
+                (GRAD * raw) + OFFSET
+            }
+        }
+
         impl Default for SIM7600 {
             fn default() -> Self {
                 Self::new()
@@ -434,24 +561,32 @@ pub mod sim {
         }
 
         impl SimModem for SIM7600 {
-            fn negotiate(&mut self, comm: &mut UartDriver) -> Result<(), ModemError> {
-                reset(comm)?;
+            fn negotiate(
+                &mut self,
+                comm: &mut UartDriver,
+                mut buffer: [u8; 64],
+            ) -> Result<(), ModemError> {
+                reset(comm, &mut buffer)?;
 
                 //disable echo
-                set_echo(comm, false)?;
+                set_echo(comm, &mut buffer, false)?;
 
+                // get signal quality
+                let (rssi, ber) = get_signal_quality(comm, &mut buffer)?;
+                log::info!("RSSI = {rssi}");
+                log::info!("BER = {ber}");
                 // get iccid
-                let iccid = get_iccid(comm)?;
+                let iccid = get_iccid(comm, &mut buffer)?;
                 log::info!("ICCID = [{}]", iccid);
 
                 // check pdp network reg
-                read_gprs_registration_status(comm)?;
+                read_gprs_registration_status(comm, &mut buffer)?;
 
                 //configure apn
-                set_pdp_context(comm)?;
+                set_pdp_context(comm, &mut buffer)?;
 
                 // start ppp
-                set_data_mode(comm)?;
+                set_data_mode(comm, &mut buffer)?;
 
                 self.0 = CommunicationMode::Data;
                 Ok(())
@@ -462,39 +597,45 @@ pub mod sim {
             }
         }
 
-        pub fn get_signal_quality<IO: embedded_svc::io::Read + embedded_svc::io::Write>(
-            comm: &mut IO,
-        ) -> Result<(i32, i32), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, true)
+        pub fn get_signal_quality(
+            comm: &mut UartDriver,
+            buff: &mut [u8],
+        ) -> Result<(RSSI, BitErrorRate), ModemError> {
+            let cmd = CommandBuilder::create_execute(buff, true)
                 .named("+CSQ")
                 .finish()?;
 
             comm.write(cmd).map_err(|_| ModemError::IO)?;
 
-            let len = comm.read(&mut buff).map_err(|_| ModemError::IO)?;
+            let len = comm
+                .read(buff, TickType::new_millis(1000).ticks())
+                .map_err(|_| ModemError::IO)?;
 
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
             // \r\n+CSQ: 19,99\r\n\r\nOK\r\n
-            Ok(CommandParser::parse(&buff[..len])
+            let (raw_rssi, raw_ber) = CommandParser::parse(&buff[..len])
                 .expect_identifier(b"\r\n+CSQ: ")
                 .expect_int_parameter()
                 .expect_int_parameter()
                 .expect_identifier(b"\r\n\r\nOK\r\n")
-                .finish()?)
+                .finish()?;
+
+            Ok((RSSI::parse(raw_rssi), raw_ber.into()))
         }
 
-        fn get_iccid(comm: &mut UartDriver) -> Result<heapless::String<22>, ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, true)
+        fn get_iccid(
+            comm: &mut UartDriver,
+            buff: &mut [u8],
+        ) -> Result<heapless::String<22>, ModemError> {
+            let cmd = CommandBuilder::create_execute(buff, true)
                 .named("+CICCID")
                 .finish()?;
 
             comm.write(cmd).map_err(|_| ModemError::IO)?;
 
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
@@ -507,9 +648,8 @@ pub mod sim {
             Ok(heapless::String::try_from(ccid).unwrap())
         }
 
-        fn reset(comm: &mut UartDriver) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
+        fn reset(comm: &mut UartDriver, buff: &mut [u8]) -> Result<(), ModemError> {
+            let cmd = CommandBuilder::create_execute(buff, false)
                 .named("ATZ0")
                 .finish()?;
             log::info!("Send Reset");
@@ -517,7 +657,7 @@ pub mod sim {
             comm.write(cmd).map_err(|_| ModemError::IO)?;
 
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
             CommandParser::parse(&buff[..len])
@@ -527,15 +667,14 @@ pub mod sim {
             Ok(())
         }
 
-        fn set_echo(comm: &mut UartDriver, echo: bool) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
+        fn set_echo(comm: &mut UartDriver, buff: &mut [u8], echo: bool) -> Result<(), ModemError> {
+            let cmd = CommandBuilder::create_execute(buff, false)
                 .named(format!("ATE{}", i32::from(echo)))
                 .finish()?;
             log::info!("Set echo ");
             comm.write(cmd).map_err(|_| ModemError::IO)?;
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
@@ -548,15 +687,15 @@ pub mod sim {
 
         fn read_gprs_registration_status(
             comm: &mut UartDriver,
+            buff: &mut [u8],
         ) -> Result<(i32, i32, Option<i32>, Option<i32>), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_query(&mut buff, true)
+            let cmd = CommandBuilder::create_query(buff, true)
                 .named("+CGREG")
                 .finish()?;
             log::info!("Get Registration Status");
             comm.write(cmd).map_err(|_| ModemError::IO)?;
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
@@ -570,9 +709,8 @@ pub mod sim {
                 .finish()?)
         }
 
-        fn set_pdp_context(comm: &mut UartDriver) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_set(&mut buff, true)
+        fn set_pdp_context(comm: &mut UartDriver, buff: &mut [u8]) -> Result<(), ModemError> {
+            let cmd = CommandBuilder::create_set(buff, true)
                 .named("+CGDCONT")
                 .with_int_parameter(1) // context id
                 .with_string_parameter("IP") // pdp type
@@ -581,7 +719,7 @@ pub mod sim {
             log::info!("Set PDP Context");
             comm.write(cmd).map_err(|_| ModemError::IO)?;
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
@@ -591,15 +729,14 @@ pub mod sim {
             Ok(())
         }
 
-        fn set_data_mode(comm: &mut UartDriver) -> Result<(), ModemError> {
-            let mut buff = [0u8; 64];
-            let cmd = CommandBuilder::create_execute(&mut buff, false)
+        fn set_data_mode(comm: &mut UartDriver, buff: &mut [u8]) -> Result<(), ModemError> {
+            let cmd = CommandBuilder::create_execute(buff, false)
                 .named("ATD*99#")
                 .finish()?;
             log::info!("Set Data mode");
             comm.write(cmd).map_err(|_| ModemError::IO)?;
             let len = comm
-                .read(&mut buff, TickType::new_millis(1000).ticks())
+                .read(buff, TickType::new_millis(1000).ticks())
                 .map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 

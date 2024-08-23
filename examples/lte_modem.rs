@@ -48,7 +48,8 @@ fn main() -> anyhow::Result<()> {
     )?;
     log::info!("Hello");
     let mut sim_device = SIM7600::new();
-    match sim_device.negotiate(&mut serial) {
+    let buff = [0u8; 64];
+    match sim_device.negotiate(&mut serial, buff) {
         Err(x) => log::error!("Error = {}", x),
         Ok(()) => log::info!("Device in PPP mode"),
     }
@@ -57,7 +58,7 @@ fn main() -> anyhow::Result<()> {
 
     let _scope = std::thread::scope::<_, anyhow::Result<()>>(|s| {
         let my_thread: ScopedJoinHandle<anyhow::Result<()>> = s.spawn(|| {
-            match modem.run() {
+            match modem.run(buff) {
                 Err(x) => log::error!("Error: {:?}", x),
                 Ok(_x) => (),
             };
