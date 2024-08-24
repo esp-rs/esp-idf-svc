@@ -875,7 +875,8 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::Borrow;
-    use log::info;
+
+    use log::debug;
 
     use crate::handle::RawHandle;
     use crate::sys::*;
@@ -1232,7 +1233,7 @@ mod driver {
                 ..Default::default()
             };
 
-            info!("Post attach ifconfig: {:?}", driver_ifconfig);
+            debug!("Post attach ifconfig: {:?}", driver_ifconfig);
 
             // d->base.netif = esp_netif; TODO: This is weird; the netif in base is already set on constructor?
 
@@ -1255,14 +1256,17 @@ mod driver {
             let this = unsafe { (h as *mut Self).as_mut() }.unwrap();
             let data = core::slice::from_raw_parts(buffer as *mut u8, len);
 
+            #[allow(clippy::let_and_return)]
+            let result = match this.tx(data) {
+                Ok(_) => ESP_OK,
+                Err(e) => e.code(),
+            };
+
             // TODO: Might not be necessary, but if I remember correctly, the Netif API
             // wanted that _we_ free the buffer; in any case needs to be compared with the C ESP Modem code
             // free(buffer);
 
-            match this.tx(data) {
-                Ok(_) => ESP_OK,
-                Err(e) => e.code(),
-            }
+            result
         }
 
         unsafe extern "C" fn raw_post_attach(
@@ -1282,7 +1286,7 @@ mod driver {
 mod ppp {
     use core::ffi;
 
-    use log::info;
+    use log::debug;
 
     use crate::eventloop::{EspEventDeserializer, EspEventSource};
     use crate::handle::RawHandle;
@@ -1391,7 +1395,7 @@ mod ppp {
             ..Default::default()
         };
 
-        info!("Netif config: {:?}", ppp_config);
+        debug!("Netif config: {:?}", ppp_config);
 
         #[cfg(not(esp_idf_version_major = "4"))]
         esp!(unsafe { esp_netif_ppp_get_params(netif.handle(), &mut ppp_config) })?;
