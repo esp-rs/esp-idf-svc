@@ -930,7 +930,7 @@ mod driver {
         ///     |netif| netif.set_ppp_conf(&PppConfiguration {
         ///         phase_events_enabled: false,
         ///         ..Default::default()
-        ///     },
+        ///     }),
         ///     move |data| uart_tx.write_all(data),
         /// )?;
         ///
@@ -1000,7 +1000,7 @@ mod driver {
         ///     |netif| netif.set_ppp_conf(&PppConfiguration {
         ///         phase_events_enabled: false,
         ///         ..Default::default()
-        ///     },
+        ///     }),
         ///     move |data| uart_tx.write_all(data),
         /// )?;
         ///
