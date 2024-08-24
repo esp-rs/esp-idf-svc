@@ -100,8 +100,8 @@ impl NetifStack {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetifConfiguration {
     pub flags: u32,
-    pub get_ip_event: Option<NonZeroU32>,
-    pub lost_ip_event: Option<NonZeroU32>,
+    pub got_ip_event_id: Option<NonZeroU32>,
+    pub lost_ip_event_id: Option<NonZeroU32>,
     pub key: heapless::String<32>,
     pub description: heapless::String<8>,
     pub route_priority: u32,
@@ -115,8 +115,8 @@ impl NetifConfiguration {
         Self {
             flags: esp_netif_flags_ESP_NETIF_FLAG_GARP
                 | esp_netif_flags_ESP_NETIF_FLAG_EVENT_IP_MODIFIED,
-            get_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_GOT_IP as _),
-            lost_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_LOST_IP as _),
+            got_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_GOT_IP as _),
+            lost_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_LOST_IP as _),
             key: "ETH_CL_DEF".try_into().unwrap(),
             description: "eth".try_into().unwrap(),
             route_priority: 60,
@@ -129,8 +129,8 @@ impl NetifConfiguration {
     pub fn eth_default_router() -> Self {
         Self {
             flags: 0,
-            get_ip_event: None,
-            lost_ip_event: None,
+            got_ip_event_id: None,
+            lost_ip_event_id: None,
             key: "ETH_RT_DEF".try_into().unwrap(),
             description: "ethrt".try_into().unwrap(),
             route_priority: 50,
@@ -144,8 +144,8 @@ impl NetifConfiguration {
         Self {
             flags: esp_netif_flags_ESP_NETIF_FLAG_GARP
                 | esp_netif_flags_ESP_NETIF_FLAG_EVENT_IP_MODIFIED,
-            get_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_STA_GOT_IP as _),
-            lost_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_STA_LOST_IP as _),
+            got_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_STA_GOT_IP as _),
+            lost_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_STA_LOST_IP as _),
             key: "WIFI_STA_DEF".try_into().unwrap(),
             description: "sta".try_into().unwrap(),
             route_priority: 100,
@@ -159,8 +159,8 @@ impl NetifConfiguration {
     pub fn wifi_default_router() -> Self {
         Self {
             flags: 0,
-            get_ip_event: None,
-            lost_ip_event: None,
+            got_ip_event_id: None,
+            lost_ip_event_id: None,
             key: "WIFI_AP_DEF".try_into().unwrap(),
             description: "ap".try_into().unwrap(),
             route_priority: 10,
@@ -174,8 +174,8 @@ impl NetifConfiguration {
     pub fn ppp_default_client() -> Self {
         Self {
             flags: esp_netif_flags_ESP_NETIF_FLAG_IS_PPP,
-            get_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_PPP_GOT_IP as _),
-            lost_ip_event: NonZeroU32::new(ip_event_t_IP_EVENT_PPP_LOST_IP as _),
+            got_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_PPP_GOT_IP as _),
+            lost_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_PPP_LOST_IP as _),
             key: "PPP_CL_DEF".try_into().unwrap(),
             description: "ppp".try_into().unwrap(),
             route_priority: 30,
@@ -189,8 +189,8 @@ impl NetifConfiguration {
     pub fn ppp_default_router() -> Self {
         Self {
             flags: esp_netif_flags_ESP_NETIF_FLAG_IS_PPP,
-            get_ip_event: None,
-            lost_ip_event: None,
+            got_ip_event_id: None,
+            lost_ip_event_id: None,
             key: "PPP_RT_DEF".try_into().unwrap(),
             description: "ppprt".try_into().unwrap(),
             route_priority: 20,
@@ -246,7 +246,11 @@ fn initialize_netif_stack() -> Result<(), EspError> {
 }
 
 #[derive(Debug)]
-pub struct EspNetif(*mut esp_netif_t);
+pub struct EspNetif {
+    handle: *mut esp_netif_t,
+    _got_ip_event_id: Option<NonZeroU32>,
+    _lost_ip_event_id: Option<NonZeroU32>,
+}
 
 impl EspNetif {
     pub fn new(stack: NetifStack) -> Result<Self, EspError> {
@@ -278,8 +282,8 @@ impl EspNetif {
                         }),
                     mac: initial_mac,
                     ip_info: ptr::null(),
-                    get_ip_event: conf.get_ip_event.map(NonZeroU32::get).unwrap_or(0),
-                    lost_ip_event: conf.lost_ip_event.map(NonZeroU32::get).unwrap_or(0),
+                    get_ip_event: conf.got_ip_event_id.map(NonZeroU32::get).unwrap_or(0),
+                    lost_ip_event: conf.lost_ip_event_id.map(NonZeroU32::get).unwrap_or(0),
                     if_key: c_if_key.as_c_str().as_ptr() as _,
                     if_desc: c_if_description.as_c_str().as_ptr() as _,
                     route_prio: conf.route_priority as _,
@@ -319,8 +323,8 @@ impl EspNetif {
                         | esp_netif_flags_ESP_NETIF_FLAG_AUTOUP,
                     mac: initial_mac,
                     ip_info: ptr::null(),
-                    get_ip_event: conf.get_ip_event.map(NonZeroU32::get).unwrap_or(0),
-                    lost_ip_event: conf.lost_ip_event.map(NonZeroU32::get).unwrap_or(0),
+                    get_ip_event: conf.got_ip_event_id.map(NonZeroU32::get).unwrap_or(0),
+                    lost_ip_event: conf.lost_ip_event_id.map(NonZeroU32::get).unwrap_or(0),
                     if_key: c_if_key.as_c_str().as_ptr() as _,
                     if_desc: c_if_description.as_c_str().as_ptr() as _,
                     route_prio: conf.route_priority as _,
@@ -349,13 +353,15 @@ impl EspNetif {
             stack: conf.stack.default_raw_stack(),
         };
 
-        let mut handle = Self(
-            unsafe { esp_netif_new(&cfg).as_mut() }
+        let mut netif = Self {
+            handle: unsafe { esp_netif_new(&cfg).as_mut() }
                 .ok_or(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?,
-        );
+            _got_ip_event_id: conf.got_ip_event_id,
+            _lost_ip_event_id: conf.lost_ip_event_id,
+        };
 
         if let Some(dns) = dns {
-            handle.set_dns(dns);
+            netif.set_dns(dns);
 
             if dhcps {
                 #[cfg(esp_idf_version_major = "4")]
@@ -367,7 +373,7 @@ impl EspNetif {
 
                 esp!(unsafe {
                     esp_netif_dhcps_option(
-                        handle.0,
+                        netif.handle,
                         esp_netif_dhcp_option_mode_t_ESP_NETIF_OP_SET,
                         esp_netif_dhcp_option_id_t_ESP_NETIF_DOMAIN_NAME_SERVER,
                         &mut dhcps_dns_value as *mut _ as *mut _,
@@ -378,22 +384,22 @@ impl EspNetif {
         }
 
         if let Some(secondary_dns) = secondary_dns {
-            handle.set_secondary_dns(secondary_dns);
+            netif.set_secondary_dns(secondary_dns);
         }
 
         if let Some(hostname) = hostname {
-            handle.set_hostname(hostname)?;
+            netif.set_hostname(hostname)?;
         }
 
-        Ok(handle)
+        Ok(netif)
     }
 
     pub fn is_up(&self) -> Result<bool, EspError> {
-        if !unsafe { esp_netif_is_netif_up(self.0) } {
+        if !unsafe { esp_netif_is_netif_up(self.handle) } {
             Ok(false)
         } else {
             let mut ip_info = Default::default();
-            unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
+            unsafe { esp!(esp_netif_get_ip_info(self.handle, &mut ip_info)) }?;
 
             Ok(ipv4::IpInfo::from(Newtype(ip_info)).ip != ipv4::Ipv4Addr::new(0, 0, 0, 0))
         }
@@ -401,7 +407,7 @@ impl EspNetif {
 
     pub fn get_ip_info(&self) -> Result<ipv4::IpInfo, EspError> {
         let mut ip_info = Default::default();
-        unsafe { esp!(esp_netif_get_ip_info(self.0, &mut ip_info)) }?;
+        unsafe { esp!(esp_netif_get_ip_info(self.handle, &mut ip_info)) }?;
 
         Ok(ipv4::IpInfo {
             // Get the DNS information
@@ -412,20 +418,22 @@ impl EspNetif {
     }
 
     pub fn get_key(&self) -> heapless::String<32> {
-        unsafe { from_cstr_ptr(esp_netif_get_ifkey(self.0)) }
+        unsafe { from_cstr_ptr(esp_netif_get_ifkey(self.handle)) }
             .try_into()
             .unwrap()
     }
 
     pub fn get_index(&self) -> u32 {
-        unsafe { esp_netif_get_netif_impl_index(self.0) as _ }
+        unsafe { esp_netif_get_netif_impl_index(self.handle) as _ }
     }
 
     pub fn get_name(&self) -> heapless::String<6> {
         let mut netif_name = [0u8; 7];
 
-        esp!(unsafe { esp_netif_get_netif_impl_name(self.0, netif_name.as_mut_ptr() as *mut _) })
-            .unwrap();
+        esp!(unsafe {
+            esp_netif_get_netif_impl_name(self.handle, netif_name.as_mut_ptr() as *mut _)
+        })
+        .unwrap();
 
         from_cstr(&netif_name).try_into().unwrap()
     }
@@ -433,12 +441,12 @@ impl EspNetif {
     pub fn get_mac(&self) -> Result<[u8; 6], EspError> {
         let mut mac = [0u8; 6];
 
-        esp!(unsafe { esp_netif_get_mac(self.0, mac.as_mut_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_get_mac(self.handle, mac.as_mut_ptr() as *mut _) })?;
         Ok(mac)
     }
 
     pub fn set_mac(&mut self, mac: &[u8; 6]) -> Result<(), EspError> {
-        esp!(unsafe { esp_netif_set_mac(self.0, mac.as_ptr() as *mut _) })?;
+        esp!(unsafe { esp_netif_set_mac(self.handle, mac.as_ptr() as *mut _) })?;
         Ok(())
     }
 
@@ -447,7 +455,7 @@ impl EspNetif {
 
         unsafe {
             esp!(esp_netif_get_dns_info(
-                self.0,
+                self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
@@ -464,7 +472,7 @@ impl EspNetif {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(dns).0;
 
             esp!(esp_netif_set_dns_info(
-                self.0,
+                self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
             ))
@@ -477,7 +485,7 @@ impl EspNetif {
 
         unsafe {
             esp!(esp_netif_get_dns_info(
-                self.0,
+                self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
@@ -494,7 +502,7 @@ impl EspNetif {
             dns_info.ip.u_addr.ip4 = Newtype::<esp_ip4_addr_t>::from(secondary_dns).0;
 
             esp!(esp_netif_set_dns_info(
-                self.0,
+                self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
             ))
@@ -504,7 +512,7 @@ impl EspNetif {
 
     pub fn get_hostname(&self) -> Result<heapless::String<30>, EspError> {
         let mut ptr: *const ffi::c_char = ptr::null();
-        esp!(unsafe { esp_netif_get_hostname(self.0, &mut ptr) })?;
+        esp!(unsafe { esp_netif_get_hostname(self.handle, &mut ptr) })?;
 
         Ok(unsafe { from_cstr_ptr(ptr) }.try_into().unwrap())
     }
@@ -512,7 +520,7 @@ impl EspNetif {
     fn set_hostname(&mut self, hostname: &str) -> Result<(), EspError> {
         let hostname = to_cstring_arg(hostname)?;
 
-        esp!(unsafe { esp_netif_set_hostname(self.0, hostname.as_ptr() as *const _) })?;
+        esp!(unsafe { esp_netif_set_hostname(self.handle, hostname.as_ptr() as *const _) })?;
 
         Ok(())
     }
@@ -521,7 +529,7 @@ impl EspNetif {
     pub fn enable_napt(&mut self, enable: bool) {
         unsafe {
             crate::sys::ip_napt_enable_no(
-                (esp_netif_get_netif_impl_index(self.0) - 1) as u8,
+                (esp_netif_get_netif_impl_index(self.handle) - 1) as u8,
                 if enable { 1 } else { 0 },
             )
         };
@@ -530,7 +538,7 @@ impl EspNetif {
 
 impl Drop for EspNetif {
     fn drop(&mut self) {
-        unsafe { esp_netif_destroy(self.0) };
+        unsafe { esp_netif_destroy(self.handle) };
 
         info!("Dropped");
     }
@@ -542,7 +550,7 @@ impl RawHandle for EspNetif {
     type Handle = *mut esp_netif_t;
 
     fn handle(&self) -> Self::Handle {
-        self.0
+        self.handle
     }
 }
 
@@ -876,7 +884,6 @@ where
 #[cfg(feature = "alloc")]
 mod driver {
     use core::borrow::BorrowMut;
-    use core::num::NonZeroU32;
 
     use log::debug;
 
@@ -921,12 +928,9 @@ mod driver {
         /// Example:
         /// ```ignore
         /// let (uart_rx, uart_tx) = uart.into_split();
-        /// let stack = NetifStack::Ppp;
-        /// let netif = EspNetif::new(stack)?;
+        ///
         /// let mut driver = EspNetifDriver::new(
-        ///     netif,
-        ///     stack.default_configuration().got_ip_event,
-        ///     stack.default_configuration().lost_ip_event,
+        ///     EspNetif::new(NetifStack::Ppp)?,
         ///     |netif| netif.set_ppp_conf(&PppConfiguration {
         ///         phase_events_enabled: false,
         ///         ..Default::default()
@@ -941,24 +945,12 @@ mod driver {
         /// }
         /// ```
         ///
-        pub fn new<P, F>(
-            netif: T,
-            got_ip_event_id: Option<NonZeroU32>,
-            lost_ip_event_id: Option<NonZeroU32>,
-            post_attach_cfg: P,
-            tx: F,
-        ) -> Result<Self, EspError>
+        pub fn new<P, F>(netif: T, post_attach_cfg: P, tx: F) -> Result<Self, EspError>
         where
             P: FnMut(&mut EspNetif) -> Result<(), EspError> + Send + 'static,
             F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'static,
         {
-            Self::new_nonstatic(
-                netif,
-                got_ip_event_id,
-                lost_ip_event_id,
-                post_attach_cfg,
-                tx,
-            )
+            Self::new_nonstatic(netif, post_attach_cfg, tx)
         }
     }
 
@@ -991,12 +983,9 @@ mod driver {
         /// Example:
         /// ```ignore
         /// let (uart_rx, uart_tx) = uart.into_split();
-        /// let stack = NetifStack::Ppp;
-        /// let netif = EspNetif::new(stack)?;
+        ///
         /// let mut driver = EspNetifDriver::new(
-        ///     netif,
-        ///     stack.default_configuration().got_ip_event,
-        ///     stack.default_configuration().lost_ip_event,
+        ///     EspNetif::new(NetifStack::Ppp)?,
         ///     |netif| netif.set_ppp_conf(&PppConfiguration {
         ///         phase_events_enabled: false,
         ///         ..Default::default()
@@ -1034,13 +1023,7 @@ mod driver {
         ///
         /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
         /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
-        pub fn new_nonstatic<P, F>(
-            netif: T,
-            got_ip_event_id: Option<NonZeroU32>,
-            lost_ip_event_id: Option<NonZeroU32>,
-            post_attach_cfg: P,
-            tx: F,
-        ) -> Result<Self, EspError>
+        pub fn new_nonstatic<P, F>(netif: T, post_attach_cfg: P, tx: F) -> Result<Self, EspError>
         where
             P: FnMut(&mut EspNetif) -> Result<(), EspError> + Send + 'd,
             F: FnMut(&[u8]) -> Result<(), EspError> + Send + 'd,
@@ -1051,15 +1034,13 @@ mod driver {
                     post_attach: Some(EspNetifDriverInner::<T>::raw_post_attach),
                 },
                 netif,
-                got_ip_event_id,
-                lost_ip_event_id,
                 post_attach_cfg: alloc::boxed::Box::new(post_attach_cfg),
                 tx: alloc::boxed::Box::new(tx),
             });
 
             let inner_ptr = inner.as_mut() as *mut _ as *mut core::ffi::c_void;
 
-            if let Some(got_ip_event_id) = got_ip_event_id {
+            if let Some(got_ip_event_id) = inner.netif.borrow()._got_ip_event_id {
                 esp!(unsafe {
                     esp_event_handler_register(
                         IP_EVENT,
@@ -1070,7 +1051,7 @@ mod driver {
                 })?;
             }
 
-            if let Some(lost_ip_event_id) = lost_ip_event_id {
+            if let Some(lost_ip_event_id) = inner.netif.borrow()._lost_ip_event_id {
                 esp!(unsafe {
                     esp_event_handler_register(
                         IP_EVENT,
@@ -1134,7 +1115,7 @@ mod driver {
                 );
             }
 
-            if let Some(got_ip_event_id) = self.inner.got_ip_event_id {
+            if let Some(got_ip_event_id) = self.inner.netif.borrow()._got_ip_event_id {
                 esp!(unsafe {
                     esp_event_handler_unregister(
                         IP_EVENT,
@@ -1145,7 +1126,7 @@ mod driver {
                 .unwrap();
             }
 
-            if let Some(lost_ip_event_id) = self.inner.lost_ip_event_id {
+            if let Some(lost_ip_event_id) = self.inner.netif.borrow()._lost_ip_event_id {
                 esp!(unsafe {
                     esp_event_handler_unregister(
                         IP_EVENT,
@@ -1165,8 +1146,6 @@ mod driver {
     {
         base: esp_netif_driver_base_t,
         netif: T,
-        got_ip_event_id: Option<NonZeroU32>,
-        lost_ip_event_id: Option<NonZeroU32>,
         #[allow(clippy::type_complexity)]
         tx: alloc::boxed::Box<dyn FnMut(&[u8]) -> Result<(), EspError> + Send + 'd>,
         #[allow(clippy::type_complexity)]
