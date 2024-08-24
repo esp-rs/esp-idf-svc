@@ -897,6 +897,7 @@ mod driver {
         T: BorrowMut<EspNetif>,
     {
         inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
+        started: bool,
     }
 
     impl<T> EspNetifDriver<'static, T>
@@ -1064,19 +1065,14 @@ mod driver {
 
             esp!(unsafe { esp_netif_attach(inner.netif.borrow().handle(), inner_ptr) })?;
 
-            unsafe {
-                esp_netif_action_start(
-                    inner.netif.borrow().handle() as *mut core::ffi::c_void,
-                    core::ptr::null_mut(),
-                    0,
-                    core::ptr::null_mut(),
-                );
-            }
-
-            Ok(Self { inner })
+            Ok(Self {
+                inner,
+                started: false,
+            })
         }
 
-        /// Ingest a packet into the driver.
+        /// Ingest a packet into the driver
+        ///
         /// The packet can arrive from anywhere, but with say - a PPP netif -
         /// it would be a PPP packet arriving typically from UART, by reading from it.
         pub fn rx(&self, data: &[u8]) -> Result<(), EspError> {
@@ -1088,6 +1084,47 @@ mod driver {
                     core::ptr::null_mut(),
                 )
             })
+        }
+
+        /// Start the driver
+        pub fn start(&mut self) -> Result<(), EspError> {
+            if self.started {
+                return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
+            }
+
+            unsafe {
+                esp_netif_action_start(
+                    self.inner.netif.borrow().handle() as *mut core::ffi::c_void,
+                    core::ptr::null_mut(),
+                    0,
+                    core::ptr::null_mut(),
+                );
+            }
+
+            Ok(())
+        }
+
+        /// Stop the driver
+        pub fn stop(&mut self) -> Result<(), EspError> {
+            if !self.started {
+                return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
+            }
+
+            unsafe {
+                esp_netif_action_stop(
+                    self.inner.netif.borrow().handle() as *mut core::ffi::c_void,
+                    core::ptr::null_mut(),
+                    0,
+                    core::ptr::null_mut(),
+                );
+            }
+
+            Ok(())
+        }
+
+        /// Check if the driver is started
+        pub fn is_started(&self) -> Result<bool, EspError> {
+            Ok(self.started)
         }
 
         /// Get a reference to the underlying `EspNetif` instance
@@ -1106,14 +1143,7 @@ mod driver {
         T: BorrowMut<EspNetif>,
     {
         fn drop(&mut self) {
-            unsafe {
-                esp_netif_action_stop(
-                    self.inner.netif.borrow().handle() as *mut core::ffi::c_void,
-                    core::ptr::null_mut(),
-                    0,
-                    core::ptr::null_mut(),
-                );
-            }
+            let _ = self.stop();
 
             if let Some(got_ip_event_id) = self.inner.netif.borrow()._got_ip_event_id {
                 esp!(unsafe {
