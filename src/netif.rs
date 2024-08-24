@@ -1236,7 +1236,9 @@ mod driver {
 
 #[cfg(esp_idf_lwip_ppp_support)]
 mod ppp {
-    use core::ffi;
+    use core::ffi::{self, CStr};
+
+    use enumset::{EnumSet, EnumSetType};
 
     use crate::eventloop::{EspEventDeserializer, EspEventSource};
     use crate::handle::RawHandle;
@@ -1416,8 +1418,19 @@ mod ppp {
         }
     }
 
+    #[derive(Debug, EnumSetType)]
+    #[enumset(repr = "u32")]
+    pub enum PppAuthentication {
+        Pap,
+        Chap,
+        MsChap,
+        MsChapV2,
+        Eap,
+    }
+
     /// PPP-specific configuration of a Netif
     impl super::EspNetif {
+        /// Get the current PPP configuration
         #[cfg(not(esp_idf_version_major = "4"))]
         pub fn get_ppp_conf(&self) -> Result<PppConfiguration, EspError> {
             let mut ppp_config = Default::default();
@@ -1427,10 +1440,28 @@ mod ppp {
             Ok(ppp_config.into())
         }
 
+        /// Set the PPP configuration
         pub fn set_ppp_conf(&mut self, conf: &PppConfiguration) -> Result<(), EspError> {
             let ppp_config: esp_netif_ppp_config_t = conf.into();
 
             esp!(unsafe { esp_netif_ppp_set_params(self.handle(), &ppp_config) })
+        }
+
+        /// Set the PPP authentication
+        pub fn set_ppp_auth(
+            &mut self,
+            auth: EnumSet<PppAuthentication>,
+            username: &CStr,
+            password: &CStr,
+        ) -> Result<(), EspError> {
+            esp!(unsafe {
+                esp_netif_ppp_set_auth(
+                    self.handle(),
+                    auth.as_repr(),
+                    username.as_ptr() as _,
+                    password.as_ptr() as _,
+                )
+            })
         }
     }
 }
