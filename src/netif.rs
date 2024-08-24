@@ -899,23 +899,23 @@ mod driver {
         /// Create a new netif driver around the provided `EspNetif` instance.
         ///
         /// The driver transport is represented by:
-        /// * The `tx` callback that the driver would call when it wants to ingest a packet
+        /// - The `tx` callback that the driver would call when it wants to ingest a packet
         ///   into the underlying transport
-        /// * `EsNetifDriver::rx`, which should be called by the transport when a new packet
+        /// - `EsNetifDriver::rx`, which should be called by the transport when a new packet
         ///   has arrived that has to be ingested in the driver
         ///   
         /// The transport can be anything, but with - say - PPP netif - it would typically be UART,
         /// and the `tx` callback implementation is simply expected to write the PPP packet into UART.
         ///
         /// Arguments:
-        /// * `netif` is the `EspNetif` instance that the driver will manage
-        /// * `got_ip_event_id` and `lost_ip_event_id` are the event IDs that the driver
+        /// - `netif` is the `EspNetif` instance that the driver will manage
+        /// - `got_ip_event_id` and `lost_ip_event_id` are the event IDs that the driver
         ///   will listen to so that it can connect/disconnect the netif upon receival
         ///   / loss of IP
-        /// * `post_attach_cfg` is a netif-specific configuration that will be executed
+        /// - `post_attach_cfg` is a netif-specific configuration that will be executed
         ///   after the netif is attached. For example, for a PPP netif, the post attach
         ///   configuration might want to invoke `EspNetif::set_ppp_conf`.
-        /// * `tx` is the callback that the driver will call when it wants to ingest a packet
+        /// - `tx` is the callback that the driver will call when it wants to ingest a packet
         ///   into the underlying transport
         ///
         /// Example:
@@ -969,23 +969,23 @@ mod driver {
         /// Create a new netif driver around the provided `EspNetif` instance.
         ///
         /// The driver transport is represented by:
-        /// * The `tx` callback that the driver would call when it wants to ingest a packet
+        /// - The `tx` callback that the driver would call when it wants to ingest a packet
         ///   into the underlying transport
-        /// * `EsNetifDriver::rx`, which should be called by the transport when a new packet
+        /// - `EsNetifDriver::rx`, which should be called by the transport when a new packet
         ///   has arrived that has to be ingested in the driver
         ///   
         /// The transport can be anything, but with - say - PPP netif - it would typically be UART,
         /// and the `tx` callback implementation is simply expected to write the PPP packet into UART.
         ///
         /// Arguments:
-        /// * `netif` is the `EspNetif` instance that the driver will manage
-        /// * `got_ip_event_id` and `lost_ip_event_id` are the event IDs that the driver
+        /// - `netif` is the `EspNetif` instance that the driver will manage
+        /// - `got_ip_event_id` and `lost_ip_event_id` are the event IDs that the driver
         ///   will listen to so that it can connect/disconnect the netif upon receival
         ///   / loss of IP
-        /// * `post_attach_cfg` is a netif-specific configuration that will be executed
+        /// - `post_attach_cfg` is a netif-specific configuration that will be executed
         ///   after the netif is attached. For example, for a PPP netif, the post attach
         ///   configuration might want to invoke `EspNetif::set_ppp_conf`.
-        /// * `tx` is the callback that the driver will call when it wants to ingest a packet
+        /// - `tx` is the callback that the driver will call when it wants to ingest a packet
         ///   into the underlying transport
         ///
         /// Example:
@@ -1448,6 +1448,10 @@ mod ppp {
         }
 
         /// Set the PPP authentication
+        /// Arguments:
+        /// - `auth` is the set of all authentication methods to allow; if empty, no authentication will be used
+        /// - `username` is the username to use for authentication; only relevant when the `auth` enumset is non-empty
+        /// - `password` is the password to use for authentication; only relevant when the `auth` enumset is non-empty
         pub fn set_ppp_auth(
             &mut self,
             auth: EnumSet<PppAuthentication>,
