@@ -6,18 +6,17 @@ use std::{thread::ScopedJoinHandle, time::Duration};
 
 use embedded_svc::{
     http::{client::Client as HttpClient, Method},
-    io::Write,
     utils::io,
 };
 
 use esp_idf_hal::gpio;
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_hal::units::Hertz;
+use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::modem::sim::sim7600::SIM7600;
 use esp_idf_svc::modem::sim::SimModem;
 use esp_idf_svc::modem::EspModem;
-use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 use esp_idf_svc::{hal::prelude::Peripherals, http::client::EspHttpConnection};
 
 use log::{error, info};
@@ -31,10 +30,11 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
-    let nvs = EspDefaultNvsPartition::take()?;
+
     let serial = peripherals.uart2;
     let tx = peripherals.pins.gpio17;
     let rx = peripherals.pins.gpio18;
+
     let mut serial = UartDriver::new(
         serial,
         tx,
@@ -46,9 +46,9 @@ fn main() -> anyhow::Result<()> {
             ..Default::default()
         },
     )?;
-    log::info!("Hello");
+
     let mut sim_device = SIM7600::new();
-    let buff = [0u8; 64];
+    let mut buff = [0u8; 64];
     match sim_device.negotiate(&mut serial, buff) {
         Err(x) => log::error!("Error = {}", x),
         Ok(()) => log::info!("Device in PPP mode"),
@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
 
     let _scope = std::thread::scope::<_, anyhow::Result<()>>(|s| {
         let my_thread: ScopedJoinHandle<anyhow::Result<()>> = s.spawn(|| {
-            match modem.run(buff) {
+            match modem.run(&mut buff) {
                 Err(x) => log::error!("Error: {:?}", x),
                 Ok(_x) => (),
             };

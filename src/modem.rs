@@ -1,5 +1,8 @@
-use crate::handle::RawHandle;
-use core::{borrow::BorrowMut, ffi, marker::PhantomData, mem::MaybeUninit};
+use crate::{
+    handle::RawHandle,
+    netif::{PppConfiguration, PppEvent},
+};
+use core::{borrow::BorrowMut, marker::PhantomData};
 use esp_idf_hal::{
     delay::BLOCK,
     uart::{UartDriver, UartTxDriver},
@@ -7,10 +10,7 @@ use esp_idf_hal::{
 use std::sync::Arc;
 
 use crate::{
-    eventloop::{
-        EspEventDeserializer, EspEventLoop, EspEventSource, EspSubscription, EspSystemEventLoop,
-        System,
-    },
+    eventloop::{EspEventLoop, EspSubscription, EspSystemEventLoop, System},
     netif::{EspNetif, EspNetifDriver, NetifStack},
     private::mutex,
     sys::*,
@@ -44,7 +44,7 @@ where
     }
 
     /// Run the modem network interface. Blocks until the PPP encounters an error.
-    pub fn run(&mut self, mut buffer: [u8; 64]) -> Result<(), EspError> {
+    pub fn run(&mut self, buffer: &mut [u8]) -> Result<(), EspError> {
         self.status.lock().running = true;
 
         // now in ppp mode.
@@ -68,15 +68,22 @@ where
             )
         })?;
         let (mut tx, rx) = self.serial.borrow_mut().split();
-        let driver = unsafe {
-            EspNetifDriver::new_nonstatic_ppp(&self.netif, move |x| Self::tx(&mut tx, x))?
-        };
+        let driver = EspNetifDriver::new_nonstatic(
+            &mut self.netif,
+            move |x| {
+                x.set_ppp_conf(&PppConfiguration {
+                    phase_events_enabled: true,
+                    error_events_enabled: true,
+                })
+            },
+            |data| Self::tx(&mut tx, data),
+        )?;
 
         loop {
             if !self.status.lock().running {
                 break;
             }
-            let len = rx.read(&mut buffer, BLOCK)?;
+            let len = rx.read(buffer, BLOCK)?;
             if len > 0 {
                 driver.rx(&buffer[..len])?;
             }
@@ -129,41 +136,39 @@ where
 
         let s_status = status.clone();
 
-        let subscription = sysloop.subscribe::<ModemEvent, _>(move |event| {
+        let subscription = sysloop.subscribe::<PppEvent, _>(move |event| {
             let mut guard = s_status.lock();
             log::info!("Got event PPP: {:?}", event);
             match event {
-                ModemEvent::ErrorNone => guard.error = None,
-                ModemEvent::ErrorParameter => guard.error = Some(ModemPPPError::Parameter),
-                ModemEvent::ErrorOpen => guard.error = Some(ModemPPPError::Open),
-                ModemEvent::ErrorDevice => guard.error = Some(ModemPPPError::Device),
-                ModemEvent::ErrorAlloc => guard.error = Some(ModemPPPError::Alloc),
-                ModemEvent::ErrorUser => guard.error = Some(ModemPPPError::User),
-                ModemEvent::ErrorDisconnect => guard.error = Some(ModemPPPError::Disconnect),
-                ModemEvent::ErrorAuthFail => guard.error = Some(ModemPPPError::AuthFail),
-                ModemEvent::ErrorProtocol => guard.error = Some(ModemPPPError::Protocol),
-                ModemEvent::ErrorPeerDead => guard.error = Some(ModemPPPError::PeerDead),
-                ModemEvent::ErrorIdleTimeout => guard.error = Some(ModemPPPError::IdleTimeout),
-                ModemEvent::ErrorMaxConnectTimeout => {
+                PppEvent::NoError => guard.error = None,
+                PppEvent::ParameterError => guard.error = Some(ModemPPPError::Parameter),
+                PppEvent::OpenError => guard.error = Some(ModemPPPError::Open),
+                PppEvent::DeviceError => guard.error = Some(ModemPPPError::Device),
+                PppEvent::AllocError => guard.error = Some(ModemPPPError::Alloc),
+                PppEvent::UserError => guard.error = Some(ModemPPPError::User),
+                PppEvent::DisconnectError => guard.error = Some(ModemPPPError::Disconnect),
+                PppEvent::AuthFailError => guard.error = Some(ModemPPPError::AuthFail),
+                PppEvent::ProtocolError => guard.error = Some(ModemPPPError::Protocol),
+                PppEvent::PeerDeadError => guard.error = Some(ModemPPPError::PeerDead),
+                PppEvent::IdleTimeoutError => guard.error = Some(ModemPPPError::IdleTimeout),
+                PppEvent::MaxConnectTimeoutError => {
                     guard.error = Some(ModemPPPError::MaxConnectTimeout)
                 }
-                ModemEvent::ErrorLoopback => guard.error = Some(ModemPPPError::Loopback),
-                ModemEvent::PhaseDead => guard.phase = ModemPhaseStatus::Dead,
-                ModemEvent::PhaseMaster => guard.phase = ModemPhaseStatus::Master,
-                ModemEvent::PhaseHoldoff => guard.phase = ModemPhaseStatus::Holdoff,
-                ModemEvent::PhaseInitialize => guard.phase = ModemPhaseStatus::Initialize,
-                ModemEvent::PhaseSerialConnection => {
-                    guard.phase = ModemPhaseStatus::SerialConnection
-                }
-                ModemEvent::PhaseDormant => guard.phase = ModemPhaseStatus::Dormant,
-                ModemEvent::PhaseEstablish => guard.phase = ModemPhaseStatus::Establish,
-                ModemEvent::PhaseAuthenticate => guard.phase = ModemPhaseStatus::Authenticate,
-                ModemEvent::PhaseCallback => guard.phase = ModemPhaseStatus::Callback,
-                ModemEvent::PhaseNetwork => guard.phase = ModemPhaseStatus::Network,
-                ModemEvent::PhaseRunning => guard.phase = ModemPhaseStatus::Running,
-                ModemEvent::PhaseTerminate => guard.phase = ModemPhaseStatus::Terminate,
-                ModemEvent::PhaseDisconnect => guard.phase = ModemPhaseStatus::Disconnect,
-                ModemEvent::PhaseFailed => guard.phase = ModemPhaseStatus::Failed,
+                PppEvent::LoopbackError => guard.error = Some(ModemPPPError::Loopback),
+                PppEvent::PhaseDead => guard.phase = ModemPhaseStatus::Dead,
+                PppEvent::PhaseMaster => guard.phase = ModemPhaseStatus::Master,
+                PppEvent::PhaseHoldoff => guard.phase = ModemPhaseStatus::Holdoff,
+                PppEvent::PhaseInitialize => guard.phase = ModemPhaseStatus::Initialize,
+                PppEvent::PhaseSerialConnection => guard.phase = ModemPhaseStatus::SerialConnection,
+                PppEvent::PhaseDormant => guard.phase = ModemPhaseStatus::Dormant,
+                PppEvent::PhaseEstablish => guard.phase = ModemPhaseStatus::Establish,
+                PppEvent::PhaseAuthenticate => guard.phase = ModemPhaseStatus::Authenticate,
+                PppEvent::PhaseCallback => guard.phase = ModemPhaseStatus::Callback,
+                PppEvent::PhaseNetwork => guard.phase = ModemPhaseStatus::Network,
+                PppEvent::PhaseRunning => guard.phase = ModemPhaseStatus::Running,
+                PppEvent::PhaseTerminate => guard.phase = ModemPhaseStatus::Terminate,
+                PppEvent::PhaseDisconnect => guard.phase = ModemPhaseStatus::Disconnect,
+                PppEvent::PhaseFailed => guard.phase = ModemPhaseStatus::Failed,
             }
         })?;
 
@@ -268,89 +273,6 @@ pub struct ModemDriverStatus {
     pub running: bool,
 }
 
-#[derive(Debug)]
-pub enum ModemEvent {
-    ErrorNone,
-    ErrorParameter,
-    ErrorOpen,
-    ErrorDevice,
-    ErrorAlloc,
-    ErrorUser,
-    ErrorDisconnect,
-    ErrorAuthFail,
-    ErrorProtocol,
-    ErrorPeerDead,
-    ErrorIdleTimeout,
-    ErrorMaxConnectTimeout,
-    ErrorLoopback,
-    PhaseDead,
-    PhaseMaster,
-    PhaseHoldoff,
-    PhaseInitialize,
-    PhaseSerialConnection,
-    PhaseDormant,
-    PhaseEstablish,
-    PhaseAuthenticate,
-    PhaseCallback,
-    PhaseNetwork,
-    PhaseRunning,
-    PhaseTerminate,
-    PhaseDisconnect,
-    PhaseFailed,
-}
-
-unsafe impl EspEventSource for ModemEvent {
-    fn source() -> Option<&'static core::ffi::CStr> {
-        Some(unsafe { ffi::CStr::from_ptr(NETIF_PPP_STATUS) })
-    }
-}
-
-impl EspEventDeserializer for ModemEvent {
-    type Data<'a> = ModemEvent;
-
-    #[allow(non_upper_case_globals, non_snake_case)]
-    fn deserialize<'a>(data: &crate::eventloop::EspEvent<'a>) -> Self::Data<'a> {
-        let event_id = data.event_id as u32;
-
-        match event_id {
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORNONE => ModemEvent::ErrorNone,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPARAM => ModemEvent::ErrorParameter,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERROROPEN => ModemEvent::ErrorOpen,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORDEVICE => ModemEvent::ErrorDevice,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORALLOC => ModemEvent::ErrorAlloc,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORUSER => ModemEvent::ErrorUser,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORCONNECT => ModemEvent::ErrorDisconnect,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORAUTHFAIL => ModemEvent::ErrorAuthFail,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPROTOCOL => ModemEvent::ErrorProtocol,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORPEERDEAD => ModemEvent::ErrorPeerDead,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORIDLETIMEOUT => ModemEvent::ErrorIdleTimeout,
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORCONNECTTIME => {
-                ModemEvent::ErrorMaxConnectTimeout
-            }
-            esp_netif_ppp_status_event_t_NETIF_PPP_ERRORLOOPBACK => ModemEvent::ErrorLoopback,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DEAD => ModemEvent::PhaseDead,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_MASTER => ModemEvent::PhaseMaster,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_HOLDOFF => ModemEvent::PhaseHoldoff,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_INITIALIZE => ModemEvent::PhaseInitialize,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_SERIALCONN => {
-                ModemEvent::PhaseSerialConnection
-            }
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DORMANT => ModemEvent::PhaseDormant,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_ESTABLISH => ModemEvent::PhaseEstablish,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_AUTHENTICATE => {
-                ModemEvent::PhaseAuthenticate
-            }
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_CALLBACK => ModemEvent::PhaseCallback,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_NETWORK => ModemEvent::PhaseNetwork,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_RUNNING => ModemEvent::PhaseRunning,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_TERMINATE => ModemEvent::PhaseTerminate,
-            esp_netif_ppp_status_event_t_NETIF_PPP_PHASE_DISCONNECT => ModemEvent::PhaseDisconnect,
-            esp_netif_ppp_status_event_t_NETIF_PPP_CONNECT_FAILED => ModemEvent::PhaseFailed,
-            _ => panic!("Unknown event ID: {}", event_id),
-        }
-    }
-}
-
 pub mod sim {
     //! SimModem
     //!
@@ -412,7 +334,7 @@ pub mod sim {
         //! [super::SimModem] Implementation for the `SIMCOM 76XX` range of
         //! modems.
 
-        use core::{fmt::Display, time::Duration};
+        use core::fmt::Display;
 
         use at_commands::{builder::CommandBuilder, parser::CommandParser};
         use esp_idf_hal::{delay::TickType, uart::UartDriver};
