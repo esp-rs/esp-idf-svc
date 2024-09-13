@@ -549,12 +549,24 @@ impl<'d> WifiDriver<'d> {
             event_handler: Some(esp_event_send_internal),
             osi_funcs: unsafe { core::ptr::addr_of_mut!(g_wifi_osi_funcs) },
             wpa_crypto_funcs: unsafe { g_wifi_default_wpa_crypto_funcs },
-            static_rx_buf_num: CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM as _,
-            dynamic_rx_buf_num: CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM as _,
-            tx_buf_type: CONFIG_ESP32_WIFI_TX_BUFFER_TYPE as _,
+            #[cfg(not(esp32p4))]
+            static_rx_buf_num: CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM as _,
+            #[cfg(esp32p4)] // There is no default value for p4 currently in idf so we use the values from c6 as a starting point
+            static_rx_buf_num: 40 as _,
+            #[cfg(not(esp32p4))]
+            dynamic_rx_buf_num: CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM as _,
+            #[cfg(esp32p4)] // There is no default value for p4 currently in idf so we use the values from c6 as a starting point
+            dynamic_rx_buf_num: 60 as _,
+            #[cfg(not(esp32p4))]
+            tx_buf_type: CONFIG_ESP_WIFI_TX_BUFFER_TYPE as _,
+            #[cfg(esp32p4)]
+            tx_buf_type: 1 as _,
             static_tx_buf_num: WIFI_STATIC_TX_BUFFER_NUM as _,
             dynamic_tx_buf_num: WIFI_DYNAMIC_TX_BUFFER_NUM as _,
+            #[cfg(not(esp32p4))]
             cache_tx_buf_num: WIFI_CACHE_TX_BUFFER_NUM as _,
+            #[cfg(esp32p4)]
+            cache_tx_buf_num: 1 as _,
             csi_enable: WIFI_CSI_ENABLED as _,
             ampdu_rx_enable: WIFI_AMPDU_RX_ENABLED as _,
             ampdu_tx_enable: WIFI_AMPDU_TX_ENABLED as _,
@@ -599,7 +611,10 @@ impl<'d> WifiDriver<'d> {
                     )
                 )
             ))]
+            #[cfg(not(esp32p4))]
             espnow_max_encrypt_num: CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM as i32,
+            #[cfg(esp32p4)]
+            espnow_max_encrypt_num: 7 as i32,
             magic: WIFI_INIT_CONFIG_MAGIC as _,
             ..Default::default()
         };
