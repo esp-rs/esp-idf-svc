@@ -84,7 +84,7 @@ impl<'d> ThreadDriver<'d, Host> {
     // - Prio B: Think of a minimal example
     // - Prio C: How to support the OpenThread CLI (useful for debugging)
     // - Prio C: Figure out what these do (bad/missing docu):
-    //   - CONFIG_OPENTHREAD_DNS_CLIENT
+    //   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
     //   - CONFIG_OPENTHREAD_DIAG
     //   - CONFIG_OPENTHREAD_CSL_ENABLE
     //   - CONFIG_OPENTHREAD_DUA_ENABLE
@@ -111,11 +111,7 @@ impl<'d> ThreadDriver<'d, Host> {
                     esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
                 ..Default::default()
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
         esp!(unsafe { esp_openthread_init(&cfg) })?;
 
@@ -197,11 +193,7 @@ impl<'d> ThreadDriver<'d, Host> {
                     esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
                 ..Default::default()
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
         esp!(unsafe { esp_openthread_init(&cfg) })?;
 
@@ -251,11 +243,7 @@ impl<'d> ThreadDriver<'d, Host> {
                     esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
                 ..Default::default()
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
 
         #[cfg(not(esp_idf_version_major = "4"))]
@@ -284,11 +272,7 @@ impl<'d> ThreadDriver<'d, Host> {
                     esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
                 ..Default::default()
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
 
         esp!(unsafe { esp_openthread_init(&cfg) })?;
@@ -369,11 +353,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                     },
                 },
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
         esp!(unsafe { esp_openthread_init(&cfg) })?;
 
@@ -424,11 +404,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                     tx_pin: tx.pin() as _,
                 },
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
 
         #[cfg(not(esp_idf_version_major = "4"))]
@@ -457,11 +433,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                     },
                 },
             },
-            port_config: esp_openthread_port_config_t {
-                storage_partition_name: b"TODO\0" as *const _ as *const _,
-                netif_queue_size: 10,
-                task_queue_size: 10,
-            },
+            port_config: Self::PORT_CONFIG,
         };
 
         esp!(unsafe { esp_openthread_init(&cfg) })?;
@@ -478,6 +450,12 @@ impl<'d> ThreadDriver<'d, RCP> {
 }
 
 impl<'d, T> ThreadDriver<'d, T> {
+    const PORT_CONFIG: esp_openthread_port_config_t = esp_openthread_port_config_t {
+        storage_partition_name: b"nvs\0" as *const _ as *const _,
+        netif_queue_size: 10,
+        task_queue_size: 10,
+    };
+
     /// Run the Thread stack
     ///
     /// The current thread would block while the stack is running
