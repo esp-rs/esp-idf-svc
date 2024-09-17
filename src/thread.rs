@@ -721,9 +721,37 @@ impl EspEventDeserializer for ThreadEvent {
                 ThreadEvent::TrelMulticastJoined
             }
             esp_openthread_event_t_OPENTHREAD_EVENT_SET_DNS_SERVER => ThreadEvent::DnsServerSet,
+            // Since 5.2.2
+            #[cfg(any(
+                not(esp_idf_version_major = "4"),
+                not(esp_idf_version_major = "5"),
+                all(
+                    esp_idf_version_major = "5",
+                    not(esp_idf_version_minor = "0"),
+                    not(esp_idf_version_minor = "1"),
+                    not(all(
+                        esp_idf_version_minor = "2",
+                        any(esp_idf_version_patch = "0", esp_idf_version_patch = "1")
+                    )),
+                ),
+            ))]
             esp_openthread_event_t_OPENTHREAD_EVENT_PUBLISH_MESHCOP_E => {
                 ThreadEvent::MeshcopEPublishStarted
             }
+            // Since 5.2.2
+            #[cfg(any(
+                not(esp_idf_version_major = "4"),
+                not(esp_idf_version_major = "5"),
+                all(
+                    esp_idf_version_major = "5",
+                    not(esp_idf_version_minor = "0"),
+                    not(esp_idf_version_minor = "1"),
+                    not(all(
+                        esp_idf_version_minor = "2",
+                        any(esp_idf_version_patch = "0", esp_idf_version_patch = "1")
+                    )),
+                ),
+            ))]
             esp_openthread_event_t_OPENTHREAD_EVENT_REMOVE_MESHCOP_E => {
                 ThreadEvent::MeshcopERemoveStarted
             }
