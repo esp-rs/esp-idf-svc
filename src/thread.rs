@@ -57,6 +57,13 @@ static CS: CriticalSection = CriticalSection::new();
 /// For most use cases, utilizing `EspThread` - which provides a networking (IP)
 /// layer as well - should be preferred. Using `ThreadDriver` directly is beneficial
 /// only when one would like to utilize a custom, non-STD network stack like `smoltcp`.
+///
+/// The driver can work in two modes:
+/// - RCP (Radio Co-Processor) mode: The driver operates as a co-processor to the host,
+///   which is expected to be another chip connected to ours via SPI or UART. This is
+///   of course only supported with MCUs that do have a Thread radio, like esp32c2 and esp32c6
+/// - Host mode: The driver operates as a host, and if the chip does not have a Thread radio
+///   it has to be connected via SPI or USB to a chip which runs the Thread stack in RCP mode
 pub struct ThreadDriver<'d, T> {
     mode: T,
     _mounted_event_fs: Arc<MountedEventfs>,
@@ -66,6 +73,8 @@ pub struct ThreadDriver<'d, T> {
 }
 
 impl<'d> ThreadDriver<'d, Host> {
+    /// Create a new Thread Host driver instance utilizing the
+    /// native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
     pub fn new<M: crate::hal::modem::ThreadModemPeripheral>(
         _modem: impl Peripheral<P = M> + 'd,
@@ -101,6 +110,8 @@ impl<'d> ThreadDriver<'d, Host> {
         })
     }
 
+    /// Create a new Thread Host driver instance utilizing an SPI connection
+    /// to another MCU running the Thread stack in RCP mode.
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi<S: Spi>(
         _spi: impl Peripheral<P = S> + 'd,
@@ -184,6 +195,8 @@ impl<'d> ThreadDriver<'d, Host> {
         })
     }
 
+    /// Create a new Thread Host driver instance utilizing a UART connection
+    /// to another MCU running the Thread stack in RCP mode.
     pub fn new_uart<U: Uart>(
         _uart: impl Peripheral<P = U> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
@@ -240,6 +253,8 @@ impl<'d> ThreadDriver<'d, Host> {
 
 #[cfg(esp_idf_soc_ieee802154_supported)]
 impl<'d> ThreadDriver<'d, RCP> {
+    /// Create a new Thread RCP driver instance utilizing an SPI connection
+    /// to another MCU running the Thread Host stack.
     pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: Spi>(
         _modem: impl Peripheral<P = M> + 'd,
         _spi: impl Peripheral<P = S> + 'd,
@@ -317,6 +332,8 @@ impl<'d> ThreadDriver<'d, RCP> {
         })
     }
 
+    /// Create a new Thread RCP driver instance utilizing a UART connection
+    /// to another MCU running the Thread Host stack.
     pub fn new_rcp_uart<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
         _modem: impl Peripheral<P = M> + 'd,
         _uart: impl Peripheral<P = U> + 'd,
@@ -391,17 +408,16 @@ impl<'d, T> Drop for ThreadDriver<'d, T> {
     }
 }
 
-/// `EspWifi` wraps a `WifiDriver` Data Link layer instance, and binds the OSI
+/// `EspThread` wraps a `ThreadDriver` Data Link layer instance, and binds the OSI
 /// Layer 3 (network) facilities of ESP IDF to it.
 ///
-/// In other words, it connects the ESP IDF AP and STA Netif interfaces to the
-/// Wifi driver. This allows users to utilize the Rust STD APIs for working with
-/// TCP and UDP sockets.
+/// In other words, it connects the ESP IDF Netif interface to the Thread driver.
+/// This allows users to utilize the Rust STD APIs for working with TCP and UDP sockets.
 ///
-/// This struct should be the default option for a Wifi driver in all use cases
+/// This struct should be the default option for a Thread driver in all use cases
 /// but the niche one where bypassing the ESP IDF Netif and lwIP stacks is
 /// desirable. E.g., using `smoltcp` or other custom IP stacks on top of the
-/// ESP IDF Wifi radio.
+/// ESP IDF Thread radio.
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 pub struct EspThread<'d> {
     netif: EspNetif,
@@ -410,6 +426,7 @@ pub struct EspThread<'d> {
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<'d> EspThread<'d> {
+    /// Create a new `EspThread` instance utilizing the native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
     pub fn new<M: crate::hal::modem::ThreadModemPeripheral>(
         modem: impl Peripheral<P = M> + 'd,
@@ -420,6 +437,8 @@ impl<'d> EspThread<'d> {
         Self::wrap(ThreadDriver::new(modem, sysloop, nvs, mounted_event_fs)?)
     }
 
+    /// Create a new `EspThread` instance utilizing an SPI connection to another MCU
+    /// which is expected to run the Thread RCP driver mode over SPI
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi<S: Spi>(
         _spi: impl Peripheral<P = S> + 'd,
@@ -445,6 +464,8 @@ impl<'d> EspThread<'d> {
         )?)
     }
 
+    /// Create a new `EspThread` instance utilizing a UART connection to another MCU
+    /// which is expected to run the Thread RCP driver mode over UART
     pub fn new_uart<U: Uart>(
         _uart: impl Peripheral<P = U> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
@@ -463,10 +484,12 @@ impl<'d> EspThread<'d> {
         )?)
     }
 
+    /// Wrap an already created Thread L2 driver instance
     pub fn wrap(driver: ThreadDriver<'d, Host>) -> Result<Self, EspError> {
         Self::wrap_all(driver, EspNetif::new(NetifStack::Thread)?)
     }
 
+    /// Wrap an already created Thread L2 driver instance and a network interface
     pub fn wrap_all(driver: ThreadDriver<'d, Host>, netif: EspNetif) -> Result<Self, EspError> {
         let mut this = Self { driver, netif };
 
@@ -475,7 +498,7 @@ impl<'d> EspThread<'d> {
         Ok(this)
     }
 
-    /// Replaces the network interface with the provided one and returns the
+    /// Replace the network interface with the provided one and return the
     /// existing network interface.
     pub fn swap_netif(&mut self, netif: EspNetif) -> Result<EspNetif, EspError> {
         self.detach_netif()?;
@@ -487,22 +510,22 @@ impl<'d> EspThread<'d> {
         Ok(old)
     }
 
-    /// Returns the underlying [`ThreadDriver`]
+    /// Return the underlying [`ThreadDriver`]
     pub fn driver(&self) -> &ThreadDriver<'d, Host> {
         &self.driver
     }
 
-    /// Returns the underlying [`ThreadDriver`], as mutable
+    /// Return the underlying [`ThreadDriver`], as mutable
     pub fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
         &mut self.driver
     }
 
-    /// Returns the underlying [`EspNetif`]
+    /// Return the underlying [`EspNetif`]
     pub fn netif(&self) -> &EspNetif {
         &self.netif
     }
 
-    /// Returns the underlying [`EspNetif`] as mutable
+    /// Return the underlying [`EspNetif`] as mutable
     pub fn netif_mut(&mut self) -> &mut EspNetif {
         &mut self.netif
     }
