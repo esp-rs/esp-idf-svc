@@ -23,7 +23,7 @@ esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 
 [features]
-default = ["std", "binstart"]
+default = ["std", "binstart", "experimental"]
 
 std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std", "futures-io"]
 alloc = ["esp-idf-hal/alloc", "embedded-svc/alloc", "uncased/alloc"]
