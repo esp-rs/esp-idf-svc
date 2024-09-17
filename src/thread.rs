@@ -507,6 +507,7 @@ impl<'d> EspThread<'d> {
 
     /// Create a new `EspThread` instance utilizing an SPI connection to another MCU
     /// which is expected to run the Thread RCP driver mode over SPI
+    #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi<S: Spi>(
         _spi: impl Peripheral<P = S> + 'd,
