@@ -73,16 +73,24 @@ pub struct ThreadDriver<'d, T> {
 
 impl<'d> ThreadDriver<'d, Host> {
     // TODO:
-    // - Prio A: Ways to programmatically set the Thread Operational Dataset (esp_openthread_auto_start?)
+    // - Prio A: Ways to programmatically set the Thread Operational Dataset (esp_openthread_auto_start / otDatasetSetActiveTlvs / otDatasetSetActive?)
     // - Prio A: Ways to perform active and energy scan (otLinkActiveScan / otLinkEnergyScan)
     // - Prio A: Status report (joined the network, device type, more?)
     // - Prio A: Map all Thread eventloop events to a Rust `ThreadEvent` enum
-    // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device)
+    // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
     // - Prio B: How to control when a device becomes a router?
-    // - Prio B: How to support the Border Router case?
-    // - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter)
+    // - Prio B: How to support the Border Router case? (esp_openthread_border_router_init / esp_openthread_border_router_deinit? probably also needs CONFIG_OPENTHREAD_BORDER_ROUTER=y)
+    // - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - no ESP API it seems, just like CONFIG_OPENTHREAD_COMMISSIONER?)
     // - Prio B: Think of a minimal example
     // - Prio C: How to support the OpenThread CLI (useful for debugging)
+    // - Prio C: Figure out what these do (bad/missing docu):
+    //   - CONFIG_OPENTHREAD_DNS_CLIENT
+    //   - CONFIG_OPENTHREAD_DIAG
+    //   - CONFIG_OPENTHREAD_CSL_ENABLE
+    //   - CONFIG_OPENTHREAD_DUA_ENABLE
+    //   - CONFIG_OPENTHREAD_SRP_CLIENT
+    //   - CONFIG_OPENTHREAD_DNS64_CLIENT? "Select this option to acquire NAT64 address from dns servers" why does this require explicit conf
+    //     or in fact why does this has anything to do with the OpenThread client?
 
     /// Create a new Thread Host driver instance utilizing the
     /// native Thread radio on the MCU
