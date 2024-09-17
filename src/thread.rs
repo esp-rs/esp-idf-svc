@@ -7,7 +7,6 @@ use log::debug;
 use crate::eventloop::EspSystemEventLoop;
 use crate::hal::gpio::{InputPin, OutputPin};
 use crate::hal::peripheral::Peripheral;
-use crate::hal::spi::Spi;
 use crate::hal::uart::Uart;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 use crate::handle::RawHandle;
@@ -114,7 +113,7 @@ impl<'d> ThreadDriver<'d, Host> {
     /// to another MCU running the Thread stack in RCP mode.
     #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
-    pub fn new_spi<S: Spi>(
+    pub fn new_spi<S: crate::hal::spi::Spi>(
         _spi: impl Peripheral<P = S> + 'd,
         mosi: impl Peripheral<P = impl InputPin> + 'd,
         miso: impl Peripheral<P = impl OutputPin> + 'd,
@@ -291,7 +290,7 @@ impl<'d> ThreadDriver<'d, RCP> {
     /// to another MCU running the Thread Host stack.
     #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
-    pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: Spi>(
+    pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: crate::hal::spi::Spi>(
         _modem: impl Peripheral<P = M> + 'd,
         _spi: impl Peripheral<P = S> + 'd,
         mosi: impl Peripheral<P = impl InputPin> + 'd,
@@ -511,7 +510,7 @@ impl<'d> EspThread<'d> {
     /// which is expected to run the Thread RCP driver mode over SPI
     #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
-    pub fn new_spi<S: Spi>(
+    pub fn new_spi<S: crate::hal::spi::Spi>(
         _spi: impl Peripheral<P = S> + 'd,
         mosi: impl Peripheral<P = impl InputPin> + 'd,
         miso: impl Peripheral<P = impl OutputPin> + 'd,
