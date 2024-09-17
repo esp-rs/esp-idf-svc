@@ -1,12 +1,13 @@
-use core::fmt::Debug;
+use core::ffi;
+use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 
-use esp_idf_hal::task::CriticalSection;
 use log::debug;
 
-use crate::eventloop::EspSystemEventLoop;
+use crate::eventloop::{EspEventDeserializer, EspEventSource, EspSystemEventLoop};
 use crate::hal::gpio::{InputPin, OutputPin};
 use crate::hal::peripheral::Peripheral;
+use crate::hal::task::CriticalSection;
 use crate::hal::uart::Uart;
 #[cfg(esp_idf_comp_esp_netif_enabled)]
 use crate::handle::RawHandle;
@@ -35,7 +36,7 @@ pub struct RCP;
 pub struct Host(esp_openthread_platform_config_t);
 
 impl Debug for Host {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Host").finish()
     }
 }
@@ -76,7 +77,6 @@ impl<'d> ThreadDriver<'d, Host> {
     // - Prio A: Ways to programmatically set the Thread Operational Dataset (esp_openthread_auto_start / otDatasetSetActiveTlvs / otDatasetSetActive?)
     // - Prio A: Ways to perform active and energy scan (otLinkActiveScan / otLinkEnergyScan)
     // - Prio A: Status report (joined the network, device type, more?)
-    // - Prio A: Map all Thread eventloop events to a Rust `ThreadEvent` enum
     // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
     // - Prio B: How to control when a device becomes a router?
     // - Prio B: How to support the Border Router case? (esp_openthread_border_router_init / esp_openthread_border_router_deinit? probably also needs CONFIG_OPENTHREAD_BORDER_ROUTER=y)
@@ -629,5 +629,105 @@ impl<'d> EspThread<'d> {
 impl Drop for EspThread<'_> {
     fn drop(&mut self) {
         let _ = self.detach_netif();
+    }
+}
+
+/// Events reported by the Thread stack on the system event loop
+#[derive(Copy, Clone, Debug)]
+pub enum ThreadEvent {
+    /// Thread stack started
+    Started,
+    /// Thread stack stopped
+    Stopped,
+    /// Thread stack detached
+    Detached,
+    /// Thread stack attached
+    Attached,
+    /// Thread role changed
+    RoleChanged {
+        current_role: otDeviceRole,
+        previous_role: otDeviceRole,
+    },
+    /// Thread network interface up
+    IfUp,
+    /// Thread network interface down
+    IfDown,
+    /// Thread got IPv6 address
+    GotIpv6,
+    /// Thread lost IPv6 address
+    LostIpv6,
+    /// Thread multicast group joined
+    MulticastJoined,
+    /// Thread multicast group left
+    MulticastLeft,
+    /// Thread TREL IPv6 address added
+    TrelIpv6Added,
+    /// Thread TREL IPv6 address removed
+    TrelIpv6Removed,
+    /// Thread TREL multicast group joined
+    TrelMulticastJoined,
+    /// Thread DNS server set
+    DnsServerSet,
+    /// Thread Meshcop E Publish started
+    MeshcopEPublishStarted,
+    /// Thread Meshcop E Remove started
+    MeshcopERemoveStarted,
+}
+
+unsafe impl EspEventSource for ThreadEvent {
+    fn source() -> Option<&'static ffi::CStr> {
+        Some(unsafe { ffi::CStr::from_ptr(OPENTHREAD_EVENT) })
+    }
+}
+
+impl EspEventDeserializer for ThreadEvent {
+    type Data<'d> = ThreadEvent;
+
+    #[allow(non_upper_case_globals, non_snake_case)]
+    fn deserialize<'d>(data: &crate::eventloop::EspEvent<'d>) -> ThreadEvent {
+        let event_id = data.event_id as u32;
+
+        match event_id {
+            esp_openthread_event_t_OPENTHREAD_EVENT_START => ThreadEvent::Started,
+            esp_openthread_event_t_OPENTHREAD_EVENT_STOP => ThreadEvent::Stopped,
+            esp_openthread_event_t_OPENTHREAD_EVENT_DETACHED => ThreadEvent::Detached,
+            esp_openthread_event_t_OPENTHREAD_EVENT_ATTACHED => ThreadEvent::Attached,
+            esp_openthread_event_t_OPENTHREAD_EVENT_ROLE_CHANGED => {
+                let payload = unsafe {
+                    (data.payload.unwrap() as *const _
+                        as *const esp_openthread_role_changed_event_t)
+                        .as_ref()
+                }
+                .unwrap();
+
+                ThreadEvent::RoleChanged {
+                    current_role: payload.current_role,
+                    previous_role: payload.previous_role,
+                }
+            }
+            esp_openthread_event_t_OPENTHREAD_EVENT_IF_UP => ThreadEvent::IfUp,
+            esp_openthread_event_t_OPENTHREAD_EVENT_IF_DOWN => ThreadEvent::IfDown,
+            esp_openthread_event_t_OPENTHREAD_EVENT_GOT_IP6 => ThreadEvent::GotIpv6,
+            esp_openthread_event_t_OPENTHREAD_EVENT_LOST_IP6 => ThreadEvent::LostIpv6,
+            esp_openthread_event_t_OPENTHREAD_EVENT_MULTICAST_GROUP_JOIN => {
+                ThreadEvent::MulticastJoined
+            }
+            esp_openthread_event_t_OPENTHREAD_EVENT_MULTICAST_GROUP_LEAVE => {
+                ThreadEvent::MulticastLeft
+            }
+            esp_openthread_event_t_OPENTHREAD_EVENT_TREL_ADD_IP6 => ThreadEvent::TrelIpv6Added,
+            esp_openthread_event_t_OPENTHREAD_EVENT_TREL_REMOVE_IP6 => ThreadEvent::TrelIpv6Removed,
+            esp_openthread_event_t_OPENTHREAD_EVENT_TREL_MULTICAST_GROUP_JOIN => {
+                ThreadEvent::TrelMulticastJoined
+            }
+            esp_openthread_event_t_OPENTHREAD_EVENT_SET_DNS_SERVER => ThreadEvent::DnsServerSet,
+            esp_openthread_event_t_OPENTHREAD_EVENT_PUBLISH_MESHCOP_E => {
+                ThreadEvent::MeshcopEPublishStarted
+            }
+            esp_openthread_event_t_OPENTHREAD_EVENT_REMOVE_MESHCOP_E => {
+                ThreadEvent::MeshcopERemoveStarted
+            }
+            _ => panic!("unknown event ID: {}", event_id),
+        }
     }
 }
