@@ -79,9 +79,10 @@ impl<'d> ThreadDriver<'d, Host> {
     // - Prio A: Map all Thread eventloop events to a Rust `ThreadEvent` enum
     // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device)
     // - Prio B: How to control when a device becomes a router?
+    // - Prio B: How to support the Border Router case?
     // - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter)
-    // - Prio B: How to support the OpenThread CLI (useful for debugging)
     // - Prio B: Think of a minimal example
+    // - Prio C: How to support the OpenThread CLI (useful for debugging)
 
     /// Create a new Thread Host driver instance utilizing the
     /// native Thread radio on the MCU
