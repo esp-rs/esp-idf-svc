@@ -72,6 +72,17 @@ pub struct ThreadDriver<'d, T> {
 }
 
 impl<'d> ThreadDriver<'d, Host> {
+    // TODO:
+    // - Prio A: Ways to programmatically set the Thread Operational Dataset (esp_openthread_auto_start?)
+    // - Prio A: Ways to perform active and energy scan (otLinkActiveScan / otLinkEnergyScan)
+    // - Prio A: Status report (joined the network, device type, more?)
+    // - Prio A: Map all Thread eventloop events to a Rust `ThreadEvent` enum
+    // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device)
+    // - Prio B: How to control when a device becomes a router?
+    // - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter)
+    // - Prio B: How to support the OpenThread CLI (useful for debugging)
+    // - Prio B: Think of a minimal example
+
     /// Create a new Thread Host driver instance utilizing the
     /// native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
