@@ -460,7 +460,8 @@ impl<'d> ThreadDriver<'d, RCP> {
 impl<'d, T> ThreadDriver<'d, T> {
     /// Run the Thread stack
     ///
-    /// The current thread would block until the stack is running
+    /// The current thread would block while the stack is running
+    /// Note that the stack will only exit if an error occurs
     pub fn run(&self) -> Result<(), EspError> {
         // TODO: Figure out how to stop running
 
@@ -600,6 +601,9 @@ impl<'d> EspThread<'d> {
     }
 
     /// Run the Thread stack
+    ///
+    /// The current thread would block while the stack is running
+    /// Note that the stack will only exit if an error occurs
     pub fn run(&self) -> Result<(), EspError> {
         self.driver.run()
     }
