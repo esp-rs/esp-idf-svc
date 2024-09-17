@@ -120,7 +120,17 @@ impl NetifStack {
                 Self::Ppp => _g_esp_netif_netstack_default_ppp,
                 #[cfg(esp_idf_lwip_slip_support)]
                 Self::Slip => _g_esp_netif_netstack_default_slip,
-                #[cfg(all(esp_idf_comp_openthread_enabled, esp_idf_openthread_enabled,))]
+                #[cfg(all(
+                    esp_idf_comp_openthread_enabled,
+                    esp_idf_openthread_enabled,
+                    esp_idf_version_major = "4"
+                ))]
+                Self::Thread => _g_esp_netif_netstack_default_openthread,
+                #[cfg(all(
+                    esp_idf_comp_openthread_enabled,
+                    esp_idf_openthread_enabled,
+                    not(esp_idf_version_major = "4")
+                ))]
                 Self::Thread => &g_esp_netif_netstack_default_openthread,
             }
         }

@@ -112,6 +112,7 @@ impl<'d> ThreadDriver<'d, Host> {
 
     /// Create a new Thread Host driver instance utilizing an SPI connection
     /// to another MCU running the Thread stack in RCP mode.
+    #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi<S: Spi>(
         _spi: impl Peripheral<P = S> + 'd,
@@ -207,6 +208,38 @@ impl<'d> ThreadDriver<'d, Host> {
     ) -> Result<Self, EspError> {
         crate::hal::into_ref!(rx, tx);
 
+        #[cfg(esp_idf_version_major = "4")]
+        let cfg = esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
+                radio_uart_config: esp_openthread_uart_config_t {
+                    port: U::port() as _,
+                    uart_config: uart_config_t {
+                        baud_rate: BAUD_RATE as _,
+                        data_bits: 8,
+                        parity: 0,
+                        stop_bits: 1,
+                        flow_ctrl: 0,
+                        rx_flow_ctrl_thresh: 0,
+                        ..Default::default()
+                    },
+                    rx_pin: rx.pin() as _,
+                    tx_pin: tx.pin() as _,
+                },
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
+                ..Default::default()
+            },
+            port_config: esp_openthread_port_config_t {
+                storage_partition_name: b"TODO\0" as *const _ as *const _,
+                netif_queue_size: 10,
+                task_queue_size: 10,
+            },
+        };
+
+        #[cfg(not(esp_idf_version_major = "4"))]
         let cfg = esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
                 radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
@@ -238,6 +271,7 @@ impl<'d> ThreadDriver<'d, Host> {
                 task_queue_size: 10,
             },
         };
+
         esp!(unsafe { esp_openthread_init(&cfg) })?;
 
         debug!("Driver initialized");
@@ -255,6 +289,7 @@ impl<'d> ThreadDriver<'d, Host> {
 impl<'d> ThreadDriver<'d, RCP> {
     /// Create a new Thread RCP driver instance utilizing an SPI connection
     /// to another MCU running the Thread Host stack.
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: Spi>(
         _modem: impl Peripheral<P = M> + 'd,
         _spi: impl Peripheral<P = S> + 'd,
@@ -345,6 +380,38 @@ impl<'d> ThreadDriver<'d, RCP> {
     ) -> Result<Self, EspError> {
         crate::hal::into_ref!(rx, tx);
 
+        #[cfg(esp_idf_version_major = "4")]
+        let cfg = esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
+                ..Default::default()
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
+                host_uart_config: esp_openthread_uart_config_t {
+                    port: U::port() as _,
+                    uart_config: uart_config_t {
+                        baud_rate: BAUD_RATE as _,
+                        data_bits: 8,
+                        parity: 0,
+                        stop_bits: 1,
+                        flow_ctrl: 0,
+                        rx_flow_ctrl_thresh: 0,
+                        ..Default::default()
+                    },
+                    rx_pin: rx.pin() as _,
+                    tx_pin: tx.pin() as _,
+                },
+            },
+            port_config: esp_openthread_port_config_t {
+                storage_partition_name: b"TODO\0" as *const _ as *const _,
+                netif_queue_size: 10,
+                task_queue_size: 10,
+            },
+        };
+
+        #[cfg(not(esp_idf_version_major = "4"))]
         let cfg = esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
                 radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
@@ -376,6 +443,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                 task_queue_size: 10,
             },
         };
+
         esp!(unsafe { esp_openthread_init(&cfg) })?;
 
         debug!("Driver initialized");
