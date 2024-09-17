@@ -290,6 +290,7 @@ impl<'d> ThreadDriver<'d, RCP> {
     /// Create a new Thread RCP driver instance utilizing an SPI connection
     /// to another MCU running the Thread Host stack.
     #[cfg(not(esp_idf_version_major = "4"))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: Spi>(
         _modem: impl Peripheral<P = M> + 'd,
         _spi: impl Peripheral<P = S> + 'd,
