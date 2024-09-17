@@ -684,7 +684,7 @@ impl EspEventDeserializer for ThreadEvent {
     type Data<'d> = ThreadEvent;
 
     #[allow(non_upper_case_globals, non_snake_case)]
-    fn deserialize<'d>(data: &crate::eventloop::EspEvent<'d>) -> ThreadEvent {
+    fn deserialize(data: &crate::eventloop::EspEvent) -> ThreadEvent {
         let event_id = data.event_id as u32;
 
         match event_id {
@@ -723,8 +723,7 @@ impl EspEventDeserializer for ThreadEvent {
             esp_openthread_event_t_OPENTHREAD_EVENT_SET_DNS_SERVER => ThreadEvent::DnsServerSet,
             // Since 5.2.2
             #[cfg(any(
-                not(esp_idf_version_major = "4"),
-                not(esp_idf_version_major = "5"),
+                not(any(esp_idf_version_major = "4", esp_idf_version_major = "5")),
                 all(
                     esp_idf_version_major = "5",
                     not(esp_idf_version_minor = "0"),
@@ -740,8 +739,7 @@ impl EspEventDeserializer for ThreadEvent {
             }
             // Since 5.2.2
             #[cfg(any(
-                not(esp_idf_version_major = "4"),
-                not(esp_idf_version_major = "5"),
+                not(any(esp_idf_version_major = "4", esp_idf_version_major = "5")),
                 all(
                     esp_idf_version_major = "5",
                     not(esp_idf_version_minor = "0"),
