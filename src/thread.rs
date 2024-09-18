@@ -640,10 +640,13 @@ pub enum ThreadEvent {
     /// Thread stack stopped
     Stopped,
     /// Thread stack detached
+    #[cfg(not(esp_idf_version_major = "4"))]
     Detached,
     /// Thread stack attached
+    #[cfg(not(esp_idf_version_major = "4"))]
     Attached,
     /// Thread role changed
+    #[cfg(not(esp_idf_version_major = "4"))]
     RoleChanged {
         current_role: otDeviceRole,
         previous_role: otDeviceRole,
@@ -661,16 +664,50 @@ pub enum ThreadEvent {
     /// Thread multicast group left
     MulticastLeft,
     /// Thread TREL IPv6 address added
+    #[cfg(not(esp_idf_version_major = "4"))]
     TrelIpv6Added,
     /// Thread TREL IPv6 address removed
+    #[cfg(not(esp_idf_version_major = "4"))]
     TrelIpv6Removed,
     /// Thread TREL multicast group joined
+    #[cfg(not(esp_idf_version_major = "4"))]
     TrelMulticastJoined,
     /// Thread DNS server set
+    // Since 5.1
+    #[cfg(all(
+        not(esp_idf_version_major = "4"),
+        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "0"))
+    ))]
     DnsServerSet,
     /// Thread Meshcop E Publish started
+    // Since 5.2.2
+    #[cfg(any(
+        not(any(esp_idf_version_major = "4", esp_idf_version_major = "5")),
+        all(
+            esp_idf_version_major = "5",
+            not(esp_idf_version_minor = "0"),
+            not(esp_idf_version_minor = "1"),
+            not(all(
+                esp_idf_version_minor = "2",
+                any(esp_idf_version_patch = "0", esp_idf_version_patch = "1")
+            )),
+        ),
+    ))]
     MeshcopEPublishStarted,
     /// Thread Meshcop E Remove started
+    // Since 5.2.2
+    #[cfg(any(
+        not(any(esp_idf_version_major = "4", esp_idf_version_major = "5")),
+        all(
+            esp_idf_version_major = "5",
+            not(esp_idf_version_minor = "0"),
+            not(esp_idf_version_minor = "1"),
+            not(all(
+                esp_idf_version_minor = "2",
+                any(esp_idf_version_patch = "0", esp_idf_version_patch = "1")
+            )),
+        ),
+    ))]
     MeshcopERemoveStarted,
 }
 
@@ -690,8 +727,11 @@ impl EspEventDeserializer for ThreadEvent {
         match event_id {
             esp_openthread_event_t_OPENTHREAD_EVENT_START => ThreadEvent::Started,
             esp_openthread_event_t_OPENTHREAD_EVENT_STOP => ThreadEvent::Stopped,
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_DETACHED => ThreadEvent::Detached,
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_ATTACHED => ThreadEvent::Attached,
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_ROLE_CHANGED => {
                 let payload = unsafe {
                     (data.payload.unwrap() as *const _
@@ -715,11 +755,18 @@ impl EspEventDeserializer for ThreadEvent {
             esp_openthread_event_t_OPENTHREAD_EVENT_MULTICAST_GROUP_LEAVE => {
                 ThreadEvent::MulticastLeft
             }
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_TREL_ADD_IP6 => ThreadEvent::TrelIpv6Added,
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_TREL_REMOVE_IP6 => ThreadEvent::TrelIpv6Removed,
+            #[cfg(not(esp_idf_version_major = "4"))]
             esp_openthread_event_t_OPENTHREAD_EVENT_TREL_MULTICAST_GROUP_JOIN => {
                 ThreadEvent::TrelMulticastJoined
             }
+            #[cfg(all(
+                not(esp_idf_version_major = "4"),
+                not(all(esp_idf_version_major = "5", esp_idf_version_minor = "0"))
+            ))]
             esp_openthread_event_t_OPENTHREAD_EVENT_SET_DNS_SERVER => ThreadEvent::DnsServerSet,
             // Since 5.2.2
             #[cfg(any(
