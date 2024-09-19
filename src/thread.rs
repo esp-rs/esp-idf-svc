@@ -3,7 +3,6 @@
 // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
 // - Prio B: API to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
 // - Prio B: API to to enable the Commissioner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_COMMISSIONER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
-// - Prio B: Think of a minimal example
 // - Prio C: How to support the OpenThread CLI (useful for debugging)
 // - Prio C: Figure out what these do (bad/missing docu):
 //   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
@@ -650,6 +649,7 @@ impl<'d> ThreadDriver<'d, RCP> {
 
     /// Create a new Thread RCP driver instance utilizing a UART connection
     /// to another MCU running the Thread Host stack.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_rcp_uart<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
         modem: impl Peripheral<P = M> + 'd,
         uart: impl Peripheral<P = U> + 'd,
