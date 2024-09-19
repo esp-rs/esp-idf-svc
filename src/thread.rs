@@ -1,7 +1,8 @@
 // TODO:
-// - Prio A: Status report (joined the network, device type, more?)
+// - Prio A: Status report (we have driver::role() now; more, e.g. ipv6 notifications?)
 // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
-// - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - no ESP API it seems, just like CONFIG_OPENTHREAD_COMMISSIONER?)
+// - Prio B: API to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
+// - Prio B: API to to enable the Commissioner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_COMMISSIONER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
 // - Prio B: Think of a minimal example
 // - Prio C: How to support the OpenThread CLI (useful for debugging)
 // - Prio C: Figure out what these do (bad/missing docu):
@@ -180,6 +181,29 @@ impl<'a> EnergyScanResult<'a> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Role {
+    Disabled,
+    Detached,
+    Child,
+    Router,
+    Leader,
+}
+
+#[allow(non_upper_case_globals, non_snake_case)]
+impl From<otDeviceRole> for Role {
+    fn from(role: otDeviceRole) -> Self {
+        match role {
+            otDeviceRole_OT_DEVICE_ROLE_DISABLED => Role::Disabled,
+            otDeviceRole_OT_DEVICE_ROLE_DETACHED => Role::Detached,
+            otDeviceRole_OT_DEVICE_ROLE_CHILD => Role::Child,
+            otDeviceRole_OT_DEVICE_ROLE_ROUTER => Role::Router,
+            otDeviceRole_OT_DEVICE_ROLE_LEADER => Role::Leader,
+            _ => Role::Disabled,
+        }
+    }
+}
+
 /// This struct provides a safe wrapper over the ESP IDF Thread C driver.
 ///
 /// The driver works on Layer 2 (Data Link) in the OSI model, in that it provides
@@ -270,6 +294,13 @@ impl<'d> ThreadDriver<'d, Host> {
             _mode: Host(()),
             _p: PhantomData,
         })
+    }
+
+    /// Retrieve the current role of the device in the Thread network
+    pub fn role(&self) -> Result<Role, EspError> {
+        let _lock = OtLock::acquire()?;
+
+        Ok(unsafe { otThreadGetDeviceRole(esp_openthread_get_instance()) }.into())
     }
 
     /// Retrieve the active TOD (Thread Operational Dataset) in the user-supplied buffer
@@ -1091,6 +1122,11 @@ where
     /// Return the underlying [`EspNetif`] as mutable
     pub fn netif_mut(&mut self) -> &mut EspNetif {
         &mut self.netif
+    }
+
+    /// Retrieve the current role of the device in the Thread network
+    pub fn role(&self) -> Result<Role, EspError> {
+        self.driver().role()
     }
 
     /// Retrieve the active TOD (Thread Operational Dataset) in the user-supplied buffer
