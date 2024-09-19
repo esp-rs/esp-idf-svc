@@ -806,11 +806,15 @@ where
 
         esp!(unsafe { esp_openthread_init(&self.cfg) })?;
 
+        debug!("Driver initialized");
+
         T::init();
 
         let result = esp!(unsafe { esp_openthread_launch_mainloop() });
 
         esp!(unsafe { esp_openthread_deinit() })?;
+
+        debug!("Driver deinitialized");
 
         result
     }
