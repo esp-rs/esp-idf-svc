@@ -21,14 +21,13 @@ jobs:
       matrix:
         target:
           - riscv32imc-esp-espidf
-          - riscv32imac-esp-espidf
+#          - riscv32imac-esp-espidf
           - xtensa-esp32-espidf
           - xtensa-esp32s2-espidf
           - xtensa-esp32s3-espidf
         idf-version:
 #          - v4.4.7
-#          - v5.1.2
-          - v5.3.1
+          - v5.1.2
     steps:
       - name: Setup | Checkout
         uses: actions/checkout@v3
