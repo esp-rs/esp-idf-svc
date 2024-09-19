@@ -43,11 +43,13 @@ impl Debug for Host {
     }
 }
 
-#[cfg(all(esp32c2, esp_idf_xtal_freq_26))]
-const BAUD_RATE: u32 = 74880;
+pub mod config {
+    #[cfg(all(esp32c2, esp_idf_xtal_freq_26))]
+    const UART_DEFAULT_BAUD_RATE: u32 = 74880;
 
-#[cfg(not(all(esp32c2, esp_idf_xtal_freq_26)))]
-const BAUD_RATE: u32 = 115200;
+    #[cfg(not(all(esp32c2, esp_idf_xtal_freq_26)))]
+    const UART_DEFAULT_BAUD_RATE: u32 = 115200;
+}
 
 macro_rules! ot_esp {
     ($err:expr) => {{
@@ -220,8 +222,9 @@ impl<'d> ThreadDriver<'d, Host> {
     /// to another MCU running the Thread stack in RCP mode.
     pub fn new_uart<U: Uart>(
         _uart: impl Peripheral<P = U> + 'd,
-        rx: impl Peripheral<P = impl InputPin> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
@@ -234,15 +237,7 @@ impl<'d> ThreadDriver<'d, Host> {
                 radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
                 radio_uart_config: esp_openthread_uart_config_t {
                     port: U::port() as _,
-                    uart_config: uart_config_t {
-                        baud_rate: BAUD_RATE as _,
-                        data_bits: 8,
-                        parity: 0,
-                        stop_bits: 1,
-                        flow_ctrl: 0,
-                        rx_flow_ctrl_thresh: 0,
-                        ..Default::default()
-                    },
+                    uart_config: config.into(),
                     rx_pin: rx.pin() as _,
                     tx_pin: tx.pin() as _,
                 },
@@ -262,15 +257,7 @@ impl<'d> ThreadDriver<'d, Host> {
                 __bindgen_anon_1: esp_openthread_radio_config_t__bindgen_ty_1 {
                     radio_uart_config: esp_openthread_uart_config_t {
                         port: U::port() as _,
-                        uart_config: uart_config_t {
-                            baud_rate: BAUD_RATE as _,
-                            data_bits: 8,
-                            parity: 0,
-                            stop_bits: 1,
-                            flow_ctrl: 0,
-                            rx_flow_ctrl_thresh: 0,
-                            ..Default::default()
-                        },
+                        uart_config: config.into(),
                         rx_pin: rx.pin() as _,
                         tx_pin: tx.pin() as _,
                     },
@@ -425,8 +412,9 @@ impl<'d> ThreadDriver<'d, RCP> {
     pub fn new_rcp_uart<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
         _modem: impl Peripheral<P = M> + 'd,
         _uart: impl Peripheral<P = U> + 'd,
-        rx: impl Peripheral<P = impl InputPin> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
@@ -444,15 +432,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                     esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
                 host_uart_config: esp_openthread_uart_config_t {
                     port: U::port() as _,
-                    uart_config: uart_config_t {
-                        baud_rate: BAUD_RATE as _,
-                        data_bits: 8,
-                        parity: 0,
-                        stop_bits: 1,
-                        flow_ctrl: 0,
-                        rx_flow_ctrl_thresh: 0,
-                        ..Default::default()
-                    },
+                    uart_config: config.into(),
                     rx_pin: rx.pin() as _,
                     tx_pin: tx.pin() as _,
                 },
@@ -472,15 +452,7 @@ impl<'d> ThreadDriver<'d, RCP> {
                 __bindgen_anon_1: esp_openthread_host_connection_config_t__bindgen_ty_1 {
                     host_uart_config: esp_openthread_uart_config_t {
                         port: U::port() as _,
-                        uart_config: uart_config_t {
-                            baud_rate: BAUD_RATE as _,
-                            data_bits: 8,
-                            parity: 0,
-                            stop_bits: 1,
-                            flow_ctrl: 0,
-                            rx_flow_ctrl_thresh: 0,
-                            ..Default::default()
-                        },
+                        uart_config: config.into(),
                         rx_pin: rx.pin() as _,
                         tx_pin: tx.pin() as _,
                     },
@@ -679,16 +651,18 @@ impl<'d> EspThread<'d> {
     /// which is expected to run the Thread RCP driver mode over UART
     pub fn new_uart<U: Uart>(
         _uart: impl Peripheral<P = U> + 'd,
-        rx: impl Peripheral<P = impl InputPin> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
     ) -> Result<Self, EspError> {
         Self::wrap(ThreadDriver::new_uart(
             _uart,
-            rx,
             tx,
+            rx,
+            config,
             _sysloop,
             nvs,
             mounted_event_fs,
