@@ -51,7 +51,7 @@ const BAUD_RATE: u32 = 115200;
 
 macro_rules! ot_esp {
     ($err:expr) => {{
-        esp!(match $err {
+        esp!(match $err as _ {
             otError_OT_ERROR_NONE => ESP_OK,
             otError_OT_ERROR_FAILED => ESP_FAIL,
             _ => ESP_FAIL, // For now
@@ -334,6 +334,10 @@ impl<'d> ThreadDriver<'d, Host> {
     }
 }
 
+extern "C" {
+    fn otAppNcpInit(instance: *mut otInstance);
+}
+
 #[cfg(esp_idf_soc_ieee802154_supported)]
 impl<'d> ThreadDriver<'d, RCP> {
     /// Create a new Thread RCP driver instance utilizing an SPI connection
@@ -403,6 +407,10 @@ impl<'d> ThreadDriver<'d, RCP> {
         };
 
         Self::init(&cfg, false)?;
+
+        unsafe {
+            otAppNcpInit(esp_openthread_get_instance());
+        }
 
         Ok(Self {
             mode: RCP,
@@ -482,6 +490,10 @@ impl<'d> ThreadDriver<'d, RCP> {
         };
 
         Self::init(&cfg, false)?;
+
+        unsafe {
+            otAppNcpInit(esp_openthread_get_instance());
+        }
 
         Ok(Self {
             mode: RCP,
@@ -727,6 +739,45 @@ impl<'d> EspThread<'d> {
     /// Return the underlying [`EspNetif`] as mutable
     pub fn netif_mut(&mut self) -> &mut EspNetif {
         &mut self.netif
+    }
+
+    /// Retrieve the active TOD (Thread Operational Dataset) in the user-supplied buffer
+    ///
+    /// Return the size of the TOD data written to the buffer
+    ///
+    /// The TOD is in Thread TLV format.
+    pub fn tod(&self, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.driver().tod(buf)
+    }
+
+    /// Retrieve the pending TOD (Thread Operational Dataset) in the user-supplied buffer
+    ///
+    /// Return the size of the TOD data written to the buffer
+    ///
+    /// The TOD is in Thread TLV format.
+    pub fn pending_tod(&self, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.driver().pending_tod(buf)
+    }
+
+    /// Set the active TOD (Thread Operational Dataset) to the provided data
+    ///
+    /// The TOD data should be in Thread TLV format.
+    pub fn set_tod(&self, tod: &[u8]) -> Result<(), EspError> {
+        self.driver().set_tod(tod)
+    }
+
+    /// Set the pending TOD (Thread Operational Dataset) to the provided data
+    ///
+    /// The TOD data should be in Thread TLV format.
+    pub fn set_pending_tod(&self, tod: &[u8]) -> Result<(), EspError> {
+        self.driver().set_pending_tod(tod)
+    }
+
+    /// Set the active TOD (Thread Operational Dataset) according to the
+    /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
+    /// during build (via `sdkconfig*)
+    pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
+        ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
 
     /// Run the Thread stack
