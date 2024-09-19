@@ -148,6 +148,7 @@ impl<'d> ThreadDriver<'d, Host> {
         sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
         cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
         intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        config: &crate::hal::spi::config::Config,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
@@ -170,6 +171,9 @@ impl<'d> ThreadDriver<'d, Host> {
             -1
         };
 
+        let mut icfg: spi_device_interface_config_t = config.into();
+        icfg.spics_io_num = cs_pin as _;
+
         let cfg = esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
                 radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_SPI_RCP,
@@ -187,15 +191,7 @@ impl<'d> ThreadDriver<'d, Host> {
                             sclk_io_num: sclk.pin() as _,
                             ..Default::default()
                         },
-                        spi_device: spi_device_interface_config_t {
-                            spics_io_num: cs_pin as _,
-                            cs_ena_pretrans: 2,
-                            input_delay_ns: 100,
-                            mode: 0,
-                            clock_speed_hz: 2500 * 1000,
-                            queue_size: 5,
-                            ..Default::default()
-                        },
+                        spi_device: icfg,
                         intr_pin,
                     },
                 },
@@ -630,6 +626,7 @@ impl<'d> EspThread<'d> {
         sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
         cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
         intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        config: &crate::hal::spi::config::Config,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
@@ -641,6 +638,7 @@ impl<'d> EspThread<'d> {
             sclk,
             cs,
             intr,
+            config,
             _sysloop,
             nvs,
             mounted_event_fs,
