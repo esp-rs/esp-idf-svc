@@ -930,6 +930,35 @@ impl<'d> EspThread<'d> {
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
 
+    /// Perform an active scan for Thread networks
+    /// The callback will be called for each found network
+    ///
+    /// At the end of the scan, the callback will be called with `None`
+    pub fn scan<F: FnMut(Option<ActiveScanResult>)>(&self, callback: F) -> Result<(), EspError> {
+        self.driver().scan(callback)
+    }
+
+    /// Check if an active scan is in progress
+    pub fn is_scan_in_progress(&self) -> Result<bool, EspError> {
+        self.driver().is_scan_in_progress()
+    }
+
+    /// Perform an energy scan for Thread networks
+    /// The callback will be called for each found network
+    ///
+    /// At the end of the scan, the callback will be called with `None`
+    pub fn energy_scan<F: FnMut(Option<EnergyScanResult>)>(
+        &self,
+        callback: F,
+    ) -> Result<(), EspError> {
+        self.driver().energy_scan(callback)
+    }
+
+    /// Check if an energy scan is in progress
+    pub fn is_energy_scan_in_progress(&self) -> Result<bool, EspError> {
+        self.driver().is_energy_scan_in_progress()
+    }
+
     /// Run the Thread stack
     ///
     /// The current thread would block while the stack is running
