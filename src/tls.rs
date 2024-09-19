@@ -122,6 +122,7 @@ impl<'a> Debug for X509<'a> {
 mod esptls {
     #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
     use core::ffi::c_int;
+    use core::pin::Pin;
     use core::task::{ready, Context, Poll};
     use core::time::Duration;
 
@@ -1022,6 +1023,102 @@ mod esptls {
 
         async fn flush(&mut self) -> Result<(), Self::Error> {
             Ok(())
+        }
+    }
+
+    #[cfg(all(
+        feature = "std",
+        not(esp_idf_version_major = "4"),
+        any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
+    ))]
+    impl<S> futures_io::AsyncRead for EspAsyncTls<S>
+    where
+        S: PollableSocket,
+    {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            ctx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.as_ref()
+                .poll_read(ctx, buf)
+                .map_err(std::io::Error::other)
+        }
+    }
+
+    #[cfg(all(
+        feature = "std",
+        not(esp_idf_version_major = "4"),
+        any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
+    ))]
+    impl<'a, S> futures_io::AsyncRead for &'a EspAsyncTls<S>
+    where
+        S: PollableSocket,
+    {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            ctx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.as_ref()
+                .poll_read(ctx, buf)
+                .map_err(std::io::Error::other)
+        }
+    }
+
+    #[cfg(all(
+        feature = "std",
+        not(esp_idf_version_major = "4"),
+        any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
+    ))]
+    impl<S> futures_io::AsyncWrite for EspAsyncTls<S>
+    where
+        S: PollableSocket,
+    {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            ctx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.as_ref()
+                .poll_write(ctx, buf)
+                .map_err(std::io::Error::other)
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[cfg(all(
+        feature = "std",
+        not(esp_idf_version_major = "4"),
+        any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
+    ))]
+    impl<'a, S> futures_io::AsyncWrite for &'a EspAsyncTls<S>
+    where
+        S: PollableSocket,
+    {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            ctx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.as_ref()
+                .poll_write(ctx, buf)
+                .map_err(std::io::Error::other)
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
         }
     }
 }
