@@ -24,7 +24,7 @@ rustflags = ["--cfg", "espidf_time64"]
 
 [env]
 ESP_IDF_SDKCONFIG_DEFAULTS = ".github/configs/sdkconfig.defaults"
-ESP_IDF_VERSION = "v5.3.1"
+ESP_IDF_VERSION = "v5.2.2"
 MCU = "esp32c3"
 
 [unstable]
