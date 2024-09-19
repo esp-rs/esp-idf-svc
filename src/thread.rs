@@ -409,6 +409,7 @@ impl<'d> ThreadDriver<'d, Host> {
     pub fn scan<F: FnMut(Option<ActiveScanResult>)>(&self, callback: F) -> Result<(), EspError> {
         let _lock = OtLock::acquire()?;
 
+        #[allow(clippy::type_complexity)]
         let mut callback: Box<Box<dyn FnMut(Option<ActiveScanResult>)>> =
             Box::new(Box::new(callback));
 
@@ -442,6 +443,7 @@ impl<'d> ThreadDriver<'d, Host> {
     ) -> Result<(), EspError> {
         let _lock = OtLock::acquire()?;
 
+        #[allow(clippy::type_complexity)]
         let mut callback: Box<Box<dyn FnMut(Option<EnergyScanResult>)>> =
             Box::new(Box::new(callback));
 
@@ -469,6 +471,7 @@ impl<'d> ThreadDriver<'d, Host> {
         result: *mut otActiveScanResult,
         context: *mut c_void,
     ) {
+        #[allow(clippy::type_complexity)]
         let callback =
             unsafe { (context as *mut Box<dyn FnMut(Option<ActiveScanResult>)>).as_mut() }.unwrap();
 
@@ -483,6 +486,7 @@ impl<'d> ThreadDriver<'d, Host> {
         result: *mut otEnergyScanResult,
         context: *mut c_void,
     ) {
+        #[allow(clippy::type_complexity)]
         let callback =
             unsafe { (context as *mut Box<dyn FnMut(Option<EnergyScanResult>)>).as_mut() }.unwrap();
 
