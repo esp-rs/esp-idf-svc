@@ -1,5 +1,20 @@
+// TODO:
+// - Prio A: Status report (joined the network, device type, more?)
+// - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
+// - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - no ESP API it seems, just like CONFIG_OPENTHREAD_COMMISSIONER?)
+// - Prio B: Think of a minimal example
+// - Prio C: How to support the OpenThread CLI (useful for debugging)
+// - Prio C: Figure out what these do (bad/missing docu):
+//   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
+//   - CONFIG_OPENTHREAD_DIAG
+//   - CONFIG_OPENTHREAD_CSL_ENABLE
+//   - CONFIG_OPENTHREAD_DUA_ENABLE
+//   - CONFIG_OPENTHREAD_SRP_CLIENT
+//   - CONFIG_OPENTHREAD_DNS64_CLIENT? "Select this option to acquire NAT64 address from dns servers" why does this require explicit conf
+//     or in fact why does this has anything to do with the OpenThread client?
+
 use core::ffi::{self, c_void, CStr};
-use core::fmt::{self, Debug};
+use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
@@ -24,24 +39,42 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
+/// A trait shared between the `Host` and `RCP` modes providing the option for these
+/// to do additional initialization.
+pub trait Mode {
+    fn init();
+}
+
 /// The driver will operate in Radio Co-Processor mode
 ///
 /// The chip needs to be connected via UART or SPI to the host
 #[cfg(esp_idf_soc_ieee802154_supported)]
 #[derive(Debug)]
-pub struct RCP;
+pub struct RCP(());
+
+#[cfg(esp_idf_soc_ieee802154_supported)]
+impl Mode for RCP {
+    fn init() {
+        extern "C" {
+            fn otAppNcpInit(instance: *mut otInstance);
+        }
+
+        unsafe {
+            otAppNcpInit(esp_openthread_get_instance());
+        }
+    }
+}
 
 /// The driver will operate as a host
 ///
 /// This means that - unless the chip has a native Thread suppoort -
 /// it needs to be connected via UART or SPI to another chip which does have
 /// native Thread support and which is configured to operate in RCP mode
-pub struct Host(esp_openthread_platform_config_t);
+#[derive(Debug)]
+pub struct Host(());
 
-impl Debug for Host {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Host").finish()
-    }
+impl Mode for Host {
+    fn init() {}
 }
 
 pub mod config {
@@ -147,8 +180,6 @@ impl<'a> EnergyScanResult<'a> {
     }
 }
 
-static CS: CriticalSection = CriticalSection::new();
-
 /// This struct provides a safe wrapper over the ESP IDF Thread C driver.
 ///
 /// The driver works on Layer 2 (Data Link) in the OSI model, in that it provides
@@ -165,59 +196,31 @@ static CS: CriticalSection = CriticalSection::new();
 /// - Host mode: The driver operates as a host, and if the chip does not have a Thread radio
 ///   it has to be connected via SPI or USB to a chip which runs the Thread stack in RCP mode
 pub struct ThreadDriver<'d, T> {
-    mode: T,
-    _mounted_event_fs: Arc<MountedEventfs>,
+    cfg: esp_openthread_platform_config_t,
+    cs: CriticalSection,
     //_subscription: EspSubscription<'static, System>,
     _nvs: EspDefaultNvsPartition,
+    _mounted_event_fs: Arc<MountedEventfs>,
+    _mode: T,
     _p: PhantomData<&'d mut ()>,
 }
 
 impl<'d> ThreadDriver<'d, Host> {
-    // TODO:
-    // - Prio A: Status report (joined the network, device type, more?)
-    // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
-    // - Prio B: How to control when a device becomes a router?
-    // - Prio B: How to support the Border Router case? (esp_openthread_border_router_init / esp_openthread_border_router_deinit? probably also needs CONFIG_OPENTHREAD_BORDER_ROUTER=y)
-    // - Prio B: Ways to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - no ESP API it seems, just like CONFIG_OPENTHREAD_COMMISSIONER?)
-    // - Prio B: Think of a minimal example
-    // - Prio C: How to support the OpenThread CLI (useful for debugging)
-    // - Prio C: Figure out what these do (bad/missing docu):
-    //   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
-    //   - CONFIG_OPENTHREAD_DIAG
-    //   - CONFIG_OPENTHREAD_CSL_ENABLE
-    //   - CONFIG_OPENTHREAD_DUA_ENABLE
-    //   - CONFIG_OPENTHREAD_SRP_CLIENT
-    //   - CONFIG_OPENTHREAD_DNS64_CLIENT? "Select this option to acquire NAT64 address from dns servers" why does this require explicit conf
-    //     or in fact why does this has anything to do with the OpenThread client?
-
     /// Create a new Thread Host driver instance utilizing the
     /// native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
     pub fn new<M: crate::hal::modem::ThreadModemPeripheral>(
-        _modem: impl Peripheral<P = M> + 'd,
+        modem: impl Peripheral<P = M> + 'd,
         _sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
     ) -> Result<Self, EspError> {
-        let cfg = esp_openthread_platform_config_t {
-            radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
-                ..Default::default()
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
-                ..Default::default()
-            },
-            port_config: Self::PORT_CONFIG,
-        };
-
-        Self::init(&cfg, true)?;
-
         Ok(Self {
-            mode: Host(cfg),
-            _mounted_event_fs: mounted_event_fs,
+            cfg: Self::native_host_cfg(modem),
+            cs: CriticalSection::new(),
             _nvs: nvs,
+            _mounted_event_fs: mounted_event_fs,
+            _mode: Host(()),
             _p: PhantomData,
         })
     }
@@ -227,7 +230,7 @@ impl<'d> ThreadDriver<'d, Host> {
     #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
     pub fn new_spi<S: crate::hal::spi::Spi>(
-        _spi: impl Peripheral<P = S> + 'd,
+        spi: impl Peripheral<P = S> + 'd,
         mosi: impl Peripheral<P = impl InputPin> + 'd,
         miso: impl Peripheral<P = impl OutputPin> + 'd,
         sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
@@ -238,63 +241,12 @@ impl<'d> ThreadDriver<'d, Host> {
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
     ) -> Result<Self, EspError> {
-        crate::hal::into_ref!(mosi, miso, sclk);
-
-        let cs_pin = if let Some(cs) = cs {
-            crate::hal::into_ref!(cs);
-
-            cs.pin() as _
-        } else {
-            -1
-        };
-
-        let intr_pin = if let Some(intr) = intr {
-            crate::hal::into_ref!(intr);
-
-            intr.pin() as _
-        } else {
-            -1
-        };
-
-        let mut icfg: spi_device_interface_config_t = config.into();
-        icfg.spics_io_num = cs_pin as _;
-
-        let cfg = esp_openthread_platform_config_t {
-            radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_SPI_RCP,
-                __bindgen_anon_1: esp_openthread_radio_config_t__bindgen_ty_1 {
-                    radio_spi_config: esp_openthread_spi_host_config_t {
-                        host_device: S::device() as _,
-                        dma_channel: spi_common_dma_t_SPI_DMA_CH_AUTO,
-                        spi_interface: spi_bus_config_t {
-                            __bindgen_anon_1: spi_bus_config_t__bindgen_ty_1 {
-                                mosi_io_num: mosi.pin() as _,
-                            },
-                            __bindgen_anon_2: spi_bus_config_t__bindgen_ty_2 {
-                                miso_io_num: miso.pin() as _,
-                            },
-                            sclk_io_num: sclk.pin() as _,
-                            ..Default::default()
-                        },
-                        spi_device: icfg,
-                        intr_pin,
-                    },
-                },
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
-                ..Default::default()
-            },
-            port_config: Self::PORT_CONFIG,
-        };
-
-        Self::init(&cfg, true)?;
-
         Ok(Self {
-            mode: Host(cfg),
-            _mounted_event_fs: mounted_event_fs,
+            cfg: Self::host_spi_cfg(spi, mosi, miso, sclk, cs, intr, config),
+            cs: CriticalSection::new(),
             _nvs: nvs,
+            _mounted_event_fs: mounted_event_fs,
+            _mode: Host(()),
             _p: PhantomData,
         })
     }
@@ -302,7 +254,7 @@ impl<'d> ThreadDriver<'d, Host> {
     /// Create a new Thread Host driver instance utilizing a UART connection
     /// to another MCU running the Thread stack in RCP mode.
     pub fn new_uart<U: Uart>(
-        _uart: impl Peripheral<P = U> + 'd,
+        uart: impl Peripheral<P = U> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
         config: &crate::hal::uart::config::Config,
@@ -310,54 +262,12 @@ impl<'d> ThreadDriver<'d, Host> {
         nvs: EspDefaultNvsPartition,
         mounted_event_fs: Arc<MountedEventfs>,
     ) -> Result<Self, EspError> {
-        crate::hal::into_ref!(rx, tx);
-
-        #[cfg(esp_idf_version_major = "4")]
-        let cfg = esp_openthread_platform_config_t {
-            radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
-                radio_uart_config: esp_openthread_uart_config_t {
-                    port: U::port() as _,
-                    uart_config: config.into(),
-                    rx_pin: rx.pin() as _,
-                    tx_pin: tx.pin() as _,
-                },
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
-                ..Default::default()
-            },
-            port_config: Self::PORT_CONFIG,
-        };
-
-        #[cfg(not(esp_idf_version_major = "4"))]
-        let cfg = esp_openthread_platform_config_t {
-            radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
-                __bindgen_anon_1: esp_openthread_radio_config_t__bindgen_ty_1 {
-                    radio_uart_config: esp_openthread_uart_config_t {
-                        port: U::port() as _,
-                        uart_config: config.into(),
-                        rx_pin: rx.pin() as _,
-                        tx_pin: tx.pin() as _,
-                    },
-                },
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
-                ..Default::default()
-            },
-            port_config: Self::PORT_CONFIG,
-        };
-
-        Self::init(&cfg, true)?;
-
         Ok(Self {
-            mode: Host(cfg),
-            _mounted_event_fs: mounted_event_fs,
+            cfg: Self::host_uart_cfg(uart, tx, rx, config),
+            cs: CriticalSection::new(),
             _nvs: nvs,
+            _mounted_event_fs: mounted_event_fs,
+            _mode: Host(()),
             _p: PhantomData,
         })
     }
@@ -496,31 +406,36 @@ impl<'d> ThreadDriver<'d, Host> {
             callback(Some(EnergyScanResult(unsafe { result.as_ref() }.unwrap())));
         }
     }
-}
 
-extern "C" {
-    #[allow(dead_code)]
-    fn otAppNcpInit(instance: *mut otInstance);
-}
+    #[cfg(esp_idf_soc_ieee802154_supported)]
+    fn host_native_cfg<M: crate::hal::modem::ThreadModemPeripheral>(
+        _modem: impl Peripheral<P = M> + 'd,
+    ) -> esp_openthread_platform_config_t {
+        esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
+                ..Default::default()
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
+                ..Default::default()
+            },
+            port_config: Self::PORT_CONFIG,
+        }
+    }
 
-#[cfg(esp_idf_soc_ieee802154_supported)]
-impl<'d> ThreadDriver<'d, RCP> {
-    /// Create a new Thread RCP driver instance utilizing an SPI connection
-    /// to another MCU running the Thread Host stack.
     #[cfg(not(esp_idf_version_major = "4"))]
     #[allow(clippy::too_many_arguments)]
-    pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: crate::hal::spi::Spi>(
-        _modem: impl Peripheral<P = M> + 'd,
+    fn host_spi_cfg<S: crate::hal::spi::Spi>(
         _spi: impl Peripheral<P = S> + 'd,
         mosi: impl Peripheral<P = impl InputPin> + 'd,
         miso: impl Peripheral<P = impl OutputPin> + 'd,
         sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
         cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
         intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
-        _sysloop: EspSystemEventLoop,
-        nvs: EspDefaultNvsPartition,
-        mounted_event_fs: Arc<MountedEventfs>,
-    ) -> Result<Self, EspError> {
+        config: &crate::hal::spi::config::Config,
+    ) -> esp_openthread_platform_config_t {
         crate::hal::into_ref!(mosi, miso, sclk);
 
         let cs_pin = if let Some(cs) = cs {
@@ -539,18 +454,17 @@ impl<'d> ThreadDriver<'d, RCP> {
             -1
         };
 
-        let cfg = esp_openthread_platform_config_t {
+        let mut icfg: spi_device_interface_config_t = config.into();
+        icfg.spics_io_num = cs_pin as _;
+
+        esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
-                ..Default::default()
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
-                __bindgen_anon_1: esp_openthread_host_connection_config_t__bindgen_ty_1 {
-                    spi_slave_config: esp_openthread_spi_slave_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_SPI_RCP,
+                __bindgen_anon_1: esp_openthread_radio_config_t__bindgen_ty_1 {
+                    radio_spi_config: esp_openthread_spi_host_config_t {
                         host_device: S::device() as _,
-                        bus_config: spi_bus_config_t {
+                        dma_channel: spi_common_dma_t_SPI_DMA_CH_AUTO,
+                        spi_interface: spi_bus_config_t {
                             __bindgen_anon_1: spi_bus_config_t__bindgen_ty_1 {
                                 mosi_io_num: mosi.pin() as _,
                             },
@@ -560,60 +474,43 @@ impl<'d> ThreadDriver<'d, RCP> {
                             sclk_io_num: sclk.pin() as _,
                             ..Default::default()
                         },
-                        slave_config: spi_slave_interface_config_t {
-                            spics_io_num: cs_pin as _,
-                            ..Default::default()
-                        },
+                        spi_device: icfg,
                         intr_pin,
                     },
                 },
             },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
+                ..Default::default()
+            },
             port_config: Self::PORT_CONFIG,
-        };
-
-        Self::init(&cfg, false)?;
-
-        unsafe {
-            otAppNcpInit(esp_openthread_get_instance());
         }
-
-        Ok(Self {
-            mode: RCP,
-            _mounted_event_fs: mounted_event_fs,
-            _nvs: nvs,
-            _p: PhantomData,
-        })
     }
 
-    /// Create a new Thread RCP driver instance utilizing a UART connection
-    /// to another MCU running the Thread Host stack.
-    pub fn new_rcp_uart<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
-        _modem: impl Peripheral<P = M> + 'd,
+    fn host_uart_cfg<U: Uart>(
         _uart: impl Peripheral<P = U> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
         config: &crate::hal::uart::config::Config,
-        _sysloop: EspSystemEventLoop,
-        nvs: EspDefaultNvsPartition,
-        mounted_event_fs: Arc<MountedEventfs>,
-    ) -> Result<Self, EspError> {
+    ) -> esp_openthread_platform_config_t {
         crate::hal::into_ref!(rx, tx);
 
         #[cfg(esp_idf_version_major = "4")]
         let cfg = esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
-                ..Default::default()
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
-                host_uart_config: esp_openthread_uart_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
+                radio_uart_config: esp_openthread_uart_config_t {
                     port: U::port() as _,
                     uart_config: config.into(),
                     rx_pin: rx.pin() as _,
                     tx_pin: tx.pin() as _,
                 },
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
+                ..Default::default()
             },
             port_config: Self::PORT_CONFIG,
         };
@@ -621,14 +518,9 @@ impl<'d> ThreadDriver<'d, RCP> {
         #[cfg(not(esp_idf_version_major = "4"))]
         let cfg = esp_openthread_platform_config_t {
             radio_config: esp_openthread_radio_config_t {
-                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
-                ..Default::default()
-            },
-            host_config: esp_openthread_host_connection_config_t {
-                host_connection_mode:
-                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
-                __bindgen_anon_1: esp_openthread_host_connection_config_t__bindgen_ty_1 {
-                    host_uart_config: esp_openthread_uart_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_UART_RCP,
+                __bindgen_anon_1: esp_openthread_radio_config_t__bindgen_ty_1 {
+                    radio_uart_config: esp_openthread_uart_config_t {
                         port: U::port() as _,
                         uart_config: config.into(),
                         rx_pin: rx.pin() as _,
@@ -636,41 +528,15 @@ impl<'d> ThreadDriver<'d, RCP> {
                     },
                 },
             },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_NONE,
+                ..Default::default()
+            },
             port_config: Self::PORT_CONFIG,
         };
 
-        Self::init(&cfg, false)?;
-
-        unsafe {
-            otAppNcpInit(esp_openthread_get_instance());
-        }
-
-        Ok(Self {
-            mode: RCP,
-            _mounted_event_fs: mounted_event_fs,
-            _nvs: nvs,
-            _p: PhantomData,
-        })
-    }
-}
-
-impl<'d, T> ThreadDriver<'d, T> {
-    const PORT_CONFIG: esp_openthread_port_config_t = esp_openthread_port_config_t {
-        storage_partition_name: b"nvs\0" as *const _ as *const _,
-        netif_queue_size: 10,
-        task_queue_size: 10,
-    };
-
-    /// Run the Thread stack
-    ///
-    /// The current thread would block while the stack is running
-    /// Note that the stack will only exit if an error occurs
-    pub fn run(&self) -> Result<(), EspError> {
-        // TODO: Figure out how to stop running
-
-        let _cs = CS.enter();
-
-        esp!(unsafe { esp_openthread_launch_mainloop() })
+        cfg
     }
 
     fn internal_tod(&self, active: bool, buf: &mut [u8]) -> Result<usize, EspError> {
@@ -721,30 +587,201 @@ impl<'d, T> ThreadDriver<'d, T> {
 
         Ok(())
     }
+}
 
-    fn init(cfg: &esp_openthread_platform_config_t, enable: bool) -> Result<(), EspError> {
-        esp!(unsafe { esp_openthread_init(cfg) })?;
-
-        Self::set_enabled(enable)?;
-
-        debug!("Driver initialized");
-
-        Ok(())
+#[cfg(esp_idf_soc_ieee802154_supported)]
+impl<'d> ThreadDriver<'d, RCP> {
+    /// Create a new Thread RCP driver instance utilizing an SPI connection
+    /// to another MCU running the Thread Host stack.
+    #[cfg(not(esp_idf_version_major = "4"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_rcp_spi<M: crate::hal::modem::ThreadModemPeripheral, S: crate::hal::spi::Spi>(
+        modem: impl Peripheral<P = M> + 'd,
+        spi: impl Peripheral<P = S> + 'd,
+        mosi: impl Peripheral<P = impl InputPin> + 'd,
+        miso: impl Peripheral<P = impl OutputPin> + 'd,
+        sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
+        cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        _sysloop: EspSystemEventLoop,
+        nvs: EspDefaultNvsPartition,
+        mounted_event_fs: Arc<MountedEventfs>,
+    ) -> Result<Self, EspError> {
+        Ok(Self {
+            cfg: Self::rcp_spi_cfg(modem, spi, mosi, miso, sclk, cs, intr),
+            cs: CriticalSection::new(),
+            _nvs: nvs,
+            _mounted_event_fs: mounted_event_fs,
+            _mode: RCP(()),
+            _p: PhantomData,
+        })
     }
 
-    fn set_enabled(enabled: bool) -> Result<(), EspError> {
-        ot_esp!(unsafe { otIp6SetEnabled(esp_openthread_get_instance(), enabled) })?;
-        ot_esp!(unsafe { otThreadSetEnabled(esp_openthread_get_instance(), enabled) })?;
+    /// Create a new Thread RCP driver instance utilizing a UART connection
+    /// to another MCU running the Thread Host stack.
+    pub fn new_rcp_uart<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
+        modem: impl Peripheral<P = M> + 'd,
+        uart: impl Peripheral<P = U> + 'd,
+        tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
+        _sysloop: EspSystemEventLoop,
+        nvs: EspDefaultNvsPartition,
+        mounted_event_fs: Arc<MountedEventfs>,
+    ) -> Result<Self, EspError> {
+        Ok(Self {
+            cfg: Self::rcp_uart_cfg(modem, uart, tx, rx, config),
+            cs: CriticalSection::new(),
+            _nvs: nvs,
+            _mounted_event_fs: mounted_event_fs,
+            _mode: RCP(()),
+            _p: PhantomData,
+        })
+    }
 
-        Ok(())
+    #[cfg(not(esp_idf_version_major = "4"))]
+    #[allow(clippy::too_many_arguments)]
+    fn rcp_spi_cfg<M: crate::hal::modem::ThreadModemPeripheral, S: crate::hal::spi::Spi>(
+        _modem: impl Peripheral<P = M> + 'd,
+        _spi: impl Peripheral<P = S> + 'd,
+        mosi: impl Peripheral<P = impl InputPin> + 'd,
+        miso: impl Peripheral<P = impl OutputPin> + 'd,
+        sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
+        cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+    ) -> esp_openthread_platform_config_t {
+        crate::hal::into_ref!(mosi, miso, sclk);
+
+        let cs_pin = if let Some(cs) = cs {
+            crate::hal::into_ref!(cs);
+
+            cs.pin() as _
+        } else {
+            -1
+        };
+
+        let intr_pin = if let Some(intr) = intr {
+            crate::hal::into_ref!(intr);
+
+            intr.pin() as _
+        } else {
+            -1
+        };
+
+        esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
+                ..Default::default()
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
+                __bindgen_anon_1: esp_openthread_host_connection_config_t__bindgen_ty_1 {
+                    spi_slave_config: esp_openthread_spi_slave_config_t {
+                        host_device: S::device() as _,
+                        bus_config: spi_bus_config_t {
+                            __bindgen_anon_1: spi_bus_config_t__bindgen_ty_1 {
+                                mosi_io_num: mosi.pin() as _,
+                            },
+                            __bindgen_anon_2: spi_bus_config_t__bindgen_ty_2 {
+                                miso_io_num: miso.pin() as _,
+                            },
+                            sclk_io_num: sclk.pin() as _,
+                            ..Default::default()
+                        },
+                        slave_config: spi_slave_interface_config_t {
+                            spics_io_num: cs_pin as _,
+                            ..Default::default()
+                        },
+                        intr_pin,
+                    },
+                },
+            },
+            port_config: Self::PORT_CONFIG,
+        }
+    }
+
+    fn rcp_uart_cfg<M: crate::hal::modem::ThreadModemPeripheral, U: Uart>(
+        _modem: impl Peripheral<P = M> + 'd,
+        _uart: impl Peripheral<P = U> + 'd,
+        tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
+    ) -> esp_openthread_platform_config_t {
+        crate::hal::into_ref!(rx, tx);
+
+        #[cfg(esp_idf_version_major = "4")]
+        let cfg = esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
+                ..Default::default()
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
+                host_uart_config: esp_openthread_uart_config_t {
+                    port: U::port() as _,
+                    uart_config: config.into(),
+                    rx_pin: rx.pin() as _,
+                    tx_pin: tx.pin() as _,
+                },
+            },
+            port_config: Self::PORT_CONFIG,
+        };
+
+        #[cfg(not(esp_idf_version_major = "4"))]
+        let cfg = esp_openthread_platform_config_t {
+            radio_config: esp_openthread_radio_config_t {
+                radio_mode: esp_openthread_radio_mode_t_RADIO_MODE_NATIVE,
+                ..Default::default()
+            },
+            host_config: esp_openthread_host_connection_config_t {
+                host_connection_mode:
+                    esp_openthread_host_connection_mode_t_HOST_CONNECTION_MODE_RCP_UART,
+                __bindgen_anon_1: esp_openthread_host_connection_config_t__bindgen_ty_1 {
+                    host_uart_config: esp_openthread_uart_config_t {
+                        port: U::port() as _,
+                        uart_config: config.into(),
+                        rx_pin: rx.pin() as _,
+                        tx_pin: tx.pin() as _,
+                    },
+                },
+            },
+            port_config: Self::PORT_CONFIG,
+        };
+
+        cfg
     }
 }
 
-impl<'d, T> Drop for ThreadDriver<'d, T> {
-    fn drop(&mut self) {
-        esp!(unsafe { esp_openthread_deinit() }).unwrap();
+impl<'d, T> ThreadDriver<'d, T>
+where
+    T: Mode,
+{
+    const PORT_CONFIG: esp_openthread_port_config_t = esp_openthread_port_config_t {
+        storage_partition_name: b"nvs\0" as *const _ as *const _,
+        netif_queue_size: 10,
+        task_queue_size: 10,
+    };
 
-        debug!("Driver dropped");
+    /// Run the Thread stack
+    ///
+    /// The current thread would block while the stack is running
+    /// Note that the stack will only exit if an error occurs
+    pub fn run(&self) -> Result<(), EspError> {
+        // TODO: Figure out how to stop running
+
+        let _lock = self.cs.enter();
+
+        esp!(unsafe { esp_openthread_init(&self.cfg) })?;
+
+        T::init();
+
+        let result = esp!(unsafe { esp_openthread_launch_mainloop() });
+
+        esp!(unsafe { esp_openthread_deinit() })?;
+
+        result
     }
 }
 
@@ -768,6 +805,71 @@ impl Drop for OtLock {
     }
 }
 
+/// Trait shared between the modes of operation of the `EspThread` instance
+pub trait NetifMode<'d> {
+    fn driver(&self) -> &ThreadDriver<'d, Host>;
+    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host>;
+}
+
+/// The regular mode of operation for the `EspThread` instance
+///
+/// This is the only available mode if the Border Router functionality in ESP-IDF is not enabled
+pub struct Node<'d>(ThreadDriver<'d, Host>);
+
+impl<'d> NetifMode<'d> for Node<'d> {
+    fn driver(&self) -> &ThreadDriver<'d, Host> {
+        &self.0
+    }
+
+    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
+        &mut self.0
+    }
+}
+
+/// The Border Router mode of operation for the `EspThread` instance
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
+pub struct BorderRouter<'d, N>(ThreadDriver<'d, Host>, N)
+where
+    N: core::borrow::Borrow<EspNetif>;
+
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
+impl<'d, N> BorderRouter<'d, N>
+where
+    N: core::borrow::Borrow<EspNetif>,
+{
+    fn new(driver: ThreadDriver<'d, Host>, netif: N) -> Result<Self, EspError> {
+        unsafe {
+            esp_openthread_set_backbone_netif(netif.borrow().handle());
+        }
+
+        esp!(unsafe { esp_openthread_border_router_init() })?;
+
+        debug!("Border router initialized");
+
+        Ok(Self(driver, netif))
+    }
+}
+
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
+impl<'d, N: core::borrow::Borrow<EspNetif>> Drop for BorderRouter<'d, N> {
+    fn drop(&mut self) {
+        esp!(unsafe { esp_openthread_border_router_deinit() }).unwrap();
+
+        debug!("Border router dropped");
+    }
+}
+
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
+impl<'d, N: core::borrow::Borrow<EspNetif>> NetifMode<'d> for BorderRouter<'d, N> {
+    fn driver(&self) -> &ThreadDriver<'d, Host> {
+        &self.0
+    }
+
+    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
+        &mut self.0
+    }
+}
+
 /// `EspThread` wraps a `ThreadDriver` Data Link layer instance, and binds the OSI
 /// Layer 3 (network) facilities of ESP IDF to it.
 ///
@@ -779,13 +881,13 @@ impl Drop for OtLock {
 /// desirable. E.g., using `smoltcp` or other custom IP stacks on top of the
 /// ESP IDF Thread radio.
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-pub struct EspThread<'d> {
+pub struct EspThread<T> {
     netif: EspNetif,
-    driver: ThreadDriver<'d, Host>,
+    driver: T,
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d> EspThread<'d> {
+impl<'d> EspThread<Node<'d>> {
     /// Create a new `EspThread` instance utilizing the native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
     pub fn new<M: crate::hal::modem::ThreadModemPeripheral>(
@@ -856,33 +958,129 @@ impl<'d> EspThread<'d> {
 
     /// Wrap an already created Thread L2 driver instance and a network interface
     pub fn wrap_all(driver: ThreadDriver<'d, Host>, netif: EspNetif) -> Result<Self, EspError> {
-        let mut this = Self { driver, netif };
+        let mut this = Self {
+            driver: Node(driver),
+            netif,
+        };
 
         this.attach_netif()?;
+        Self::enable_network(true)?;
 
         Ok(this)
     }
+}
 
-    /// Replace the network interface with the provided one and return the
-    /// existing network interface.
-    pub fn swap_netif(&mut self, netif: EspNetif) -> Result<EspNetif, EspError> {
-        self.detach_netif()?;
-
-        let old = core::mem::replace(&mut self.netif, netif);
-
-        self.attach_netif()?;
-
-        Ok(old)
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
+impl<'d, N> EspThread<BorderRouter<'d, N>>
+where
+    N: core::borrow::Borrow<EspNetif>,
+{
+    /// Create a new `EspThread` Border Router instance utilizing the native Thread radio on the MCU
+    #[cfg(esp_idf_soc_ieee802154_supported)]
+    pub fn new_br<M: crate::hal::modem::ThreadModemPeripheral>(
+        modem: impl Peripheral<P = M> + 'd,
+        sysloop: EspSystemEventLoop,
+        nvs: EspDefaultNvsPartition,
+        mounted_event_fs: Arc<MountedEventfs>,
+        backbone_netif: N,
+    ) -> Result<Self, EspError> {
+        Self::wrap_br(
+            ThreadDriver::new(modem, sysloop, nvs, mounted_event_fs)?,
+            backbone_netif,
+        )
     }
 
+    /// Create a new `EspThread` Border Router instance utilizing an SPI connection to another MCU
+    /// which is expected to run the Thread RCP driver mode over SPI
+    #[cfg(not(esp_idf_version_major = "4"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_br_spi<S: crate::hal::spi::Spi>(
+        _spi: impl Peripheral<P = S> + 'd,
+        mosi: impl Peripheral<P = impl InputPin> + 'd,
+        miso: impl Peripheral<P = impl OutputPin> + 'd,
+        sclk: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
+        cs: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        intr: Option<impl Peripheral<P = impl InputPin + OutputPin> + 'd>,
+        config: &crate::hal::spi::config::Config,
+        _sysloop: EspSystemEventLoop,
+        nvs: EspDefaultNvsPartition,
+        mounted_event_fs: Arc<MountedEventfs>,
+        backbone_netif: N,
+    ) -> Result<Self, EspError> {
+        Self::wrap_br(
+            ThreadDriver::new_spi(
+                _spi,
+                mosi,
+                miso,
+                sclk,
+                cs,
+                intr,
+                config,
+                _sysloop,
+                nvs,
+                mounted_event_fs,
+            )?,
+            backbone_netif,
+        )
+    }
+
+    /// Create a new `EspThread` Border Router instance utilizing a UART connection to another MCU
+    /// which is expected to run the Thread RCP driver mode over UART
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_br_uart<U: Uart>(
+        _uart: impl Peripheral<P = U> + 'd,
+        tx: impl Peripheral<P = impl OutputPin> + 'd,
+        rx: impl Peripheral<P = impl InputPin> + 'd,
+        config: &crate::hal::uart::config::Config,
+        _sysloop: EspSystemEventLoop,
+        nvs: EspDefaultNvsPartition,
+        mounted_event_fs: Arc<MountedEventfs>,
+        backbone_netif: N,
+    ) -> Result<Self, EspError> {
+        Self::wrap_br(
+            ThreadDriver::new_uart(_uart, tx, rx, config, _sysloop, nvs, mounted_event_fs)?,
+            backbone_netif,
+        )
+    }
+
+    /// Wrap an already created Thread L2 driver instance and a backbone network interface
+    /// to the outside world
+    pub fn wrap_br(driver: ThreadDriver<'d, Host>, backbone_netif: N) -> Result<Self, EspError> {
+        Self::wrap_br_all(driver, EspNetif::new(NetifStack::Thread)?, backbone_netif)
+    }
+
+    /// Wrap an already created Thread L2 driver instance, a network interface to be used for the
+    /// Thread network, and a backbone network interface to the outside world
+    pub fn wrap_br_all(
+        driver: ThreadDriver<'d, Host>,
+        netif: EspNetif,
+        backbone_netif: N,
+    ) -> Result<Self, EspError> {
+        let mut this = Self {
+            driver: BorderRouter::new(driver, backbone_netif)?,
+            netif,
+        };
+
+        this.attach_netif()?;
+        Self::enable_network(true)?;
+
+        Ok(this)
+    }
+}
+
+#[cfg(esp_idf_comp_esp_netif_enabled)]
+impl<'d, T> EspThread<T>
+where
+    T: NetifMode<'d>,
+{
     /// Return the underlying [`ThreadDriver`]
     pub fn driver(&self) -> &ThreadDriver<'d, Host> {
-        &self.driver
+        self.driver.driver()
     }
 
     /// Return the underlying [`ThreadDriver`], as mutable
     pub fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
-        &mut self.driver
+        self.driver.driver_mut()
     }
 
     /// Return the underlying [`EspNetif`]
@@ -969,16 +1167,40 @@ impl<'d> EspThread<'d> {
     /// The current thread would block while the stack is running
     /// Note that the stack will only exit if an error occurs
     pub fn run(&self) -> Result<(), EspError> {
-        self.driver.run()
+        self.driver.driver().run()
+    }
+
+    /// Replace the network interface with the provided one and return the
+    /// existing network interface.
+    pub fn swap_netif(&mut self, netif: EspNetif) -> Result<EspNetif, EspError> {
+        Self::enable_network(false)?;
+        self.detach_netif()?;
+
+        let old = core::mem::replace(&mut self.netif, netif);
+
+        self.attach_netif()?;
+        Self::enable_network(true)?;
+
+        Ok(old)
     }
 
     fn attach_netif(&mut self) -> Result<(), EspError> {
         esp!(unsafe {
             esp_netif_attach(
                 self.netif.handle() as *mut _,
-                esp_openthread_netif_glue_init(&self.driver.mode.0),
+                esp_openthread_netif_glue_init(&self.driver.driver().cfg),
             )
         })?;
+
+        Ok(())
+    }
+}
+
+#[cfg(esp_idf_comp_esp_netif_enabled)]
+impl<T> EspThread<T> {
+    fn enable_network(enabled: bool) -> Result<(), EspError> {
+        ot_esp!(unsafe { otIp6SetEnabled(esp_openthread_get_instance(), enabled) })?;
+        ot_esp!(unsafe { otThreadSetEnabled(esp_openthread_get_instance(), enabled) })?;
 
         Ok(())
     }
@@ -992,7 +1214,7 @@ impl<'d> EspThread<'d> {
     }
 }
 
-impl Drop for EspThread<'_> {
+impl<T> Drop for EspThread<T> {
     fn drop(&mut self) {
         let _ = self.detach_netif();
     }
