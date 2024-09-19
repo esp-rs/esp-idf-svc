@@ -862,46 +862,38 @@ impl<'d> NetifMode<'d> for Node<'d> {
 }
 
 /// The Border Router mode of operation for the `EspThread` instance
-// Since 5.2.0
 #[cfg(all(
     esp_idf_comp_esp_netif_enabled,
     esp_idf_openthread_border_router,
-    any(
-        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-        all(
-            esp_idf_version_major = "5",
-            not(esp_idf_version_minor = "0"),
-            not(esp_idf_version_minor = "1")
-        ),
-    ),
+    not(any(esp32h2, esp32h4))
 ))]
 pub struct BorderRouter<'d, N>(ThreadDriver<'d, Host>, N)
 where
     N: core::borrow::Borrow<EspNetif>;
 
-// Since 5.2.0
 #[cfg(all(
     esp_idf_comp_esp_netif_enabled,
     esp_idf_openthread_border_router,
-    any(
-        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-        all(
-            esp_idf_version_major = "5",
-            not(esp_idf_version_minor = "0"),
-            not(esp_idf_version_minor = "1")
-        ),
-    ),
+    not(any(esp32h2, esp32h4))
 ))]
 impl<'d, N> BorderRouter<'d, N>
 where
     N: core::borrow::Borrow<EspNetif>,
 {
     fn new(driver: ThreadDriver<'d, Host>, netif: N) -> Result<Self, EspError> {
-        unsafe {
-            esp_openthread_set_backbone_netif(netif.borrow().handle());
+        #[cfg(esp_idf_version_major = "4")]
+        {
+            esp!(unsafe { esp_openthread_border_router_init(netif.borrow().handle()) })?;
         }
 
-        esp!(unsafe { esp_openthread_border_router_init() })?;
+        #[cfg(not(esp_idf_version_major = "4"))]
+        {
+            unsafe {
+                esp_openthread_set_backbone_netif(netif.borrow().handle());
+            }
+
+            esp!(unsafe { esp_openthread_border_router_init() })?;
+        }
 
         debug!("Border router initialized");
 
@@ -909,18 +901,10 @@ where
     }
 }
 
-// Since 5.2.0
 #[cfg(all(
     esp_idf_comp_esp_netif_enabled,
     esp_idf_openthread_border_router,
-    any(
-        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-        all(
-            esp_idf_version_major = "5",
-            not(esp_idf_version_minor = "0"),
-            not(esp_idf_version_minor = "1")
-        ),
-    ),
+    not(any(esp32h2, esp32h4))
 ))]
 impl<'d, N: core::borrow::Borrow<EspNetif>> Drop for BorderRouter<'d, N> {
     fn drop(&mut self) {
@@ -930,18 +914,10 @@ impl<'d, N: core::borrow::Borrow<EspNetif>> Drop for BorderRouter<'d, N> {
     }
 }
 
-// Since 5.2.0
 #[cfg(all(
     esp_idf_comp_esp_netif_enabled,
     esp_idf_openthread_border_router,
-    any(
-        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-        all(
-            esp_idf_version_major = "5",
-            not(esp_idf_version_minor = "0"),
-            not(esp_idf_version_minor = "1")
-        ),
-    ),
+    not(any(esp32h2, esp32h4))
 ))]
 impl<'d, N: core::borrow::Borrow<EspNetif>> NetifMode<'d> for BorderRouter<'d, N> {
     fn driver(&self) -> &ThreadDriver<'d, Host> {
@@ -1053,18 +1029,10 @@ impl<'d> EspThread<Node<'d>> {
     }
 }
 
-// Since 5.2.0
 #[cfg(all(
     esp_idf_comp_esp_netif_enabled,
     esp_idf_openthread_border_router,
-    any(
-        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-        all(
-            esp_idf_version_major = "5",
-            not(esp_idf_version_minor = "0"),
-            not(esp_idf_version_minor = "1")
-        ),
-    ),
+    not(any(esp32h2, esp32h4))
 ))]
 impl<'d, N> EspThread<BorderRouter<'d, N>>
 where
