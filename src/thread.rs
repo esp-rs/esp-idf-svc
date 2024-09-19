@@ -398,7 +398,7 @@ impl<'d> ThreadDriver<'d, Host> {
     /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
     /// during build (via `sdkconfig*`)
     #[cfg(not(esp_idf_version_major = "4"))]
-    pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
+    pub fn set_tod_from_cfg(&self) -> Result<(), EspError> {
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
 
@@ -926,8 +926,9 @@ impl<'d> EspThread<'d> {
     /// Set the active TOD (Thread Operational Dataset) according to the
     /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
     /// during build (via `sdkconfig*`)
-    pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
-        ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
+    #[cfg(not(esp_idf_version_major = "4"))]
+    pub fn set_tod_from_cfg(&self) -> Result<(), EspError> {
+        self.driver().set_tod_from_cfg()
     }
 
     /// Perform an active scan for Thread networks
