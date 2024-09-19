@@ -240,7 +240,7 @@ impl<'d> ThreadDriver<'d, Host> {
         mounted_event_fs: Arc<MountedEventfs>,
     ) -> Result<Self, EspError> {
         Ok(Self {
-            cfg: Self::native_host_cfg(modem),
+            cfg: Self::host_native_cfg(modem),
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
