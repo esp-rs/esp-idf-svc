@@ -4,43 +4,47 @@
 //! NOTE: This example only works on MCUs that has Thread capabilities, like the ESP32-C6 or ESP32-H2.
 
 fn main() -> anyhow::Result<()> {
+    esp_idf_svc::sys::link_patches();
+    esp_idf_svc::log::EspLogger::initialize_default();
+
     #[cfg(any(esp32h2, esp32c6))]
-    router::main()?;
+    example::main()?;
 
     #[cfg(not(any(esp32h2, esp32c6)))]
-    println!("This example only works on MCUs that have Thread capabilities, like the ESP32-C6 or ESP32-H2.");
+    log::info!("This example only works on MCUs that have Thread capabilities, like the ESP32-C6 or ESP32-H2.");
 
     Ok(())
 }
 
 #[cfg(any(esp32h2, esp32c6))]
-mod router {
+mod example {
     use std::sync::Arc;
 
-    use esp_idf_svc::eventloop::EspSystemSubscription;
     use log::info;
 
+    use esp_idf_svc::eventloop::EspSystemSubscription;
     use esp_idf_svc::hal::prelude::Peripherals;
     use esp_idf_svc::io::vfs::MountedEventfs;
-    use esp_idf_svc::log::EspLogger;
     use esp_idf_svc::thread::{EspThread, ThreadEvent};
     use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 
     pub fn main() -> anyhow::Result<()> {
-        esp_idf_svc::sys::link_patches();
-        EspLogger::initialize_default();
-
         let peripherals = Peripherals::take()?;
         let sys_loop = EspSystemEventLoop::take()?;
         let nvs = EspDefaultNvsPartition::take()?;
 
-        let mounted_event_fs = Arc::new(MountedEventfs::mount(4)?);
+        let mounted_event_fs = Arc::new(MountedEventfs::mount(6)?);
 
-        info!("Running Thread...");
+        info!("Initializing Thread...");
 
         let _subscription = log_thread_sysloop(sys_loop.clone())?;
 
-        let thread = EspThread::new(peripherals.modem, sys_loop.clone(), nvs, mounted_event_fs)?;
+        let mut thread =
+            EspThread::new(peripherals.modem, sys_loop.clone(), nvs, mounted_event_fs)?;
+
+        thread.init()?;
+
+        info!("Thread initialized, now running...");
 
         thread.run()?;
 

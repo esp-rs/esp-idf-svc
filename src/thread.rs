@@ -218,8 +218,12 @@ impl From<otDeviceRole> for Role {
 ///   of course only supported with MCUs that do have a Thread radio, like esp32c2 and esp32c6
 /// - Host mode: The driver operates as a host, and if the chip does not have a Thread radio
 ///   it has to be connected via SPI or USB to a chip which runs the Thread stack in RCP mode
-pub struct ThreadDriver<'d, T> {
+pub struct ThreadDriver<'d, T>
+where
+    T: Mode,
+{
     cfg: esp_openthread_platform_config_t,
+    initialized: bool,
     cs: CriticalSection,
     //_subscription: EspSubscription<'static, System>,
     _nvs: EspDefaultNvsPartition,
@@ -240,6 +244,7 @@ impl<'d> ThreadDriver<'d, Host> {
     ) -> Result<Self, EspError> {
         Ok(Self {
             cfg: Self::host_native_cfg(modem),
+            initialized: false,
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
@@ -266,6 +271,7 @@ impl<'d> ThreadDriver<'d, Host> {
     ) -> Result<Self, EspError> {
         Ok(Self {
             cfg: Self::host_spi_cfg(spi, mosi, miso, sclk, cs, intr, config),
+            initialized: false,
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
@@ -287,6 +293,7 @@ impl<'d> ThreadDriver<'d, Host> {
     ) -> Result<Self, EspError> {
         Ok(Self {
             cfg: Self::host_uart_cfg(uart, tx, rx, config),
+            initialized: false,
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
@@ -297,6 +304,8 @@ impl<'d> ThreadDriver<'d, Host> {
 
     /// Retrieve the current role of the device in the Thread network
     pub fn role(&self) -> Result<Role, EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         Ok(unsafe { otThreadGetDeviceRole(esp_openthread_get_instance()) }.into())
@@ -339,6 +348,8 @@ impl<'d> ThreadDriver<'d, Host> {
     /// during build (via `sdkconfig*`)
     #[cfg(not(esp_idf_version_major = "4"))]
     pub fn set_tod_from_cfg(&self) -> Result<(), EspError> {
+        self.check_init()?;
+
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
 
@@ -347,6 +358,8 @@ impl<'d> ThreadDriver<'d, Host> {
     /// The callback will be called for each found network
     /// At the end of the scan, the callback will be called with `None`
     pub fn scan<F: FnMut(Option<ActiveScanResult>)>(&self, callback: F) -> Result<(), EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         #[allow(clippy::type_complexity)]
@@ -356,8 +369,8 @@ impl<'d> ThreadDriver<'d, Host> {
         ot_esp!(unsafe {
             otLinkActiveScan(
                 esp_openthread_get_instance(),
-                0,
-                0,
+                0xffff_ffffu32, // All channels
+                200,            // ms scan per channel
                 Some(Self::on_active_scan_result),
                 callback.as_mut() as *mut _ as *mut c_void,
             )
@@ -368,6 +381,8 @@ impl<'d> ThreadDriver<'d, Host> {
 
     /// Check if an active scan is in progress
     pub fn is_scan_in_progress(&self) -> Result<bool, EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         Ok(unsafe { otLinkIsActiveScanInProgress(esp_openthread_get_instance()) })
@@ -381,6 +396,8 @@ impl<'d> ThreadDriver<'d, Host> {
         &self,
         callback: F,
     ) -> Result<(), EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         #[allow(clippy::type_complexity)]
@@ -390,8 +407,8 @@ impl<'d> ThreadDriver<'d, Host> {
         ot_esp!(unsafe {
             otLinkEnergyScan(
                 esp_openthread_get_instance(),
-                0,
-                0,
+                0xffff_ffffu32, // All channels
+                200,            // ms scan per channel
                 Some(Self::on_energy_scan_result),
                 callback.as_mut() as *mut _ as *mut c_void,
             )
@@ -402,6 +419,8 @@ impl<'d> ThreadDriver<'d, Host> {
 
     /// Check if an energy scan is in progress
     pub fn is_energy_scan_in_progress(&self) -> Result<bool, EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         Ok(unsafe { otLinkIsEnergyScanInProgress(esp_openthread_get_instance()) })
@@ -570,6 +589,8 @@ impl<'d> ThreadDriver<'d, Host> {
     }
 
     fn internal_tod(&self, active: bool, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         let mut tlvs = MaybeUninit::<otOperationalDatasetTlvs>::uninit(); // TODO: Large buffer
@@ -594,6 +615,8 @@ impl<'d> ThreadDriver<'d, Host> {
     }
 
     fn internal_set_tod(&self, active: bool, data: &[u8]) -> Result<(), EspError> {
+        self.check_init()?;
+
         let _lock = OtLock::acquire()?;
 
         let mut tlvs = MaybeUninit::<otOperationalDatasetTlvs>::uninit(); // TODO: Large buffer
@@ -639,6 +662,7 @@ impl<'d> ThreadDriver<'d, RCP> {
     ) -> Result<Self, EspError> {
         Ok(Self {
             cfg: Self::rcp_spi_cfg(modem, spi, mosi, miso, sclk, cs, intr),
+            initialized: false,
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
@@ -662,6 +686,7 @@ impl<'d> ThreadDriver<'d, RCP> {
     ) -> Result<Self, EspError> {
         Ok(Self {
             cfg: Self::rcp_uart_cfg(modem, uart, tx, rx, config),
+            initialized: false,
             cs: CriticalSection::new(),
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
@@ -802,21 +827,74 @@ where
     pub fn run(&self) -> Result<(), EspError> {
         // TODO: Figure out how to stop running
 
+        self.check_init()?;
+
+        let _lock = self.cs.enter();
+
+        debug!("Driver running");
+
+        let result = esp!(unsafe { esp_openthread_launch_mainloop() });
+
+        debug!("Driver stopped running");
+
+        result
+    }
+
+    /// Initialize the Thread driver
+    /// Note that this needs to be done before calling any other driver method.
+    ///
+    /// Does nothing if the driver is already initialized.
+    pub fn init(&mut self) -> Result<(), EspError> {
+        if self.initialized {
+            return Ok(());
+        }
+
         let _lock = self.cs.enter();
 
         esp!(unsafe { esp_openthread_init(&self.cfg) })?;
 
-        debug!("Driver initialized");
-
         T::init();
 
-        let result = esp!(unsafe { esp_openthread_launch_mainloop() });
+        self.initialized = true;
+
+        Ok(())
+    }
+
+    // Deinitialize the Thread driver
+    pub fn deinit(&mut self) -> Result<(), EspError> {
+        if !self.initialized {
+            return Ok(());
+        }
+
+        let _lock = self.cs.enter();
 
         esp!(unsafe { esp_openthread_deinit() })?;
 
-        debug!("Driver deinitialized");
+        self.initialized = false;
 
-        result
+        Ok(())
+    }
+
+    /// Return `true` if the driver is already initialized
+    pub fn is_init(&self) -> Result<bool, EspError> {
+        Ok(self.initialized)
+    }
+
+    fn check_init(&self) -> Result<(), EspError> {
+        if !self.initialized {
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'d, T> Drop for ThreadDriver<'d, T>
+where
+    T: Mode,
+{
+    fn drop(&mut self) {
+        self.deinit().unwrap();
     }
 }
 
@@ -841,23 +919,23 @@ impl Drop for OtLock {
 }
 
 /// Trait shared between the modes of operation of the `EspThread` instance
-pub trait NetifMode<'d> {
-    fn driver(&self) -> &ThreadDriver<'d, Host>;
-    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host>;
+pub trait NetifMode {
+    fn init(&mut self) -> Result<(), EspError>;
+    fn deinit(&mut self) -> Result<(), EspError>;
 }
 
 /// The regular mode of operation for the `EspThread` instance
 ///
 /// This is the only available mode if the Border Router functionality in ESP-IDF is not enabled
-pub struct Node<'d>(ThreadDriver<'d, Host>);
+pub struct Node(());
 
-impl<'d> NetifMode<'d> for Node<'d> {
-    fn driver(&self) -> &ThreadDriver<'d, Host> {
-        &self.0
+impl NetifMode for Node {
+    fn init(&mut self) -> Result<(), EspError> {
+        Ok(())
     }
 
-    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
-        &mut self.0
+    fn deinit(&mut self) -> Result<(), EspError> {
+        Ok(())
     }
 }
 
@@ -867,7 +945,7 @@ impl<'d> NetifMode<'d> for Node<'d> {
     esp_idf_openthread_border_router,
     not(any(esp32h2, esp32h4))
 ))]
-pub struct BorderRouter<'d, N>(ThreadDriver<'d, Host>, N)
+pub struct BorderRouter<N>(N)
 where
     N: core::borrow::Borrow<EspNetif>;
 
@@ -876,11 +954,8 @@ where
     esp_idf_openthread_border_router,
     not(any(esp32h2, esp32h4))
 ))]
-impl<'d, N> BorderRouter<'d, N>
-where
-    N: core::borrow::Borrow<EspNetif>,
-{
-    fn new(driver: ThreadDriver<'d, Host>, netif: N) -> Result<Self, EspError> {
+impl<N: core::borrow::Borrow<EspNetif>> NetifMode for BorderRouter<N> {
+    fn init(&mut self) -> Result<(), EspError> {
         #[cfg(esp_idf_version_major = "4")]
         {
             esp!(unsafe { esp_openthread_border_router_init(netif.borrow().handle()) })?;
@@ -888,44 +963,20 @@ where
 
         #[cfg(not(esp_idf_version_major = "4"))]
         {
-            unsafe {
-                esp_openthread_set_backbone_netif(netif.borrow().handle());
-            }
-
             esp!(unsafe { esp_openthread_border_router_init() })?;
         }
 
         debug!("Border router initialized");
 
-        Ok(Self(driver, netif))
-    }
-}
-
-#[cfg(all(
-    esp_idf_comp_esp_netif_enabled,
-    esp_idf_openthread_border_router,
-    not(any(esp32h2, esp32h4))
-))]
-impl<'d, N: core::borrow::Borrow<EspNetif>> Drop for BorderRouter<'d, N> {
-    fn drop(&mut self) {
-        esp!(unsafe { esp_openthread_border_router_deinit() }).unwrap();
-
-        debug!("Border router dropped");
-    }
-}
-
-#[cfg(all(
-    esp_idf_comp_esp_netif_enabled,
-    esp_idf_openthread_border_router,
-    not(any(esp32h2, esp32h4))
-))]
-impl<'d, N: core::borrow::Borrow<EspNetif>> NetifMode<'d> for BorderRouter<'d, N> {
-    fn driver(&self) -> &ThreadDriver<'d, Host> {
-        &self.0
+        Ok(())
     }
 
-    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
-        &mut self.0
+    fn deinit(&mut self) -> Result<(), EspError> {
+        esp!(unsafe { esp_openthread_border_router_deinit() })?;
+
+        debug!("Border router deinitialized");
+
+        Ok(())
     }
 }
 
@@ -940,13 +991,18 @@ impl<'d, N: core::borrow::Borrow<EspNetif>> NetifMode<'d> for BorderRouter<'d, N
 /// desirable. E.g., using `smoltcp` or other custom IP stacks on top of the
 /// ESP IDF Thread radio.
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-pub struct EspThread<T> {
+pub struct EspThread<'d, T>
+where
+    T: NetifMode,
+{
     netif: EspNetif,
-    driver: T,
+    driver: ThreadDriver<'d, Host>,
+    netif_initialized: bool,
+    mode: T,
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d> EspThread<Node<'d>> {
+impl<'d> EspThread<'d, Node> {
     /// Create a new `EspThread` instance utilizing the native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
     pub fn new<M: crate::hal::modem::ThreadModemPeripheral>(
@@ -1016,16 +1072,15 @@ impl<'d> EspThread<Node<'d>> {
     }
 
     /// Wrap an already created Thread L2 driver instance and a network interface
-    pub fn wrap_all(driver: ThreadDriver<'d, Host>, netif: EspNetif) -> Result<Self, EspError> {
-        let mut this = Self {
-            driver: Node(driver),
+    pub fn wrap_all(mut driver: ThreadDriver<'d, Host>, netif: EspNetif) -> Result<Self, EspError> {
+        driver.deinit()?;
+
+        Ok(Self {
+            driver,
             netif,
-        };
-
-        this.attach_netif()?;
-        Self::enable_network(true)?;
-
-        Ok(this)
+            netif_initialized: false,
+            mode: Node(()),
+        })
     }
 }
 
@@ -1034,7 +1089,7 @@ impl<'d> EspThread<Node<'d>> {
     esp_idf_openthread_border_router,
     not(any(esp32h2, esp32h4))
 ))]
-impl<'d, N> EspThread<BorderRouter<'d, N>>
+impl<'d, N> EspThread<'d, BorderRouter<N>>
 where
     N: core::borrow::Borrow<EspNetif>,
 {
@@ -1115,35 +1170,38 @@ where
     /// Wrap an already created Thread L2 driver instance, a network interface to be used for the
     /// Thread network, and a backbone network interface to the outside world
     pub fn wrap_br_all(
-        driver: ThreadDriver<'d, Host>,
+        mut driver: ThreadDriver<'d, Host>,
         netif: EspNetif,
         backbone_netif: N,
     ) -> Result<Self, EspError> {
-        let mut this = Self {
-            driver: BorderRouter::new(driver, backbone_netif)?,
+        driver.deinit()?;
+
+        unsafe {
+            esp_openthread_set_backbone_netif(backbone_netif.borrow().handle());
+        }
+
+        Ok(Self {
+            driver,
             netif,
-        };
-
-        this.attach_netif()?;
-        Self::enable_network(true)?;
-
-        Ok(this)
+            netif_initialized: false,
+            mode: BorderRouter(backbone_netif),
+        })
     }
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> EspThread<T>
+impl<'d, T> EspThread<'d, T>
 where
-    T: NetifMode<'d>,
+    T: NetifMode,
 {
     /// Return the underlying [`ThreadDriver`]
     pub fn driver(&self) -> &ThreadDriver<'d, Host> {
-        self.driver.driver()
+        &self.driver
     }
 
     /// Return the underlying [`ThreadDriver`], as mutable
-    pub fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
-        self.driver.driver_mut()
+    fn driver_mut(&mut self) -> &mut ThreadDriver<'d, Host> {
+        &mut self.driver
     }
 
     /// Return the underlying [`EspNetif`]
@@ -1154,6 +1212,30 @@ where
     /// Return the underlying [`EspNetif`] as mutable
     pub fn netif_mut(&mut self) -> &mut EspNetif {
         &mut self.netif
+    }
+
+    /// Initialize the Thread stack
+    ///
+    /// This should be called after the `EspThread` instance is created
+    /// and before any other operation is performed on it
+    ///
+    /// If the stack is already initialized, this method does nothing
+    pub fn init(&mut self) -> Result<(), EspError> {
+        self.driver_mut().init()?;
+        self.init_netif()
+    }
+
+    /// Deinitialize the Thread stack
+    ///
+    /// If the stack is already deinitialized, this method does nothing
+    pub fn deinit(&mut self) -> Result<(), EspError> {
+        self.deinit_netif()?;
+        self.driver_mut().deinit()
+    }
+
+    /// Return `true` if the Thread stack is already initialized
+    pub fn is_init(&self) -> Result<bool, EspError> {
+        Ok(self.netif_initialized && self.driver().is_init()?)
     }
 
     /// Retrieve the current role of the device in the Thread network
@@ -1235,56 +1317,91 @@ where
     /// The current thread would block while the stack is running
     /// Note that the stack will only exit if an error occurs
     pub fn run(&self) -> Result<(), EspError> {
-        self.driver.driver().run()
+        self.driver().run()
     }
 
     /// Replace the network interface with the provided one and return the
     /// existing network interface.
     pub fn swap_netif(&mut self, netif: EspNetif) -> Result<EspNetif, EspError> {
-        Self::enable_network(false)?;
-        self.detach_netif()?;
+        let initialized = self.is_init()?;
+
+        self.deinit()?;
 
         let old = core::mem::replace(&mut self.netif, netif);
 
-        self.attach_netif()?;
-        Self::enable_network(true)?;
+        if initialized {
+            self.init()?;
+        }
 
         Ok(old)
     }
 
-    fn attach_netif(&mut self) -> Result<(), EspError> {
+    fn init_netif(&mut self) -> Result<(), EspError> {
+        if self.netif_initialized {
+            return Ok(());
+        }
+
+        let _lock = OtLock::acquire()?;
+
+        self.ot_attach_netif()?;
+        self.mode.init()?;
+
+        Self::ot_enable_network(true)?;
+
+        Ok(())
+    }
+
+    fn deinit_netif(&mut self) -> Result<(), EspError> {
+        if !self.netif_initialized {
+            return Ok(());
+        }
+
+        let _lock = OtLock::acquire()?;
+
+        Self::ot_enable_network(false)?;
+
+        self.mode.deinit()?;
+        self.ot_detach_netif()?;
+
+        Ok(())
+    }
+
+    // NOTE: Methods starting with `ot_` have to be called only when the OpenThread lock is held
+    fn ot_attach_netif(&mut self) -> Result<(), EspError> {
         esp!(unsafe {
             esp_netif_attach(
                 self.netif.handle() as *mut _,
-                esp_openthread_netif_glue_init(&self.driver.driver().cfg),
+                esp_openthread_netif_glue_init(&self.driver().cfg),
             )
         })?;
 
         Ok(())
     }
-}
 
-#[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<T> EspThread<T> {
-    fn enable_network(enabled: bool) -> Result<(), EspError> {
-        ot_esp!(unsafe { otIp6SetEnabled(esp_openthread_get_instance(), enabled) })?;
-        ot_esp!(unsafe { otThreadSetEnabled(esp_openthread_get_instance(), enabled) })?;
-
-        Ok(())
-    }
-
-    fn detach_netif(&mut self) -> Result<(), EspError> {
+    fn ot_detach_netif(&mut self) -> Result<(), EspError> {
         unsafe {
             esp_openthread_netif_glue_deinit();
         }
 
         Ok(())
     }
+
+    fn ot_enable_network(enabled: bool) -> Result<(), EspError> {
+        ot_esp!(unsafe { otIp6SetEnabled(esp_openthread_get_instance(), enabled) })?;
+        ot_esp!(unsafe { otThreadSetEnabled(esp_openthread_get_instance(), enabled) })?;
+
+        debug!("Network enabled={enabled}");
+
+        Ok(())
+    }
 }
 
-impl<T> Drop for EspThread<T> {
+impl<'d, T> Drop for EspThread<'d, T>
+where
+    T: NetifMode,
+{
     fn drop(&mut self) {
-        let _ = self.detach_netif();
+        self.deinit_netif().unwrap();
     }
 }
 

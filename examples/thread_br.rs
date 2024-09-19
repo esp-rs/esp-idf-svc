@@ -10,19 +10,32 @@
 //! NOTE NOTE NOTE:
 //! To build, you need to put the following in your `sdkconfig.defaults`:
 //! ```text
-//! # Generic Thread functionality
 //! CONFIG_OPENTHREAD_ENABLED=y
 //!
 //! # Thread Border Router
 //! CONFIG_OPENTHREAD_BORDER_ROUTER=y
-//! CONFIG_LWIP_IPV6_NUM_ADDRESSES=12
-//! CONFIG_LWIP_NETIF_STATUS_CALLBACK=y
 //!
-//! # (These are also necessary for the Joiner feature)
+//! # These are also necessary for the Joiner feature
 //! CONFIG_MBEDTLS_CMAC_C=y
 //! CONFIG_MBEDTLS_SSL_PROTO_DTLS=y
 //! CONFIG_MBEDTLS_KEY_EXCHANGE_ECJPAKE=y
 //! CONFIG_MBEDTLS_ECJPAKE_C=y
+//!
+//! # Border Router again, lwIP
+//! CONFIG_LWIP_IPV6_NUM_ADDRESSES=12
+//! CONFIG_LWIP_NETIF_STATUS_CALLBACK=y
+//! CONFIG_LWIP_IPV6_FORWARD=y
+//! CONFIG_LWIP_MULTICAST_PING=y
+//! CONFIG_LWIP_NETIF_STATUS_CALLBACK=y
+//! CONFIG_LWIP_HOOK_IP6_ROUTE_DEFAULT=y
+//! CONFIG_LWIP_HOOK_ND6_GET_GW_DEFAULT=y
+//! CONFIG_LWIP_HOOK_IP6_INPUT_CUSTOM=y
+//! CONFIG_LWIP_HOOK_IP6_SELECT_SRC_ADDR_CUSTOM=y
+//! CONFIG_LWIP_IPV6_AUTOCONFIG=y
+//! CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
+//!
+//! # Border Router again, mDNS
+//! CONFIG_MDNS_MULTIPLE_INSTANCE=y
 //! ```
 //!
 //! And also the following in your `Cargo.toml`:
@@ -34,14 +47,17 @@
 #![allow(unexpected_cfgs)]
 
 fn main() -> anyhow::Result<()> {
+    esp_idf_svc::sys::link_patches();
+    esp_idf_svc::log::EspLogger::initialize_default();
+
     #[cfg(i_have_done_all_of_the_above)] // Remove this `cfg` when you have done all of the above for the example to compile
     #[cfg(esp32c6)]
-    router::main()?;
+    example::main()?;
 
     // Remove this whole code block when you have done all of the above for the example to compile
     #[cfg(not(i_have_done_all_of_the_above))]
     {
-        println!("Please follow the instructions in the source code.");
+        log::info!("Please follow the instructions in the source code.");
     }
 
     Ok(())
@@ -49,19 +65,18 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(i_have_done_all_of_the_above)] // Remove this `cfg` when you have done all of the above for the example to compile
 #[cfg(esp32c6)]
-mod router {
+mod example {
     use core::convert::TryInto;
 
     use std::sync::Arc;
 
-    use esp_idf_svc::eventloop::EspSystemSubscription;
     use log::info;
 
     use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
+    use esp_idf_svc::eventloop::EspSystemSubscription;
     use esp_idf_svc::hal::prelude::Peripherals;
     use esp_idf_svc::io::vfs::MountedEventfs;
-    use esp_idf_svc::log::EspLogger;
     use esp_idf_svc::thread::{EspThread, ThreadEvent};
     use esp_idf_svc::wifi::{BlockingWifi, EspWifi};
     use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
@@ -70,9 +85,6 @@ mod router {
     const PASSWORD: &str = env!("WIFI_PASS");
 
     pub fn main() -> anyhow::Result<()> {
-        esp_idf_svc::sys::link_patches();
-        EspLogger::initialize_default();
-
         let peripherals = Peripherals::take()?;
         let sys_loop = EspSystemEventLoop::take()?;
         let nvs = EspDefaultNvsPartition::take()?;
@@ -92,17 +104,21 @@ mod router {
 
         info!("Wifi DHCP info: {:?}", ip_info);
 
-        info!("Running Thread...");
+        info!("Initializing Thread...");
 
         let _subscription = log_thread_sysloop(sys_loop.clone())?;
 
-        let thread = EspThread::new_br(
+        let mut thread = EspThread::new_br(
             thread_modem,
             sys_loop,
             nvs,
             mounted_event_fs,
             wifi.wifi().sta_netif(),
         )?;
+
+        thread.init()?;
+
+        info!("Thread initialized, now running...");
 
         thread.run()?;
 

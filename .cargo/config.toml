@@ -1,5 +1,5 @@
 [build]
-target = "riscv32imac-esp-espidf"
+target = "riscv32imc-esp-espidf"
 #target = "xtensa-esp32-espidf"
 
 [target.xtensa-esp32-espidf]
@@ -25,7 +25,7 @@ rustflags = ["--cfg", "espidf_time64"]
 [env]
 ESP_IDF_SDKCONFIG_DEFAULTS = ".github/configs/sdkconfig.defaults"
 ESP_IDF_VERSION = "v5.3.1"
-MCU = "esp32c6"
+MCU = "esp32c3"
 
 [unstable]
 build-std = ["std", "panic_abort"]
