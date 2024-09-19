@@ -1,4 +1,4 @@
-use core::ffi;
+use core::ffi::{self, c_void, CStr};
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -21,6 +21,7 @@ use crate::sys::*;
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 /// The driver will operate in Radio Co-Processor mode
@@ -66,6 +67,86 @@ macro_rules! ot_esp {
     }};
 }
 
+/// Active scan result
+pub struct ActiveScanResult<'a>(&'a otActiveScanResult);
+
+impl<'a> ActiveScanResult<'a> {
+    /// IEEE 802.15.4 Extended Address
+    pub fn extended_address(&self) -> &'a [u8] {
+        &self.0.mExtAddress.m8
+    }
+
+    /// Thread Network Name
+    pub fn network_name_cstr(&self) -> &'a CStr {
+        unsafe { ffi::CStr::from_ptr(&self.0.mNetworkName.m8 as *const _ as *const _) }
+    }
+
+    /// Thread Extended PAN ID
+    pub fn extended_pan_id(&self) -> &[u8] {
+        &self.0.mExtendedPanId.m8
+    }
+
+    /// Steering Data
+    pub fn steering_data(&self) -> &[u8] {
+        &self.0.mSteeringData.m8
+    }
+
+    /// IEEE 802.15.4 PAN ID
+    pub fn pan_id(&self) -> u16 {
+        self.0.mPanId
+    }
+
+    /// Joiner UDP Port
+    pub fn joiner_udp_port(&self) -> u16 {
+        self.0.mJoinerUdpPort
+    }
+
+    /// IEEE 802.15.4 Channel
+    pub fn channel(&self) -> u8 {
+        self.0.mChannel
+    }
+
+    /// The max RSSI (dBm)
+    pub fn max_rssi(&self) -> i8 {
+        self.0.mRssi
+    }
+
+    /// LQI
+    pub fn lqi(&self) -> u8 {
+        self.0.mLqi
+    }
+
+    /// Version
+    pub fn version(&self) -> u8 {
+        self.0.mVersion() as _
+    }
+
+    /// Native Commissioner
+    pub fn native_commissioner(&self) -> bool {
+        self.0.mIsNative()
+    }
+
+    /// Join permitted
+    pub fn join_permitted(&self) -> bool {
+        self.0.mIsJoinable()
+    }
+}
+
+/// Energy scan result
+pub struct EnergyScanResult<'a>(&'a otEnergyScanResult);
+
+impl<'a> EnergyScanResult<'a> {
+    /// IEEE 802.15.4 Channel
+    pub fn channel(&self) -> u8 {
+        self.0.mChannel
+    }
+
+    /// The max RSSI (dBm)
+    pub fn max_rssi(&self) -> i8 {
+        self.0.mMaxRssi
+    }
+}
+
 static CS: CriticalSection = CriticalSection::new();
 
 /// This struct provides a safe wrapper over the ESP IDF Thread C driver.
@@ -93,7 +174,6 @@ pub struct ThreadDriver<'d, T> {
 
 impl<'d> ThreadDriver<'d, Host> {
     // TODO:
-    // - Prio A: Ways to perform active and energy scan (otLinkActiveScan / otLinkEnergyScan)
     // - Prio A: Status report (joined the network, device type, more?)
     // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
     // - Prio B: How to control when a device becomes a router?
@@ -317,8 +397,100 @@ impl<'d> ThreadDriver<'d, Host> {
     /// Set the active TOD (Thread Operational Dataset) according to the
     /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
     /// during build (via `sdkconfig*`)
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
+    }
+
+    /// Perform an active scan for Thread networks
+    ///
+    /// The callback will be called for each found network
+    /// At the end of the scan, the callback will be called with `None`
+    pub fn scan<F: FnMut(Option<ActiveScanResult>)>(&self, callback: F) -> Result<(), EspError> {
+        let _lock = OtLock::acquire()?;
+
+        let mut callback: Box<Box<dyn FnMut(Option<ActiveScanResult>)>> =
+            Box::new(Box::new(callback));
+
+        ot_esp!(unsafe {
+            otLinkActiveScan(
+                esp_openthread_get_instance(),
+                0,
+                0,
+                Some(Self::on_active_scan_result),
+                callback.as_mut() as *mut _ as *mut c_void,
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Check if an active scan is in progress
+    pub fn is_scan_in_progress(&self) -> Result<bool, EspError> {
+        let _lock = OtLock::acquire()?;
+
+        Ok(unsafe { otLinkIsActiveScanInProgress(esp_openthread_get_instance()) })
+    }
+
+    /// Perform an energy scan for Thread networks
+    ///
+    /// The callback will be called for each found network
+    /// At the end of the scan, the callback will be called with `None`
+    pub fn energy_scan<F: FnMut(Option<EnergyScanResult>)>(
+        &self,
+        callback: F,
+    ) -> Result<(), EspError> {
+        let _lock = OtLock::acquire()?;
+
+        let mut callback: Box<Box<dyn FnMut(Option<EnergyScanResult>)>> =
+            Box::new(Box::new(callback));
+
+        ot_esp!(unsafe {
+            otLinkEnergyScan(
+                esp_openthread_get_instance(),
+                0,
+                0,
+                Some(Self::on_energy_scan_result),
+                callback.as_mut() as *mut _ as *mut c_void,
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Check if an energy scan is in progress
+    pub fn is_energy_scan_in_progress(&self) -> Result<bool, EspError> {
+        let _lock = OtLock::acquire()?;
+
+        Ok(unsafe { otLinkIsEnergyScanInProgress(esp_openthread_get_instance()) })
+    }
+
+    unsafe extern "C" fn on_active_scan_result(
+        result: *mut otActiveScanResult,
+        context: *mut c_void,
+    ) {
+        let callback =
+            unsafe { (context as *mut Box<dyn FnMut(Option<ActiveScanResult>)>).as_mut() }.unwrap();
+
+        if result.is_null() {
+            callback(None);
+        } else {
+            callback(Some(ActiveScanResult(unsafe { result.as_ref() }.unwrap())));
+        }
+    }
+
+    unsafe extern "C" fn on_energy_scan_result(
+        result: *mut otEnergyScanResult,
+        context: *mut c_void,
+    ) {
+        let callback =
+            unsafe { (context as *mut Box<dyn FnMut(Option<EnergyScanResult>)>).as_mut() }.unwrap();
+
+        if result.is_null() {
+            callback(None);
+        } else {
+            callback(Some(EnergyScanResult(unsafe { result.as_ref() }.unwrap())));
+        }
     }
 }
 
