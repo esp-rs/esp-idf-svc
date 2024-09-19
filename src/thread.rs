@@ -1,10 +1,12 @@
 use core::ffi;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 
 use log::debug;
 
 use crate::eventloop::{EspEventDeserializer, EspEventSource, EspSystemEventLoop};
+use crate::hal::delay;
 use crate::hal::gpio::{InputPin, OutputPin};
 use crate::hal::peripheral::Peripheral;
 use crate::hal::task::CriticalSection;
@@ -47,6 +49,16 @@ const BAUD_RATE: u32 = 74880;
 #[cfg(not(all(esp32c2, esp_idf_xtal_freq_26)))]
 const BAUD_RATE: u32 = 115200;
 
+macro_rules! ot_esp {
+    ($err:expr) => {{
+        esp!(match $err {
+            otError_OT_ERROR_NONE => ESP_OK,
+            otError_OT_ERROR_FAILED => ESP_FAIL,
+            _ => ESP_FAIL, // For now
+        })
+    }};
+}
+
 static CS: CriticalSection = CriticalSection::new();
 
 /// This struct provides a safe wrapper over the ESP IDF Thread C driver.
@@ -74,7 +86,6 @@ pub struct ThreadDriver<'d, T> {
 
 impl<'d> ThreadDriver<'d, Host> {
     // TODO:
-    // - Prio A: Ways to programmatically set the Thread Operational Dataset (esp_openthread_auto_start / otDatasetSetActiveTlvs / otDatasetSetActive?)
     // - Prio A: Ways to perform active and energy scan (otLinkActiveScan / otLinkEnergyScan)
     // - Prio A: Status report (joined the network, device type, more?)
     // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
@@ -113,9 +124,8 @@ impl<'d> ThreadDriver<'d, Host> {
             },
             port_config: Self::PORT_CONFIG,
         };
-        esp!(unsafe { esp_openthread_init(&cfg) })?;
 
-        debug!("Driver initialized");
+        Self::init(&cfg, true)?;
 
         Ok(Self {
             mode: Host(cfg),
@@ -195,9 +205,8 @@ impl<'d> ThreadDriver<'d, Host> {
             },
             port_config: Self::PORT_CONFIG,
         };
-        esp!(unsafe { esp_openthread_init(&cfg) })?;
 
-        debug!("Driver initialized");
+        Self::init(&cfg, true)?;
 
         Ok(Self {
             mode: Host(cfg),
@@ -275,9 +284,7 @@ impl<'d> ThreadDriver<'d, Host> {
             port_config: Self::PORT_CONFIG,
         };
 
-        esp!(unsafe { esp_openthread_init(&cfg) })?;
-
-        debug!("Driver initialized");
+        Self::init(&cfg, true)?;
 
         Ok(Self {
             mode: Host(cfg),
@@ -285,6 +292,45 @@ impl<'d> ThreadDriver<'d, Host> {
             _nvs: nvs,
             _p: PhantomData,
         })
+    }
+
+    /// Retrieve the active TOD (Thread Operational Dataset) in the user-supplied buffer
+    ///
+    /// Return the size of the TOD data written to the buffer
+    ///
+    /// The TOD is in Thread TLV format.
+    pub fn tod(&self, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.internal_tod(true, buf)
+    }
+
+    /// Retrieve the pending TOD (Thread Operational Dataset) in the user-supplied buffer
+    ///
+    /// Return the size of the TOD data written to the buffer
+    ///
+    /// The TOD is in Thread TLV format.
+    pub fn pending_tod(&self, buf: &mut [u8]) -> Result<usize, EspError> {
+        self.internal_tod(false, buf)
+    }
+
+    /// Set the active TOD (Thread Operational Dataset) to the provided data
+    ///
+    /// The TOD data should be in Thread TLV format.
+    pub fn set_tod(&self, tod: &[u8]) -> Result<(), EspError> {
+        self.internal_set_tod(true, tod)
+    }
+
+    /// Set the pending TOD (Thread Operational Dataset) to the provided data
+    ///
+    /// The TOD data should be in Thread TLV format.
+    pub fn set_pending_tod(&self, tod: &[u8]) -> Result<(), EspError> {
+        self.internal_set_tod(false, tod)
+    }
+
+    /// Set the active TOD (Thread Operational Dataset) according to the
+    /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
+    /// during build (via `sdkconfig*)
+    pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
+        ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
 }
 
@@ -355,9 +401,8 @@ impl<'d> ThreadDriver<'d, RCP> {
             },
             port_config: Self::PORT_CONFIG,
         };
-        esp!(unsafe { esp_openthread_init(&cfg) })?;
 
-        debug!("Driver initialized");
+        Self::init(&cfg, false)?;
 
         Ok(Self {
             mode: RCP,
@@ -436,9 +481,7 @@ impl<'d> ThreadDriver<'d, RCP> {
             port_config: Self::PORT_CONFIG,
         };
 
-        esp!(unsafe { esp_openthread_init(&cfg) })?;
-
-        debug!("Driver initialized");
+        Self::init(&cfg, false)?;
 
         Ok(Self {
             mode: RCP,
@@ -467,11 +510,99 @@ impl<'d, T> ThreadDriver<'d, T> {
 
         esp!(unsafe { esp_openthread_launch_mainloop() })
     }
+
+    fn internal_tod(&self, active: bool, buf: &mut [u8]) -> Result<usize, EspError> {
+        let _lock = OtLock::acquire()?;
+
+        let mut tlvs = MaybeUninit::<otOperationalDatasetTlvs>::uninit(); // TODO: Large buffer
+        ot_esp!(unsafe {
+            if active {
+                otDatasetGetActiveTlvs(esp_openthread_get_instance(), tlvs.assume_init_mut())
+            } else {
+                otDatasetGetPendingTlvs(esp_openthread_get_instance(), tlvs.assume_init_mut())
+            }
+        })?;
+
+        let tlvs = unsafe { tlvs.assume_init_mut() };
+
+        let len = tlvs.mLength as usize;
+        if buf.len() < len {
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?;
+        }
+
+        buf[..len].copy_from_slice(&tlvs.mTlvs[..len]);
+
+        Ok(len)
+    }
+
+    fn internal_set_tod(&self, active: bool, data: &[u8]) -> Result<(), EspError> {
+        let _lock = OtLock::acquire()?;
+
+        let mut tlvs = MaybeUninit::<otOperationalDatasetTlvs>::uninit(); // TODO: Large buffer
+
+        let tlvs = unsafe { tlvs.assume_init_mut() };
+
+        if data.len() > core::mem::size_of_val(&tlvs.mTlvs) {
+            Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?;
+        }
+
+        tlvs.mLength = data.len() as _;
+        tlvs.mTlvs[..data.len()].copy_from_slice(data);
+
+        ot_esp!(unsafe {
+            if active {
+                otDatasetSetActiveTlvs(esp_openthread_get_instance(), tlvs)
+            } else {
+                otDatasetSetPendingTlvs(esp_openthread_get_instance(), tlvs)
+            }
+        })?;
+
+        Ok(())
+    }
+
+    fn init(cfg: &esp_openthread_platform_config_t, enable: bool) -> Result<(), EspError> {
+        esp!(unsafe { esp_openthread_init(cfg) })?;
+
+        Self::set_enabled(enable)?;
+
+        debug!("Driver initialized");
+
+        Ok(())
+    }
+
+    fn set_enabled(enabled: bool) -> Result<(), EspError> {
+        ot_esp!(unsafe { otIp6SetEnabled(esp_openthread_get_instance(), enabled) })?;
+        ot_esp!(unsafe { otThreadSetEnabled(esp_openthread_get_instance(), enabled) })?;
+
+        Ok(())
+    }
 }
 
 impl<'d, T> Drop for ThreadDriver<'d, T> {
     fn drop(&mut self) {
         esp!(unsafe { esp_openthread_deinit() }).unwrap();
+
+        debug!("Driver dropped");
+    }
+}
+
+struct OtLock(PhantomData<*const ()>);
+
+impl OtLock {
+    pub fn acquire() -> Result<Self, EspError> {
+        if !unsafe { esp_openthread_lock_acquire(delay::BLOCK) } {
+            Err(EspError::from_infallible::<ESP_ERR_TIMEOUT>())?;
+        }
+
+        Ok(Self(PhantomData))
+    }
+}
+
+impl Drop for OtLock {
+    fn drop(&mut self) {
+        unsafe {
+            esp_openthread_lock_release();
+        }
     }
 }
 
