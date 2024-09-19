@@ -45,18 +45,23 @@ impl Debug for Host {
 
 pub mod config {
     #[cfg(all(esp32c2, esp_idf_xtal_freq_26))]
-    const UART_DEFAULT_BAUD_RATE: u32 = 74880;
+    pub const UART_DEFAULT_BAUD_RATE: u32 = 74880;
 
     #[cfg(not(all(esp32c2, esp_idf_xtal_freq_26)))]
-    const UART_DEFAULT_BAUD_RATE: u32 = 115200;
+    pub const UART_DEFAULT_BAUD_RATE: u32 = 115200;
 }
 
 macro_rules! ot_esp {
     ($err:expr) => {{
-        esp!(match $err as _ {
-            otError_OT_ERROR_NONE => ESP_OK,
-            otError_OT_ERROR_FAILED => ESP_FAIL,
-            _ => ESP_FAIL, // For now
+        esp!({
+            #[allow(non_upper_case_globals, non_snake_case)]
+            let err = match $err as _ {
+                otError_OT_ERROR_NONE => ESP_OK,
+                otError_OT_ERROR_FAILED => ESP_FAIL,
+                _ => ESP_FAIL, // For now
+            };
+
+            err
         })
     }};
 }
@@ -318,6 +323,7 @@ impl<'d> ThreadDriver<'d, Host> {
 }
 
 extern "C" {
+    #[allow(dead_code)]
     fn otAppNcpInit(instance: *mut otInstance);
 }
 
