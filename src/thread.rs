@@ -328,7 +328,7 @@ impl<'d> ThreadDriver<'d, Host> {
 
     /// Set the active TOD (Thread Operational Dataset) according to the
     /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
-    /// during build (via `sdkconfig*)
+    /// during build (via `sdkconfig*`)
     pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
@@ -775,7 +775,7 @@ impl<'d> EspThread<'d> {
 
     /// Set the active TOD (Thread Operational Dataset) according to the
     /// `CONFIG_OPENTHREAD_` TOD-related parameters compiled into the app
-    /// during build (via `sdkconfig*)
+    /// during build (via `sdkconfig*`)
     pub fn set_active_tod_from_cfg(&self) -> Result<(), EspError> {
         ot_esp!(unsafe { esp_openthread_auto_start(core::ptr::null_mut()) })
     }
