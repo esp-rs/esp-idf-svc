@@ -28,7 +28,7 @@ jobs:
         idf-version:
 #          - v4.4.7
 #          - v5.1.2
-          - v5.3
+          - v5.3.1
     steps:
       - name: Setup | Checkout
         uses: actions/checkout@v3
