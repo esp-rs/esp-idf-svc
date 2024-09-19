@@ -1332,8 +1332,8 @@ pub enum ThreadEvent {
     /// Thread role changed
     #[cfg(not(esp_idf_version_major = "4"))]
     RoleChanged {
-        current_role: otDeviceRole,
-        previous_role: otDeviceRole,
+        current_role: Role,
+        previous_role: Role,
     },
     /// Thread network interface up
     IfUp,
@@ -1425,8 +1425,8 @@ impl EspEventDeserializer for ThreadEvent {
                 .unwrap();
 
                 ThreadEvent::RoleChanged {
-                    current_role: payload.current_role,
-                    previous_role: payload.previous_role,
+                    current_role: payload.current_role.into(),
+                    previous_role: payload.previous_role.into(),
                 }
             }
             esp_openthread_event_t_OPENTHREAD_EVENT_IF_UP => ThreadEvent::IfUp,
