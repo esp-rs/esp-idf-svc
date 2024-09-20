@@ -1411,9 +1411,9 @@ where
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-unsafe impl<'d, T> Send for EspThread<'d, T> where T: NetifNode {}
+unsafe impl<'d, T> Send for EspThread<'d, T> where T: NetifMode {}
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-unsafe impl<'d, T> Sync for EspThread<'d, T> where T: NetifNode {}
+unsafe impl<'d, T> Sync for EspThread<'d, T> where T: NetifMode {}
 
 /// Events reported by the Thread stack on the system event loop
 #[derive(Copy, Clone, Debug)]
