@@ -1176,6 +1176,7 @@ where
     ) -> Result<Self, EspError> {
         driver.deinit()?;
 
+        #[cfg(not(esp_idf_version_major = "4"))]
         unsafe {
             esp_openthread_set_backbone_netif(backbone_netif.borrow().handle());
         }
