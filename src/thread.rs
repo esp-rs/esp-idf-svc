@@ -1400,6 +1400,7 @@ where
     }
 }
 
+#[cfg(esp_idf_comp_esp_netif_enabled)]
 impl<'d, T> Drop for EspThread<'d, T>
 where
     T: NetifMode,
@@ -1409,7 +1410,9 @@ where
     }
 }
 
+#[cfg(esp_idf_comp_esp_netif_enabled)]
 unsafe impl<'d, T> Send for EspThread<'d, T> where T: NetifNode {}
+#[cfg(esp_idf_comp_esp_netif_enabled)]
 unsafe impl<'d, T> Sync for EspThread<'d, T> where T: NetifNode {}
 
 /// Events reported by the Thread stack on the system event loop
