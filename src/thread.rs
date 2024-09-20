@@ -898,6 +898,9 @@ where
     }
 }
 
+unsafe impl<'d, T> Send for ThreadDriver<'d, T> where T: Mode {}
+unsafe impl<'d, T> Sync for ThreadDriver<'d, T> where T: Mode {}
+
 struct OtLock(PhantomData<*const ()>);
 
 impl OtLock {
@@ -1405,6 +1408,9 @@ where
         self.deinit_netif().unwrap();
     }
 }
+
+unsafe impl<'d, T> Send for EspThread<'d, T> where T: NetifNode {}
+unsafe impl<'d, T> Sync for EspThread<'d, T> where T: NetifNode {}
 
 /// Events reported by the Thread stack on the system event loop
 #[derive(Copy, Clone, Debug)]
