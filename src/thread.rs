@@ -180,6 +180,7 @@ impl<'a> EnergyScanResult<'a> {
     }
 }
 
+/// The current role of the device in the Thread network
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Role {
     Disabled,
@@ -201,6 +202,40 @@ impl From<otDeviceRole> for Role {
             _ => Role::Disabled,
         }
     }
+}
+
+/// The Ipv6 packet received from Thread via the `ThreadDriver::set_rx_callback` method
+pub struct Ipv6Packet<'a>(&'a otMessage);
+
+impl<'a> Ipv6Packet<'a> {
+    pub fn raw(&self) -> &otMessage {
+        self.0
+    }
+
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        unsafe { otMessageGetLength(self.0) as _ }
+    }
+
+    pub fn offset(&self) -> usize {
+        unsafe { otMessageGetOffset(self.0) as _ }
+    }
+
+    pub fn read(&self, offset: usize, buf: &mut [u8]) -> usize {
+        let len = self.len();
+
+        unsafe { otMessageRead(self.0, offset as _, buf.as_mut_ptr() as *mut _, len as _) as _ }
+    }
+}
+
+/// The incoming Ipv6 data received from Thread via the `ThreadDriver::set_rx_callback` method
+pub enum Ipv6Incoming<'a> {
+    /// A notification that an IPv6 address was added to the device
+    AddressAdded(core::net::Ipv6Addr),
+    /// A notification that an IPv6 address was removed from the device
+    AddressRemoved(core::net::Ipv6Addr),
+    /// An incoming raw IPv6 packet
+    Data(Ipv6Packet<'a>),
 }
 
 /// This struct provides a safe wrapper over the ESP IDF Thread C driver.
@@ -225,6 +260,8 @@ where
     cfg: esp_openthread_platform_config_t,
     initialized: bool,
     cs: CriticalSection,
+    #[allow(clippy::type_complexity)]
+    callback: Option<Box<Box<dyn FnMut(Ipv6Incoming) + Send + 'static>>>,
     //_subscription: EspSubscription<'static, System>,
     _nvs: EspDefaultNvsPartition,
     _mounted_event_fs: Arc<MountedEventfs>,
@@ -246,6 +283,7 @@ impl<'d> ThreadDriver<'d, Host> {
             cfg: Self::host_native_cfg(modem),
             initialized: false,
             cs: CriticalSection::new(),
+            callback: None,
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
             _mode: Host(()),
@@ -273,6 +311,7 @@ impl<'d> ThreadDriver<'d, Host> {
             cfg: Self::host_spi_cfg(spi, mosi, miso, sclk, cs, intr, config),
             initialized: false,
             cs: CriticalSection::new(),
+            callback: None,
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
             _mode: Host(()),
@@ -295,6 +334,7 @@ impl<'d> ThreadDriver<'d, Host> {
             cfg: Self::host_uart_cfg(uart, tx, rx, config),
             initialized: false,
             cs: CriticalSection::new(),
+            callback: None,
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
             _mode: Host(()),
@@ -424,6 +464,147 @@ impl<'d> ThreadDriver<'d, Host> {
         let _lock = OtLock::acquire()?;
 
         Ok(unsafe { otLinkIsEnergyScanInProgress(esp_openthread_get_instance()) })
+    }
+
+    /// Send an Ipv6 raw packet over Thread
+    pub fn tx(&self, packet: &[u8]) -> Result<(), EspError> {
+        self.check_init()?;
+
+        let _lock = OtLock::acquire()?;
+
+        let message =
+            unsafe { otIp6NewMessage(esp_openthread_get_instance(), core::ptr::null_mut()) };
+        if message.is_null() {
+            Err(EspError::from_infallible::<ESP_FAIL>())?;
+        }
+
+        let result = ot_esp!(unsafe {
+            otMessageAppend(message, packet.as_ptr() as *const _, packet.len() as _)
+        })
+        .and_then(|_| ot_esp!(unsafe { otIp6Send(esp_openthread_get_instance(), message) }));
+
+        unsafe { otMessageFree(message) };
+
+        result
+    }
+
+    /// Set a callback function for receiving Ipv6 raw packets from Thread
+    pub fn set_rx_callback<R>(&mut self, callback: Option<R>) -> Result<(), EspError>
+    where
+        R: FnMut(Ipv6Incoming) + Send + 'static,
+    {
+        self.internal_set_rx_callback(callback)
+    }
+
+    /// Set a callback function for receiving Ipv6 raw packets from Thread
+    ///
+    /// # Safety
+    ///
+    /// This method - in contrast to method `set_rx_callback` - allows the user to pass
+    /// non-static callback/closure. This enables users to borrow
+    /// - in the closure - variables that live on the stack - or more generally - in the same
+    ///   scope where the service is created.
+    ///
+    /// HOWEVER: care should be taken NOT to call `core::mem::forget()` on the service,
+    /// as that would immediately lead to an UB (crash).
+    /// Also note that forgetting the service might happen with `Rc` and `Arc`
+    /// when circular references are introduced: https://github.com/rust-lang/rust/issues/24456
+    ///
+    /// The reason is that the closure is actually sent to a hidden ESP IDF thread.
+    /// This means that if the service is forgotten, Rust is free to e.g. unwind the stack
+    /// and the closure now owned by this other thread will end up with references to variables that no longer exist.
+    ///
+    /// The destructor of the service takes care - prior to the service being dropped and e.g.
+    /// the stack being unwind - to remove the closure from the hidden thread and destroy it.
+    /// Unfortunately, when the service is forgotten, the un-subscription does not happen
+    /// and invalid references are left dangling.
+    ///
+    /// This "local borrowing" will only be possible to express in a safe way once/if `!Leak` types
+    /// are introduced to Rust (i.e. the impossibility to "forget" a type and thus not call its destructor).
+    pub fn set_nonstatic_rx_callback<R>(&mut self, callback: Option<R>) -> Result<(), EspError>
+    where
+        R: FnMut(Ipv6Incoming) + Send + 'd,
+    {
+        self.internal_set_rx_callback(callback)
+    }
+
+    fn internal_set_rx_callback<R>(&mut self, callback: Option<R>) -> Result<(), EspError>
+    where
+        R: FnMut(Ipv6Incoming) + Send + 'd,
+    {
+        self.deinit()?;
+
+        let _lock = OtLock::acquire()?;
+
+        if let Some(callback) = callback {
+            #[allow(clippy::type_complexity)]
+            let callback: Box<Box<dyn FnMut(Ipv6Incoming) + Send + 'd>> =
+                Box::new(Box::new(callback));
+
+            #[allow(clippy::type_complexity)]
+            let mut callback: Box<Box<dyn FnMut(Ipv6Incoming) + Send + 'static>> =
+                unsafe { core::mem::transmute(callback) };
+
+            let callback_ptr = callback.as_mut() as *mut _ as *mut c_void;
+
+            self.callback = Some(callback);
+
+            unsafe {
+                otIp6SetAddressCallback(
+                    esp_openthread_get_instance(),
+                    Some(Self::on_address),
+                    callback_ptr,
+                );
+                otIp6SetReceiveCallback(
+                    esp_openthread_get_instance(),
+                    Some(Self::on_packet),
+                    callback_ptr,
+                );
+                otIp6SetReceiveFilterEnabled(esp_openthread_get_instance(), true);
+
+                // TODO otIcmp6SetEchoMode(esp_openthread_get_instance(), OT_ICMP6_ECHO_HANDLER_RLOC_ALOC_ONLY);
+            }
+        } else {
+            unsafe {
+                otIp6SetAddressCallback(esp_openthread_get_instance(), None, core::ptr::null_mut());
+                otIp6SetReceiveCallback(esp_openthread_get_instance(), None, core::ptr::null_mut());
+                otIp6SetReceiveFilterEnabled(esp_openthread_get_instance(), true);
+                // TODO otIcmp6SetEchoMode(esp_openthread_get_instance(), OT_ICMP6_ECHO_HANDLER_RLOC_ALOC_ONLY);
+            }
+
+            self.callback = None;
+        }
+
+        Ok(())
+    }
+
+    unsafe extern "C" fn on_address(
+        address_info: *const otIp6AddressInfo,
+        is_added: bool,
+        context: *mut c_void,
+    ) {
+        let callback = unsafe { (context as *mut Box<dyn FnMut(Ipv6Incoming)>).as_mut() }.unwrap();
+
+        let address_info = unsafe { address_info.as_ref() }.unwrap();
+        let ot_address = unsafe { address_info.mAddress.as_ref() }.unwrap();
+
+        let address = core::net::Ipv6Addr::from(ot_address.mFields.m8);
+
+        if is_added {
+            callback(Ipv6Incoming::AddressAdded(address));
+        } else {
+            callback(Ipv6Incoming::AddressRemoved(address));
+        }
+    }
+
+    unsafe extern "C" fn on_packet(message: *mut otMessage, context: *mut c_void) {
+        let callback = unsafe { (context as *mut Box<dyn FnMut(Ipv6Incoming)>).as_mut() }.unwrap();
+
+        callback(Ipv6Incoming::Data(Ipv6Packet(
+            unsafe { message.as_ref() }.unwrap(),
+        )));
+
+        otMessageFree(message);
     }
 
     unsafe extern "C" fn on_active_scan_result(
@@ -664,6 +845,7 @@ impl<'d> ThreadDriver<'d, RCP> {
             cfg: Self::rcp_spi_cfg(modem, spi, mosi, miso, sclk, cs, intr),
             initialized: false,
             cs: CriticalSection::new(),
+            callback: None,
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
             _mode: RCP(()),
@@ -688,6 +870,7 @@ impl<'d> ThreadDriver<'d, RCP> {
             cfg: Self::rcp_uart_cfg(modem, uart, tx, rx, config),
             initialized: false,
             cs: CriticalSection::new(),
+            callback: None,
             _nvs: nvs,
             _mounted_event_fs: mounted_event_fs,
             _mode: RCP(()),
