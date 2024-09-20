@@ -33,7 +33,7 @@ mod example {
         let sys_loop = EspSystemEventLoop::take()?;
         let nvs = EspDefaultNvsPartition::take()?;
 
-        let mounted_event_fs = Arc::new(MountedEventfs::mount(6)?);
+        let mounted_event_fs = Arc::new(MountedEventfs::mount(4)?);
 
         info!("Initializing Thread...");
 
