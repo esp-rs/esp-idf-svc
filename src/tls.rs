@@ -122,8 +122,9 @@ impl<'a> Debug for X509<'a> {
 mod esptls {
     #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
     use core::ffi::c_int;
-    use core::pin::Pin;
-    use core::task::{ready, Context, Poll};
+    #[allow(unused_imports)]
+    use core::{pin::Pin, task::ready};
+    use core::task::{Context, Poll};
     use core::time::Duration;
 
     use embedded_svc::io;
