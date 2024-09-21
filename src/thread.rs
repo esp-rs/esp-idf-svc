@@ -3,7 +3,6 @@
 // - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
 // - Prio B: API to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
 // - Prio B: API to to enable the Commissioner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_COMMISSIONER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
-// - Prio C: How to support the OpenThread CLI (useful for debugging)
 // - Prio C: Figure out what these do (bad/missing docu):
 //   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
 //   - CONFIG_OPENTHREAD_DIAG
@@ -349,6 +348,31 @@ impl<'d> ThreadDriver<'d, Host> {
         let _lock = OtLock::acquire()?;
 
         Ok(unsafe { otThreadGetDeviceRole(esp_openthread_get_instance()) }.into())
+    }
+
+    /// Initialize the Thread command-line interface (CLI) for debugging purposes.
+    ///
+    /// NOTE: This function can only be called once.
+    #[cfg(esp_idf_openthread_cli)]
+    pub fn init_cli(&mut self) -> Result<(), EspError> {
+        self.init()?;
+
+        // TODO: Can only be called once; track this
+
+        unsafe {
+            esp_openthread_cli_init();
+        }
+
+        #[cfg(esp_idf_openthread_cli_esp_extension)]
+        unsafe {
+            esp_cli_custom_command_init();
+        }
+
+        unsafe {
+            esp_openthread_cli_create_task();
+        }
+
+        Ok(())
     }
 
     /// Retrieve the active TOD (Thread Operational Dataset) in the user-supplied buffer
@@ -1035,6 +1059,10 @@ where
         let _lock = self.cs.enter();
 
         esp!(unsafe { esp_openthread_init(&self.cfg) })?;
+
+        unsafe {
+            otLoggingSetLevel(CONFIG_LOG_DEFAULT_LEVEL as _);
+        }
 
         T::init();
 
