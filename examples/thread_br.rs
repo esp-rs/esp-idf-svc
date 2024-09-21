@@ -117,7 +117,7 @@ mod example {
         )?;
 
         thread.init()?;
-        thread.init_wifi_coex()?;
+        thread.init_coex()?;
 
         thread.set_tod_from_cfg()?;
 
