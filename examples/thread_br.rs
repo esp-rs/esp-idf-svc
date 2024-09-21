@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     // Remove this whole code block when you have done all of the above for the example to compile
     #[cfg(not(i_have_done_all_of_the_above))]
     {
-        log::info!("Please follow the instructions in the source code.");
+        log::error!("Please follow the instructions in the source code.");
     }
 
     Ok(())
@@ -91,7 +91,7 @@ mod example {
 
         let (wifi_modem, thread_modem, _) = peripherals.modem.split();
 
-        let mounted_event_fs = Arc::new(MountedEventfs::mount(4)?);
+        let mounted_event_fs = Arc::new(MountedEventfs::mount(6)?);
 
         let mut wifi = BlockingWifi::wrap(
             EspWifi::new(wifi_modem, sys_loop.clone(), Some(nvs.clone()))?,
@@ -117,6 +117,9 @@ mod example {
         )?;
 
         thread.init()?;
+        thread.init_wifi_coex()?;
+
+        thread.set_tod_from_cfg()?;
 
         info!("Thread initialized, now running...");
 
