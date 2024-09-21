@@ -1027,26 +1027,6 @@ where
         task_queue_size: 10,
     };
 
-    /// Run the Thread stack
-    ///
-    /// The current thread would block while the stack is running
-    /// Note that the stack will only exit if an error occurs
-    pub fn run(&self) -> Result<(), EspError> {
-        // TODO: Figure out how to stop running
-
-        self.check_init()?;
-
-        let _lock = self.cs.enter();
-
-        debug!("Driver running");
-
-        let result = esp!(unsafe { esp_openthread_launch_mainloop() });
-
-        debug!("Driver stopped running");
-
-        result
-    }
-
     /// Initialize the Thread driver
     /// Note that this needs to be done before calling any other driver method.
     ///
@@ -1091,9 +1071,50 @@ where
         Ok(self.initialized)
     }
 
+    /// Initialize the coexistence between the Thread and Wifi radios
+    pub fn init_wifi_coex(&mut self) -> Result<(), EspError> {
+        Self::internal_init_wifi_coex()
+    }
+
+    /// Run the Thread stack
+    ///
+    /// The current thread would block while the stack is running
+    /// Note that the stack will only exit if an error occurs
+    pub fn run(&self) -> Result<(), EspError> {
+        // TODO: Figure out how to stop running
+
+        self.check_init()?;
+
+        let _lock = self.cs.enter();
+
+        debug!("Driver running");
+
+        let result = esp!(unsafe { esp_openthread_launch_mainloop() });
+
+        debug!("Driver stopped running");
+
+        result
+    }
+
     fn check_init(&self) -> Result<(), EspError> {
         if !self.initialized {
             Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())?;
+        }
+
+        Ok(())
+    }
+
+    fn internal_init_wifi_coex() -> Result<(), EspError> {
+        #[cfg(not(any(esp32h2, esp32h4)))]
+        esp!(unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) })?;
+
+        #[cfg(all(
+            esp_idf_esp_coex_sw_coexist_enable,
+            esp_idf_openthread_radio_native,
+            esp_idf_soc_ieee802154_supported
+        ))]
+        {
+            esp!(unsafe { esp_coex_wifi_i154_enable() })?;
         }
 
         Ok(())
@@ -1451,6 +1472,11 @@ where
     /// Return `true` if the Thread stack is already initialized
     pub fn is_init(&self) -> Result<bool, EspError> {
         Ok(self.netif_initialized && self.driver().is_init()?)
+    }
+
+    /// Initialize the coexistence between the Thread and Wifi radios
+    pub fn init_wifi_coex(&mut self) -> Result<(), EspError> {
+        self.driver_mut().init_wifi_coex()
     }
 
     /// Retrieve the current role of the device in the Thread network
