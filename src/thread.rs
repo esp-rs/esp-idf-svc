@@ -1071,9 +1071,10 @@ where
         Ok(self.initialized)
     }
 
-    /// Initialize the coexistence between the Thread and Wifi radios
-    pub fn init_wifi_coex(&mut self) -> Result<(), EspError> {
-        Self::internal_init_wifi_coex()
+    /// Initialize the coexistence between the Thread stack and a Wifi/BT stack on the modem
+    #[cfg(all(esp_idf_openthread_radio_native, esp_idf_soc_ieee802154_supported))]
+    pub fn init_coex(&mut self) -> Result<(), EspError> {
+        Self::internal_init_coex()
     }
 
     /// Run the Thread stack
@@ -1104,15 +1105,14 @@ where
         Ok(())
     }
 
-    fn internal_init_wifi_coex() -> Result<(), EspError> {
+    #[cfg(all(esp_idf_openthread_radio_native, esp_idf_soc_ieee802154_supported))]
+    fn internal_init_coex() -> Result<(), EspError> {
         #[cfg(not(any(esp32h2, esp32h4)))]
-        esp!(unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) })?;
+        {
+            esp!(unsafe { esp_wifi_set_ps(wifi_ps_type_t_WIFI_PS_MAX_MODEM) })?;
+        }
 
-        #[cfg(all(
-            esp_idf_esp_coex_sw_coexist_enable,
-            esp_idf_openthread_radio_native,
-            esp_idf_soc_ieee802154_supported
-        ))]
+        #[cfg(esp_idf_esp_coex_sw_coexist_enable)]
         {
             esp!(unsafe { esp_coex_wifi_i154_enable() })?;
         }
@@ -1474,9 +1474,10 @@ where
         Ok(self.netif_initialized && self.driver().is_init()?)
     }
 
-    /// Initialize the coexistence between the Thread and Wifi radios
-    pub fn init_wifi_coex(&mut self) -> Result<(), EspError> {
-        self.driver_mut().init_wifi_coex()
+    /// Initialize the coexistence between the Thread stack and a Wifi/BT stack on the modem
+    #[cfg(all(esp_idf_openthread_radio_native, esp_idf_soc_ieee802154_supported))]
+    pub fn init_coex(&mut self) -> Result<(), EspError> {
+        self.driver_mut().init_coex()
     }
 
     /// Retrieve the current role of the device in the Thread network
