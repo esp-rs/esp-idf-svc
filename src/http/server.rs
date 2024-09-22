@@ -74,6 +74,8 @@ pub use embedded_svc::utils::http::server::registration::*;
 
 pub use super::*;
 
+use esp_idf_hal::task::thread::MallocCap;
+
 #[derive(Copy, Clone, Debug)]
 pub struct Configuration {
     pub http_port: u16,
@@ -141,7 +143,7 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             open_fn: None,
             close_fn: None,
             uri_match_fn: conf.uri_match_wildcard.then_some(httpd_uri_match_wildcard),
-            task_caps: (1 << 11) | (1 << 2),
+            task_caps: (MallocCap::Internal | MallocCap::Cap8bit).as_u32(),
             // Latest 4.4 and master branches have options to control SO linger,
             // but these are not released yet so we cannot (yet) support these
             // conditionally
