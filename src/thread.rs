@@ -1220,7 +1220,7 @@ impl<N: core::borrow::Borrow<EspNetif>> NetifMode for BorderRouter<N> {
         //     esp!(unsafe { mdns_init() })?;
         //     esp!(unsafe { mdns_hostname_set(b"esp-ot-br\0" as *const _ as *const _) })?;
         // }
-        
+
         debug!("Border router initialized");
 
         Ok(())

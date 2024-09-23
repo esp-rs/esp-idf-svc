@@ -1,10 +1,10 @@
 //! Example of using Thread in "Node" mode.
-//! 
+//!
 //! The example just starts Thread and logs the events, without doing anything else useful.
 //! However, in 99% of the case this is exactly what you want to do.
-//! 
+//!
 //! NOTE: This example only works on MCUs that has Thread capabilities, like the ESP32-C6 or ESP32-H2.
-//! 
+//!
 //! It is however possible to run this example on other MCUs, using the UART or SPI protocols, but then
 //! you anyway would need _another_, Thread-capable MCU that runs Thread in RCP mode (see the `thread_rcp`) example.
 

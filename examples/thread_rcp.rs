@@ -1,6 +1,6 @@
 //! Example of using Thread in "RCP" mode.
-//! 
-//! The `RCP` mode of `ThreadDriver` is a mode where the Thread stack is running on the MCU, however, 
+//!
+//! The `RCP` mode of `ThreadDriver` is a mode where the Thread stack is running on the MCU, however,
 //! it communicates via UART or SPI to another - "master" MCU which - most often than not - does not
 //! have a native Thread radio, but has other connectivity like Wifi. It is this other MCU which actually runs
 //! Thread as a real "Node", from the POV of the user.
@@ -48,12 +48,12 @@ mod example {
 
         let mut thread = ThreadDriver::new_rcp_uart(
             peripherals.modem,
-            peripherals.uart1, 
+            peripherals.uart1,
             peripherals.pins.gpio10,
             peripherals.pins.gpio11,
             &esp_idf_svc::thread::config::uart_default_cfg(),
-            sys_loop.clone(), 
-            nvs, 
+            sys_loop.clone(),
+            nvs,
             mounted_event_fs,
         )?;
 
