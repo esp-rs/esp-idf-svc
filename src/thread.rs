@@ -1,16 +1,7 @@
 // TODO:
 // - Prio A: Status report (we have driver::role() now; more, e.g. ipv6 notifications?)
-// - Prio B: Option to switch between FTD (Full Thread Device) and MTD (Minimal Thread Device) (otDatasetCreateNewNetwork? probably needs CONFIG_OPENTHREAD_DEVICE_TYPE=CONFIG_OPENTHREAD_FTD/CONFIG_OPENTHREAD_MTD/CONFIG_OPENTHREAD_RADIO)
 // - Prio B: API to enable the Joiner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_JOINER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
 // - Prio B: API to to enable the Commissioner workflow (need to read on that, but not needed for Matter; CONFIG_OPENTHREAD_COMMISSIONER - also native OpenThread API https://github.com/espressif/esp-idf/issues/13475)
-// - Prio C: Figure out what these do (bad/missing docu):
-//   - CONFIG_OPENTHREAD_DNS_CLIENT (can this be enabled programmatically too - does not seem so, and why is this part of OpenThread and not the LwIP ipv6 stack?)
-//   - CONFIG_OPENTHREAD_DIAG
-//   - CONFIG_OPENTHREAD_CSL_ENABLE
-//   - CONFIG_OPENTHREAD_DUA_ENABLE
-//   - CONFIG_OPENTHREAD_SRP_CLIENT
-//   - CONFIG_OPENTHREAD_DNS64_CLIENT? "Select this option to acquire NAT64 address from dns servers" why does this require explicit conf
-//     or in fact why does this has anything to do with the OpenThread client?
 
 use core::ffi::{self, c_void, CStr};
 use core::fmt::Debug;
