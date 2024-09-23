@@ -1,11 +1,9 @@
 //! Example of a Thread Border Router.
 //!
-//! This example only works on MCUs that have BOTH Thread and Wifi capabilities, like the ESP32-C6.
-//!
-//! For other MCUs, you need to use at least one Thread-capable MCU like the ESP32-H2 (which only supports Thread),
-//! and then instead of Wifi, you need to use Ethernet via SPI.
-//! ... or use a pair of Thread-capable MCU (as the Thread RCP) and Wifi-capable MCU (as the Thread Host) and connect
-//! them over UART or SPI.
+//! This example only works on MCUs that do have Wifi capabilities, as follows:
+//! - On MCUs with both native `Thread` as well as `Wifi` capabilities, the example will run in co-exist mode, on a single MCU;
+//! - On MCUs with only `Wifi` capabilities, the example will run in UART mode, so you need to flash the `thread_rcp` example
+//!   on a separate MCU which does have native `Thread` capabilities, and connect the two via UART.
 //!
 //! NOTE NOTE NOTE:
 //! To build, you need to put the following in your `sdkconfig.defaults`:
@@ -50,21 +48,28 @@ fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    #[cfg(i_have_done_all_of_the_above)] // Remove this `cfg` when you have done all of the above for the example to compile
-    #[cfg(esp32c6)]
-    example::main()?;
-
-    // Remove this whole code block when you have done all of the above for the example to compile
-    #[cfg(not(i_have_done_all_of_the_above))]
+    #[cfg(any(esp32h2, esp32h4))]
     {
-        log::error!("Please follow the instructions in the source code.");
+        log::error!("This example only works on MCUs which do have Wifi support.");
+    }
+
+    #[cfg(not(any(esp32h2, esp32h4)))]
+    {
+        //#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
+        example::main()?;
+
+        // // Remove this whole code block when you have done all of the above for the example to compile
+        // #[cfg(not(i_have_done_all_configs_from_the_top_comment))]
+        // {
+        //     log::error!("Please follow the instructions in the source code.");
+        // }
     }
 
     Ok(())
 }
 
-#[cfg(i_have_done_all_of_the_above)] // Remove this `cfg` when you have done all of the above for the example to compile
-#[cfg(esp32c6)]
+//#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
+#[cfg(not(any(esp32h2, esp32h4)))]
 mod example {
     use core::convert::TryInto;
 
@@ -89,7 +94,11 @@ mod example {
         let sys_loop = EspSystemEventLoop::take()?;
         let nvs = EspDefaultNvsPartition::take()?;
 
-        let (wifi_modem, thread_modem, _) = peripherals.modem.split();
+        #[cfg(esp32c6)]
+        let (wifi_modem, _thread_modem) = { peripherals.modem.split() };
+
+        #[cfg(not(esp32c6))]
+        let (wifi_modem, _thread_modem) = { (peripherals.modem, ()) };
 
         let mounted_event_fs = Arc::new(MountedEventfs::mount(6)?);
 
@@ -104,12 +113,27 @@ mod example {
 
         info!("Wifi DHCP info: {:?}", ip_info);
 
-        info!("Initializing Thread...");
+        info!("Initializing Thread Border Router...");
 
         let _subscription = log_thread_sysloop(sys_loop.clone())?;
 
+        // On the C6, run the Thread Border Router in co-exist mode
+        #[cfg(esp32c6)]
         let mut thread = EspThread::new_br(
-            thread_modem,
+            _thread_modem,
+            sys_loop,
+            nvs,
+            mounted_event_fs,
+            wifi.wifi().sta_netif(),
+        )?;
+
+        // On all other chips, run the Thread Border Router in UART mode
+        #[cfg(not(esp32c6))]
+        let mut thread = EspThread::new_br_uart(
+            peripherals.uart1,
+            peripherals.pins.gpio2,
+            peripherals.pins.gpio3,
+            &esp_idf_svc::thread::config::uart_default_cfg(),
             sys_loop,
             nvs,
             mounted_event_fs,
@@ -117,11 +141,13 @@ mod example {
         )?;
 
         thread.init()?;
+
+        #[cfg(esp32c6)]
         thread.init_coex()?;
 
         thread.set_tod_from_cfg()?;
 
-        info!("Thread initialized, now running...");
+        info!("Thread Border Router initialized, now running...");
 
         thread.run()?;
 
