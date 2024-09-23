@@ -58,17 +58,17 @@ fn main() -> anyhow::Result<()> {
         //#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
         example::main()?;
 
-        // // Remove this whole code block when you have done all of the above for the example to compile
-        // #[cfg(not(i_have_done_all_configs_from_the_top_comment))]
-        // {
-        //     log::error!("Please follow the instructions in the source code.");
-        // }
+        // Remove this whole code block when you have done all of the above for the example to compile
+        #[cfg(not(i_have_done_all_configs_from_the_top_comment))]
+        {
+            log::error!("Please follow the instructions in the source code.");
+        }
     }
 
     Ok(())
 }
 
-//#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
+#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
 #[cfg(not(any(esp32h2, esp32h4)))]
 mod example {
     use core::convert::TryInto;
