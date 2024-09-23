@@ -25,10 +25,10 @@ use crate::hal::gpio::{InputPin, OutputPin};
 use crate::hal::peripheral::Peripheral;
 use crate::hal::task::CriticalSection;
 use crate::hal::uart::Uart;
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 use crate::handle::RawHandle;
 use crate::io::vfs::MountedEventfs;
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 use crate::netif::*;
 use crate::nvs::EspDefaultNvsPartition;
 use crate::sys::*;
@@ -54,12 +54,15 @@ pub struct RCP(());
 #[cfg(esp_idf_soc_ieee802154_supported)]
 impl Mode for RCP {
     fn init() {
-        extern "C" {
-            fn otAppNcpInit(instance: *mut otInstance);
-        }
+        //#[cfg(esp_idf_openthread_ncp_vendor_hook)]
+        {
+            extern "C" {
+                fn otAppNcpInit(instance: *mut otInstance);
+            }
 
-        unsafe {
-            otAppNcpInit(esp_openthread_get_instance());
+            unsafe {
+                otAppNcpInit(esp_openthread_get_instance());
+            }
         }
     }
 }
@@ -77,11 +80,27 @@ impl Mode for Host {
 }
 
 pub mod config {
-    #[cfg(all(esp32c2, esp_idf_xtal_freq_26))]
-    pub const UART_DEFAULT_BAUD_RATE: u32 = 74880;
+    use crate::hal::uart::config::*;
+    use crate::hal::units::*;
 
+    /// A safe baud rate for the UART
+    #[cfg(all(esp32c2, esp_idf_xtal_freq_26))]
+    pub const UART_SAFE_BAUD_RATE: Hertz = Hertz(74880);
+
+    /// A safe baud rate for the UART
     #[cfg(not(all(esp32c2, esp_idf_xtal_freq_26)))]
-    pub const UART_DEFAULT_BAUD_RATE: u32 = 115200;
+    pub const UART_SAFE_BAUD_RATE: Hertz = Hertz(115200);
+
+    /// A safe default UART configuration
+    pub fn uart_default_cfg() -> Config {
+        Config::new()
+            .baudrate(UART_SAFE_BAUD_RATE)
+            .data_bits(DataBits::DataBits8)
+            .parity_none()
+            .stop_bits(StopBits::STOP1)
+            .flow_control(FlowControl::None)
+            .flow_control_rts_threshold(0)
+    }
 }
 
 macro_rules! ot_esp {
@@ -1040,6 +1059,7 @@ where
 
         esp!(unsafe { esp_openthread_init(&self.cfg) })?;
 
+        #[cfg(not(esp_idf_openthread_radio))]
         unsafe {
             otLoggingSetLevel(CONFIG_LOG_DEFAULT_LEVEL as _);
         }
@@ -1175,20 +1195,12 @@ impl NetifMode for Node {
 }
 
 /// The Border Router mode of operation for the `EspThread` instance
-#[cfg(all(
-    esp_idf_comp_esp_netif_enabled,
-    esp_idf_openthread_border_router,
-    not(any(esp32h2, esp32h4))
-))]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
 pub struct BorderRouter<N>(N)
 where
     N: core::borrow::Borrow<EspNetif>;
 
-#[cfg(all(
-    esp_idf_comp_esp_netif_enabled,
-    esp_idf_openthread_border_router,
-    not(any(esp32h2, esp32h4))
-))]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
 impl<N: core::borrow::Borrow<EspNetif>> NetifMode for BorderRouter<N> {
     fn init(&mut self) -> Result<(), EspError> {
         #[cfg(esp_idf_version_major = "4")]
@@ -1201,6 +1213,14 @@ impl<N: core::borrow::Borrow<EspNetif>> NetifMode for BorderRouter<N> {
             esp!(unsafe { esp_openthread_border_router_init() })?;
         }
 
+        // TODO: This is probably best left to the user to call, as it is
+        // not strictly necessary for the border router to function
+        // #[cfg(any(esp_idf_comp_mdns_enabled, esp_idf_comp_espressif__mdns_enabled))]
+        // {
+        //     esp!(unsafe { mdns_init() })?;
+        //     esp!(unsafe { mdns_hostname_set(b"esp-ot-br\0" as *const _ as *const _) })?;
+        // }
+        
         debug!("Border router initialized");
 
         Ok(())
@@ -1225,7 +1245,7 @@ impl<N: core::borrow::Borrow<EspNetif>> NetifMode for BorderRouter<N> {
 /// but the niche one where bypassing the ESP IDF Netif and lwIP stacks is
 /// desirable. E.g., using `smoltcp` or other custom IP stacks on top of the
 /// ESP IDF Thread radio.
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 pub struct EspThread<'d, T>
 where
     T: NetifMode,
@@ -1236,7 +1256,7 @@ where
     mode: T,
 }
 
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 impl<'d> EspThread<'d, Node> {
     /// Create a new `EspThread` instance utilizing the native Thread radio on the MCU
     #[cfg(esp_idf_soc_ieee802154_supported)]
@@ -1319,11 +1339,7 @@ impl<'d> EspThread<'d, Node> {
     }
 }
 
-#[cfg(all(
-    esp_idf_comp_esp_netif_enabled,
-    esp_idf_openthread_border_router,
-    not(any(esp32h2, esp32h4))
-))]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, esp_idf_openthread_border_router))]
 impl<'d, N> EspThread<'d, BorderRouter<N>>
 where
     N: core::borrow::Borrow<EspNetif>,
@@ -1425,7 +1441,7 @@ where
     }
 }
 
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 impl<'d, T> EspThread<'d, T>
 where
     T: NetifMode,
@@ -1638,7 +1654,7 @@ where
     }
 }
 
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 impl<'d, T> Drop for EspThread<'d, T>
 where
     T: NetifMode,
@@ -1648,9 +1664,9 @@ where
     }
 }
 
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 unsafe impl<'d, T> Send for EspThread<'d, T> where T: NetifMode {}
-#[cfg(esp_idf_comp_esp_netif_enabled)]
+#[cfg(all(esp_idf_comp_esp_netif_enabled, not(esp_idf_openthread_radio)))]
 unsafe impl<'d, T> Sync for EspThread<'d, T> where T: NetifMode {}
 
 /// Events reported by the Thread stack on the system event loop
