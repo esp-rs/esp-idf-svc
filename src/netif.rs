@@ -479,7 +479,7 @@ impl EspNetif {
         }
     }
 
-    fn set_dns(&mut self, dns: ipv4::Ipv4Addr) {
+    pub fn set_dns(&mut self, dns: ipv4::Ipv4Addr) {
         let mut dns_info: esp_netif_dns_info_t = Default::default();
 
         unsafe {
@@ -509,7 +509,7 @@ impl EspNetif {
         }
     }
 
-    fn set_secondary_dns(&mut self, secondary_dns: ipv4::Ipv4Addr) {
+    pub fn set_secondary_dns(&mut self, secondary_dns: ipv4::Ipv4Addr) {
         let mut dns_info: esp_netif_dns_info_t = Default::default();
 
         unsafe {
