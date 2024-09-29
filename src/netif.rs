@@ -531,7 +531,7 @@ impl EspNetif {
         Ok(unsafe { from_cstr_ptr(ptr) }.try_into().unwrap())
     }
 
-    fn set_hostname(&mut self, hostname: &str) -> Result<(), EspError> {
+    pub fn set_hostname(&mut self, hostname: &str) -> Result<(), EspError> {
         let hostname = to_cstring_arg(hostname)?;
 
         esp!(unsafe { esp_netif_set_hostname(self.handle, hostname.as_ptr() as *const _) })?;
