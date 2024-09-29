@@ -375,7 +375,7 @@ impl EspNetif {
         };
 
         if let Some(dns) = dns {
-            netif.set_dns(dns);
+            netif.set_dns(dns)?;
 
             if dhcps {
                 #[cfg(esp_idf_version_major = "4")]
@@ -398,7 +398,7 @@ impl EspNetif {
         }
 
         if let Some(secondary_dns) = secondary_dns {
-            netif.set_secondary_dns(secondary_dns);
+            netif.set_secondary_dns(secondary_dns)?;
         }
 
         if let Some(hostname) = hostname {
@@ -479,7 +479,7 @@ impl EspNetif {
         }
     }
 
-    pub fn set_dns(&mut self, dns: ipv4::Ipv4Addr) {
+    pub fn set_dns(&mut self, dns: ipv4::Ipv4Addr) -> Result<(), EspError> {
         let mut dns_info: esp_netif_dns_info_t = Default::default();
 
         unsafe {
@@ -489,8 +489,8 @@ impl EspNetif {
                 self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN,
                 &mut dns_info
-            ))
-            .unwrap();
+            ))?;
+            Ok(())
         }
     }
 
@@ -509,7 +509,7 @@ impl EspNetif {
         }
     }
 
-    pub fn set_secondary_dns(&mut self, secondary_dns: ipv4::Ipv4Addr) {
+    pub fn set_secondary_dns(&mut self, secondary_dns: ipv4::Ipv4Addr) -> Result<(), EspError> {
         let mut dns_info: esp_netif_dns_info_t = Default::default();
 
         unsafe {
@@ -519,8 +519,8 @@ impl EspNetif {
                 self.handle,
                 esp_netif_dns_type_t_ESP_NETIF_DNS_BACKUP,
                 &mut dns_info
-            ))
-            .unwrap();
+            ))?;
+            Ok(())
         }
     }
 
