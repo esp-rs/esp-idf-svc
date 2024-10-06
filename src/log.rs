@@ -248,7 +248,6 @@ impl ::log::Log for EspLogger {
 
         if self.enabled(metadata) && self.should_log(record) {
             let marker = Self::get_marker(metadata.level());
-            let timestamp = unsafe { esp_log_timestamp() };
             let target = record.metadata().target();
             let args = record.args();
             let color = Self::get_color(record.level());
@@ -256,14 +255,21 @@ impl ::log::Log for EspLogger {
             let mut stdout = EspStdout::new();
 
             if let Some(color) = color {
-                writeln!(
-                    stdout,
-                    "\x1b[0;{}m{} ({}) {}: {}\x1b[0m",
-                    color, marker, timestamp, target, args
-                )
-                .unwrap();
-            } else {
-                writeln!(stdout, "{} ({}) {}: {}", marker, timestamp, target, args).unwrap();
+                write!(stdout, "\x1b[0;{}m", color).unwrap();
+            }
+            write!(stdout, "{} (", marker).unwrap();
+            if cfg!(esp_idf_log_timestamp_rtos) {
+                let timestamp = unsafe { esp_log_timestamp() };
+                write!(stdout, "{}", timestamp).unwrap();
+            } else if cfg!(esp_idf_log_timestamp_source_system) {
+                // esp_log_system_timestamp returns a pointer to a static buffer containing the c-string
+                let timestamp =
+                    unsafe { CStr::from_ptr(esp_log_system_timestamp()).to_str().unwrap() };
+                write!(stdout, "{}", timestamp).unwrap();
+            }
+            write!(stdout, ") {}: {}", target, args).unwrap();
+            if color.is_some() {
+                writeln!(stdout, "\x1b[0m").unwrap();
             }
         }
     }
