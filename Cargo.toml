@@ -18,15 +18,12 @@ rust-version = "1.77"
 [lib]
 harness = false
 
-[[package.metadata.esp-idf-sys.extra_components]]
-remote_component = { name = "joltwallet/littlefs", version = "1.14" }
-
 [patch.crates-io]
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 
 [features]
-default = ["std", "binstart", "experimental"]
+default = ["std", "binstart"]
 
 std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std", "futures-io"]
 alloc = ["esp-idf-hal/alloc", "embedded-svc/alloc", "uncased/alloc"]
