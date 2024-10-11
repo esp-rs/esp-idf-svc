@@ -10,6 +10,12 @@
 //! ```
 //! CONFIG_LITTLEFS_SDMMC_SUPPORT=y
 //! ```
+//!
+//! NOTE: While this example is using the SD card via the SPI interface,
+//! it is also possible to use the SD card via the SDMMC interface. Moreover,
+//! it is possible to initialize and use Littlefs with the internal Flash
+//! storage as well, by using one of the two unsafe constructors that take
+//! a partition label or a raw partition pointer.
 
 #![allow(unexpected_cfgs)]
 
