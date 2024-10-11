@@ -95,7 +95,7 @@ fn example_main() -> anyhow::Result<()> {
     // log::info!("SD card formatted");
 
     // Keep it around or else it will be dropped and unmounted
-    let mut mounted_littlefs = MountedLittlefs::mount(littlefs, "/sdcard")?;
+    let mounted_littlefs = MountedLittlefs::mount(littlefs, "/sdcard")?;
 
     info!("Filesystem usage: {:?}", mounted_littlefs.info()?);
 

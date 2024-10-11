@@ -199,7 +199,7 @@ pub mod vfs {
             })
         }
 
-        pub fn info(&mut self) -> Result<crate::fs::littlefs::LittleFsInfo, sys::EspError> {
+        pub fn info(&self) -> Result<crate::fs::littlefs::LittleFsInfo, sys::EspError> {
             use crate::fs::littlefs::PartitionRawData;
 
             let mut info = crate::fs::littlefs::LittleFsInfo {
