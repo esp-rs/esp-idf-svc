@@ -238,8 +238,9 @@ impl<'a> EspOtaUpdate<'a> {
         Ok(())
     }
 
-    /// No-op: the OTA update is aborted when `EspOtaUpdate` is dropped.
+    /// Cancels the update.
     pub fn abort(self) -> Result<(), EspError> {
+        // The OTA update is aborted when `EspOtaUpdate` is dropped.
         Ok(())
     }
 
@@ -274,6 +275,7 @@ pub struct EspOtaUpdateFinished<'a> {
 
 impl EspOtaUpdateFinished<'_> {
     /// Sets the boot partition to the newly updated app partition.
+    /// The app will be run on the next boot.
     pub fn activate(self) -> Result<(), EspError> {
         esp!(unsafe { esp_ota_set_boot_partition(self.update_partition) })
     }
