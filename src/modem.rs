@@ -150,7 +150,7 @@ impl<T: embedded_svc::io::Read> embedded_svc::io::BufRead for BufferedRead<'_, T
 pub struct EspModem<'d, T, R, E>
 where
     T: embedded_svc::io::Write<Error = E> + Send,
-    R: embedded_svc::io::BufRead<Error = E>,
+    R: embedded_svc::io::Read<Error = E>,
     EspIOError: From<E>,
 {
     writer: Arc<mutex::Mutex<T>>,
@@ -164,7 +164,7 @@ where
 impl<'d, T, R, E> EspModem<'d, T, R, E>
 where
     T: embedded_svc::io::Write<Error = E> + Send,
-    R: embedded_svc::io::BufRead<Error = E>,
+    R: embedded_svc::io::Read<Error = E>,
     EspIOError: From<E>, // EspError: From<<T as embedded_svc::io::ErrorType>::Error>,
                          // EspError: From<<R as embedded_svc::io::ErrorType>::Error>,
 {
@@ -213,8 +213,6 @@ where
             move |data| Self::tx(writer.clone(), data),
         )?;
 
-        use embedded_svc::io::Read;
-
         loop {
             if !self.status.lock().running {
                 break;
@@ -222,10 +220,9 @@ where
             let len = self
                 .reader
                 .lock()
-                .fill_buf()
-                .map_err(|w| Into::<EspIOError>::into(w).0)?
                 .read(buffer)
-                .unwrap();
+                .map_err(|w| Into::<EspIOError>::into(w).0)?;
+
             if len > 0 {
                 driver.rx(&buffer[..len])?;
             }
@@ -354,7 +351,7 @@ where
 impl<'d, T, R, E> Drop for EspModem<'d, T, R, E>
 where
     T: embedded_svc::io::Write<Error = E> + Send,
-    R: embedded_svc::io::BufRead<Error = E>,
+    R: embedded_svc::io::Read<Error = E>,
     EspIOError: From<E>,
 {
     fn drop(&mut self) {
@@ -427,6 +424,8 @@ pub mod sim {
     //! Models a modem device with a sim card able to serve as a
     //! network interface for the host.
 
+    use embedded_svc::io::{BufRead, Read, Write};
+
     /// The generic device trait. Implementations of this trait should provide
     /// relevant AT commands and confirm the modem replies to drive the modem
     /// into PPPoS (data mode).
@@ -435,10 +434,7 @@ pub mod sim {
         fn get_mode(&self) -> &CommunicationMode;
 
         /// Initialise the remote modem so that it is in PPPoS mode.
-        fn negotiate<
-            T: embedded_svc::io::Write,
-            R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-        >(
+        fn negotiate<T: Write, R: BufRead + Read>(
             &mut self,
             tx: &mut T,
             rx: &mut R,
@@ -488,10 +484,9 @@ pub mod sim {
         //! [super::SimModem] Implementation for the `SIMCOM 76XX` range of
         //! modems.
 
-        use core::fmt::Display;
-        use std::io::Read;
-
         use at_commands::{builder::CommandBuilder, parser::CommandParser};
+        use core::fmt::Display;
+        use embedded_svc::io::{BufRead, Read, Write};
 
         use super::{CommunicationMode, ModemError, SimModem};
         pub struct SIM7600(CommunicationMode);
@@ -637,10 +632,7 @@ pub mod sim {
         }
 
         impl SimModem for SIM7600 {
-            fn negotiate<
-                T: embedded_svc::io::Write,
-                R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-            >(
+            fn negotiate<T: Write, R: BufRead + Read>(
                 &mut self,
                 tx: &mut T,
                 rx: &mut R,
@@ -735,9 +727,9 @@ pub mod sim {
             Ok(heapless::String::try_from(ccid).unwrap())
         }
 
-        fn reset<T: embedded_svc::io::Write, R: embedded_svc::io::BufRead>(
+        fn reset<T: Write, R: Read>(
             tx: &mut T,
-            rx: &R,
+            _rx: &R,
             buff: &mut [u8],
         ) -> Result<(), ModemError> {
             let cmd = CommandBuilder::create_execute(buff, false)
@@ -747,6 +739,7 @@ pub mod sim {
 
             tx.write(cmd).map_err(|_| ModemError::IO)?;
 
+            // not sure if I need this or not
             // let len = comm
             //     .read(buff, TickType::new_millis(1000).ticks())
             //     .map_err(|_| ModemError::IO)?;
@@ -758,10 +751,7 @@ pub mod sim {
             Ok(())
         }
 
-        fn set_echo<
-            T: embedded_svc::io::Write,
-            R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-        >(
+        fn set_echo<T: Write, R: Read>(
             tx: &mut T,
             rx: &mut R,
             buff: &mut [u8],
@@ -773,26 +763,16 @@ pub mod sim {
             log::info!("Set echo ");
             tx.write(cmd).map_err(|_| ModemError::IO)?;
 
-            let len = rx
-                .fill_buf()
-                .map_err(|_| ModemError::IO)?
-                .read(buff)
-                .map_err(|_| ModemError::IO)?;
+            let len = rx.read(buff).map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
-            CommandParser::parse(&buff[..len])
+            Ok(CommandParser::parse(&buff[..len])
                 .expect_identifier(b"ATE0\r")
                 .expect_identifier(b"\r\nOK\r\n")
-                .finish()?;
-
-            rx.consume(len);
-            Ok(())
+                .finish()?)
         }
 
-        fn read_gprs_registration_status<
-            T: embedded_svc::io::Write,
-            R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-        >(
+        fn read_gprs_registration_status<T: Write, R: Read>(
             tx: &mut T,
             rx: &mut R,
             buff: &mut [u8],
@@ -802,30 +782,20 @@ pub mod sim {
                 .finish()?;
             log::info!("Get Registration Status");
             tx.write(cmd).map_err(|_| ModemError::IO)?;
-            let len = rx
-                .fill_buf()
-                .map_err(|_| ModemError::IO)?
-                .read(buff)
-                .map_err(|_| ModemError::IO)?;
+            let len = rx.read(buff).map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
-            let (a, b, c, d) = CommandParser::parse(&buff[..len])
+            Ok(CommandParser::parse(&buff[..len])
                 .expect_identifier(b"\r\n+CGREG: ")
                 .expect_int_parameter()
                 .expect_int_parameter()
                 .expect_optional_int_parameter()
                 .expect_optional_int_parameter()
                 .expect_identifier(b"\r\n\r\nOK\r\n")
-                .finish()?;
-
-            rx.consume(len);
-            Ok((a, b, c, d))
+                .finish()?)
         }
 
-        fn set_pdp_context<
-            T: embedded_svc::io::Write,
-            R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-        >(
+        fn set_pdp_context<T: Write, R: Read>(
             tx: &mut T,
             rx: &mut R,
             buff: &mut [u8],
@@ -838,24 +808,15 @@ pub mod sim {
                 .finish()?;
             log::info!("Set PDP Context");
             tx.write(cmd).map_err(|_| ModemError::IO)?;
-            let len = rx
-                .fill_buf()
-                .map_err(|_| ModemError::IO)?
-                .read(buff)
-                .map_err(|_| ModemError::IO)?;
+            let len = rx.read(buff).map_err(|_| ModemError::IO)?;
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
-            CommandParser::parse(&buff[..len])
+            Ok(CommandParser::parse(&buff[..len])
                 .expect_identifier(b"\r\nOK\r\n")
-                .finish()?;
-            rx.consume(len);
-            Ok(())
+                .finish()?)
         }
 
-        fn set_data_mode<
-            T: embedded_svc::io::Write,
-            R: embedded_svc::io::BufRead + embedded_svc::io::Read,
-        >(
+        fn set_data_mode<T: Write, R: BufRead + Read>(
             tx: &mut T,
             rx: &mut R,
             buff: &mut [u8],
@@ -865,11 +826,13 @@ pub mod sim {
                 .finish()?;
             log::info!("Set Data mode");
             tx.write(cmd).map_err(|_| ModemError::IO)?;
+
             let len = rx
                 .fill_buf()
                 .map_err(|_| ModemError::IO)?
                 .read(buff)
                 .map_err(|_| ModemError::IO)?;
+
             log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
 
             let (connect_parm,) = CommandParser::parse(&buff[..len])
