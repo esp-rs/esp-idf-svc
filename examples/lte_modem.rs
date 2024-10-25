@@ -9,9 +9,12 @@ use embedded_svc::{
     utils::io,
 };
 
-use esp_idf_hal::gpio;
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_hal::units::Hertz;
+use esp_idf_hal::{
+    delay,
+    gpio::{self, PinDriver},
+};
 use esp_idf_svc::modem::sim::sim7600::SIM7600;
 use esp_idf_svc::modem::sim::SimModem;
 use esp_idf_svc::modem::EspModem;
@@ -35,6 +38,22 @@ fn main() -> anyhow::Result<()> {
     let tx = peripherals.pins.gpio17;
     let rx = peripherals.pins.gpio18;
 
+    let mut lte_reset = PinDriver::output(peripherals.pins.gpio42).unwrap();
+    lte_reset.set_low().unwrap();
+
+    let mut lte_power = PinDriver::output(peripherals.pins.gpio41).unwrap();
+    let mut lte_on = PinDriver::output(peripherals.pins.gpio40).unwrap();
+    // turn lte device on
+    log::info!("Reset GSM Device");
+    lte_power.set_high().unwrap();
+    let delay = delay::Delay::new_default();
+    delay.delay_ms(100);
+    lte_on.set_high().unwrap();
+    delay.delay_ms(100);
+    lte_on.set_low().unwrap();
+    delay.delay_ms(10000);
+    log::info!("Reset Complete");
+
     let mut serial = UartDriver::new(
         serial,
         tx,
@@ -47,11 +66,11 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let mut buff = [0u8; 64];
+    let mut buff = [0u8; 1024];
 
     let (mut tx, rx) = serial.split();
 
-    let buf_reader = BufferedRead::new(rx, &mut buff);
+    let mut buf_reader = BufferedRead::new(rx, &mut buff);
 
     let mut sim_device = SIM7600::new();
 
@@ -60,10 +79,12 @@ fn main() -> anyhow::Result<()> {
         Ok(()) => log::info!("Device in PPP mode"),
     }
 
-    let mut modem = EspModem::new(&mut tx, &mut buf_reader, sys_loop)?;
+    let modem = EspModem::new(&mut tx, &mut buf_reader, sys_loop)?;
 
     let _scope = std::thread::scope::<_, anyhow::Result<()>>(|s| {
         let my_thread: ScopedJoinHandle<anyhow::Result<()>> = s.spawn(|| {
+            let mut buff = [0u8; 64];
+
             match modem.run(&mut buff) {
                 Err(x) => log::error!("Error: {:?}", x),
                 Ok(_x) => (),
@@ -71,8 +92,6 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         });
         std::thread::sleep(Duration::from_secs(10));
-
-       
 
         let mut client = HttpClient::wrap(EspHttpConnection::new(&Default::default())?);
 

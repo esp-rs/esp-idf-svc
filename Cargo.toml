@@ -51,8 +51,8 @@ log = { version = "0.4", default-features = false }
 uncased = { version = "0.9.7", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
 embedded-svc = { version = "0.28", default-features = false }
-esp-idf-hal = { version = "0.44", default-features = false }
-# esp-idf-hal ={path = "../esp-idf-hal"}
+# esp-idf-hal = { version = "0.44", default-features = false }
+esp-idf-hal = { path = "../esp-idf-hal" }
 embassy-time-driver = { version = "0.1", optional = true, features = [
     "tick-hz-1_000_000",
 ] }

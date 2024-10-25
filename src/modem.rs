@@ -348,6 +348,22 @@ where
     }
 }
 
+unsafe impl<T, R, E> Send for EspModem<'_, T, R, E>
+where
+    T: embedded_svc::io::Write<Error = E> + Send,
+    R: embedded_svc::io::Read<Error = E>,
+    EspIOError: From<E>,
+{
+}
+
+unsafe impl<T, R, E> Sync for EspModem<'_, T, R, E>
+where
+    T: embedded_svc::io::Write<Error = E> + Send,
+    R: embedded_svc::io::Read<Error = E>,
+    EspIOError: From<E>,
+{
+}
+
 impl<'d, T, R, E> Drop for EspModem<'d, T, R, E>
 where
     T: embedded_svc::io::Write<Error = E> + Send,
@@ -729,7 +745,7 @@ pub mod sim {
 
         fn reset<T: Write, R: Read>(
             tx: &mut T,
-            _rx: &R,
+            rx: &mut R,
             buff: &mut [u8],
         ) -> Result<(), ModemError> {
             let cmd = CommandBuilder::create_execute(buff, false)
@@ -740,14 +756,19 @@ pub mod sim {
             tx.write(cmd).map_err(|_| ModemError::IO)?;
 
             // not sure if I need this or not
-            // let len = comm
-            //     .read(buff, TickType::new_millis(1000).ticks())
-            //     .map_err(|_| ModemError::IO)?;
-            // log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
-            // CommandParser::parse(&buff[..len])
-            //     .expect_identifier(b"ATZ0\r")
-            //     .expect_identifier(b"\r\nOK\r\n")
-            //     .finish()?;
+            let len = rx.read(buff).map_err(|_| ModemError::IO)?;
+            log::info!("got response{:?}", std::str::from_utf8(&buff[..len]));
+            if CommandParser::parse(&buff[..len])
+                .expect_identifier(b"ATZ0\r")
+                .expect_identifier(b"\r\nOK\r\n")
+                .finish()
+                .is_err()
+            {
+                CommandParser::parse(&buff[..len])
+                    .expect_identifier(b"ATZ0\r")
+                    .expect_identifier(b"\r\nERROR\r\n")
+                    .finish()?
+            }
             Ok(())
         }
 
