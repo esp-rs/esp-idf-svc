@@ -25,7 +25,7 @@ use esp_idf_svc::sys::{EspError, ESP_ERR_INVALID_SIZE};
 
 use log::*;
 
-use std::{borrow::Cow, collections::BTreeMap, str, sync::Mutex};
+use std::{borrow::Cow, collections::BTreeMap, ffi::CStr, str, sync::Mutex};
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
