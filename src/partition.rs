@@ -72,6 +72,7 @@ impl EspPartitionType {
                     EspDataPartitionSubtype::Spiffs => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS
                     }
+                    // Note: only available in the latest patch releases
                     EspDataPartitionSubtype::LittleFs => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS
                     }
