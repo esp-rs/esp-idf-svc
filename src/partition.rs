@@ -57,75 +57,21 @@ impl EspPartitionType {
                     EspDataPartitionSubtype::NvsKeys => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::Efuse => {
-                        esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_EFUSE
+                        esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_EFUSE_EM
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::Undefined => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_UNDEFINED
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::EspHttpd => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_ESPHTTPD
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::Fat => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_FAT
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::Spiffs => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     EspDataPartitionSubtype::LittleFs => {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS
                     }
@@ -412,75 +358,21 @@ impl EspPartition {
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS => {
                         EspDataPartitionSubtype::NvsKeys
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
-                    esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_EFUSE => {
+                    esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_EFUSE_EM => {
                         EspDataPartitionSubtype::Efuse
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_UNDEFINED => {
                         EspDataPartitionSubtype::Undefined
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_ESPHTTPD => {
                         EspDataPartitionSubtype::EspHttpd
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_FAT => {
                         EspDataPartitionSubtype::Fat
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS => {
                         EspDataPartitionSubtype::Spiffs
                     }
-                    #[cfg(any(
-                        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
-                        all(
-                            esp_idf_version_major = "5",
-                            not(esp_idf_version_minor = "0"),
-                            not(esp_idf_version_minor = "1"),
-                            not(esp_idf_version_minor = "2")
-                        )
-                    ))]
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS => {
                         EspDataPartitionSubtype::LittleFs
                     }
@@ -512,6 +404,14 @@ impl EspPartition {
     }
 
     /// Return `true` if the partition is read-only
+    #[cfg(any(
+        all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
+        all(
+            esp_idf_version_major = "5",
+            not(esp_idf_version_minor = "0"),
+            not(esp_idf_version_minor = "1"),
+        )
+    ))]
     pub fn readonly(&self) -> bool {
         unsafe { (*self.0).readonly }
     }
