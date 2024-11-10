@@ -256,6 +256,7 @@ impl EspPartition {
     ///
     /// # Safety
     /// Only a single partition should be active at any point in time for that label.
+    #[cfg(feature = "alloc")]
     pub unsafe fn new(label: &str) -> Result<Option<Self>, EspError> {
         let cstr = crate::private::cstr::to_cstring_arg(label)?;
 
