@@ -662,6 +662,7 @@ impl Drop for EspWlMount<'_> {
     }
 }
 
+#[cfg(feature = "embedded-storage")]
 mod embedded_storage {
     use core::fmt;
 
