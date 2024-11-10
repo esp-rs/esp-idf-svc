@@ -668,7 +668,7 @@ mod embedded_storage {
     use embedded_storage::nor_flash::{
         ErrorType, MultiwriteNorFlash, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
     };
-    use embedded_storage::{ReadStorage, Storage};
+    use embedded_storage::ReadStorage;
 
     use esp_idf_hal::sys::{EspError, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_SIZE};
 
@@ -686,18 +686,12 @@ mod embedded_storage {
         }
     }
 
-    impl Storage for EspPartition {
-        fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
-            EspPartition::write(self, offset as _, data)
-        }
-    }
-
     impl ErrorType for EspPartition {
         type Error = EspFlashError;
     }
 
     impl ReadNorFlash for EspPartition {
-        const READ_SIZE: usize = 4096;
+        const READ_SIZE: usize = 1;
 
         fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
             EspPartition::read(self, offset as _, buf)?;
@@ -769,18 +763,12 @@ mod embedded_storage {
         }
     }
 
-    impl Storage for EspWlMount<'_> {
-        fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
-            EspWlMount::write(self, offset as _, data)
-        }
-    }
-
     impl ErrorType for EspWlMount<'_> {
         type Error = EspFlashError;
     }
 
     impl ReadNorFlash for EspWlMount<'_> {
-        const READ_SIZE: usize = 4096;
+        const READ_SIZE: usize = 1;
 
         fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
             EspWlMount::read(self, offset as _, buf)?;
