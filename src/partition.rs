@@ -1,7 +1,6 @@
 //! ESP IDF partitions API
 
-use core::ffi::{c_void, CStr};
-use core::marker::PhantomData;
+use core::ffi::CStr;
 
 use esp_idf_hal::sys::*;
 
@@ -151,7 +150,7 @@ pub enum EspMemMapType {
 pub struct EspMemMappedPartition<'a> {
     handle: esp_partition_mmap_handle_t,
     start: usize,
-    _t: PhantomData<&'a mut ()>,
+    _t: core::marker::PhantomData<&'a mut ()>,
 }
 
 #[cfg(not(esp_idf_version_major = "4"))]
@@ -533,7 +532,7 @@ impl EspPartition {
         mmap_type: EspMemMapType,
     ) -> Result<EspMemMappedPartition<'_>, EspError> {
         let mut handle: esp_partition_mmap_handle_t = Default::default();
-        let mut out: *const c_void = core::ptr::null_mut();
+        let mut out: *const core::ffi::c_void = core::ptr::null_mut();
 
         esp!(esp_partition_mmap(
             self.0,
@@ -547,7 +546,7 @@ impl EspPartition {
         Ok(EspMemMappedPartition {
             handle,
             start: out as _,
-            _t: PhantomData,
+            _t: core::marker::PhantomData,
         })
     }
 }
@@ -660,4 +659,155 @@ impl Drop for EspWlMount<'_> {
     fn drop(&mut self) {
         esp!(unsafe { wl_unmount(self.handle) }).unwrap();
     }
+}
+
+mod embedded_storage {
+    use core::fmt;
+
+    use embedded_storage::nor_flash::{
+        ErrorType, MultiwriteNorFlash, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
+    };
+    use embedded_storage::{ReadStorage, Storage};
+
+    use esp_idf_hal::sys::{EspError, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_SIZE};
+
+    use super::{EspPartition, EspWlMount};
+
+    impl ReadStorage for EspPartition {
+        type Error = EspError;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            EspPartition::read(self, offset as _, buf)
+        }
+
+        fn capacity(&self) -> usize {
+            self.size()
+        }
+    }
+
+    impl Storage for EspPartition {
+        fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
+            EspPartition::write(self, offset as _, data)
+        }
+    }
+
+    impl ErrorType for EspPartition {
+        type Error = EspFlashError;
+    }
+
+    impl ReadNorFlash for EspPartition {
+        const READ_SIZE: usize = 4096;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            EspPartition::read(self, offset as _, buf)?;
+
+            Ok(())
+        }
+
+        fn capacity(&self) -> usize {
+            self.size()
+        }
+    }
+
+    impl NorFlash for EspPartition {
+        const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
+        const ERASE_SIZE: usize = 4096;
+
+        fn erase(&mut self, offset: u32, size: u32) -> Result<(), Self::Error> {
+            EspPartition::erase(self, offset as _, size as _)?;
+
+            Ok(())
+        }
+
+        fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+            EspPartition::write(self, offset as _, bytes)?;
+
+            Ok(())
+        }
+    }
+
+    impl MultiwriteNorFlash for EspPartition {}
+
+    #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+    pub struct EspFlashError(pub EspError);
+
+    impl From<EspError> for EspFlashError {
+        fn from(e: EspError) -> Self {
+            Self(e)
+        }
+    }
+
+    impl fmt::Display for EspFlashError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl std::error::Error for EspFlashError {}
+
+    impl NorFlashError for EspFlashError {
+        fn kind(&self) -> NorFlashErrorKind {
+            match self.0.code() as _ {
+                ESP_ERR_INVALID_ARG => NorFlashErrorKind::NotAligned,
+                ESP_ERR_INVALID_SIZE => NorFlashErrorKind::OutOfBounds,
+                _ => NorFlashErrorKind::Other,
+            }
+        }
+    }
+
+    impl ReadStorage for EspWlMount<'_> {
+        type Error = EspError;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            EspWlMount::read(self, offset as _, buf)
+        }
+
+        fn capacity(&self) -> usize {
+            self.size()
+        }
+    }
+
+    impl Storage for EspWlMount<'_> {
+        fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
+            EspWlMount::write(self, offset as _, data)
+        }
+    }
+
+    impl ErrorType for EspWlMount<'_> {
+        type Error = EspFlashError;
+    }
+
+    impl ReadNorFlash for EspWlMount<'_> {
+        const READ_SIZE: usize = 4096;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            EspWlMount::read(self, offset as _, buf)?;
+
+            Ok(())
+        }
+
+        fn capacity(&self) -> usize {
+            self.size()
+        }
+    }
+
+    impl NorFlash for EspWlMount<'_> {
+        const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
+        const ERASE_SIZE: usize = 4096;
+
+        fn erase(&mut self, offset: u32, size: u32) -> Result<(), Self::Error> {
+            EspWlMount::erase(self, offset as _, size as _)?;
+
+            Ok(())
+        }
+
+        fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+            EspWlMount::write(self, offset as _, bytes)?;
+
+            Ok(())
+        }
+    }
+
+    impl MultiwriteNorFlash for EspWlMount<'_> {}
 }
