@@ -73,9 +73,10 @@ impl EspPartitionType {
                         esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS
                     }
                     // Note: only available in the latest patch releases
-                    EspDataPartitionSubtype::LittleFs => {
-                        esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS
-                    }
+                    // #[cfg(not(esp_idf_version_major = "4"))]
+                    // EspDataPartitionSubtype::LittleFs => {
+                    //     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS
+                    // }
                     _ => esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_ANY,
                 };
 
@@ -126,13 +127,14 @@ pub enum EspDataPartitionSubtype {
     Fat,
     /// SPIFFS partition
     Spiffs,
-    /// LittleFS partition
-    LittleFs,
+    // /// LittleFS partition
+    // LittleFs,
     /// Unknown data partition subtype
     Unknown,
 }
 
 /// The type of memory mapping
+#[cfg(not(esp_idf_version_major = "4"))]
 #[non_exhaustive]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum EspMemMapType {
@@ -145,12 +147,14 @@ pub enum EspMemMapType {
 /// Represents a memory-mapping of a partition region
 ///
 /// Drop this to unmap the memory region
+#[cfg(not(esp_idf_version_major = "4"))]
 pub struct EspMemMappedPartition<'a> {
     handle: esp_partition_mmap_handle_t,
     start: usize,
     _t: PhantomData<&'a mut ()>,
 }
 
+#[cfg(not(esp_idf_version_major = "4"))]
 impl EspMemMappedPartition<'_> {
     /// Returns the start address of the memory-mapped region
     pub const fn start(&self) -> usize {
@@ -158,6 +162,7 @@ impl EspMemMappedPartition<'_> {
     }
 }
 
+#[cfg(not(esp_idf_version_major = "4"))]
 impl Drop for EspMemMappedPartition<'_> {
     fn drop(&mut self) {
         unsafe {
@@ -374,9 +379,10 @@ impl EspPartition {
                     esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_SPIFFS => {
                         EspDataPartitionSubtype::Spiffs
                     }
-                    esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS => {
-                        EspDataPartitionSubtype::LittleFs
-                    }
+                    // #[cfg(not(esp_idf_version_major = "4"))]
+                    // esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_LITTLEFS => {
+                    //     EspDataPartitionSubtype::LittleFs
+                    // }
                     _ => EspDataPartitionSubtype::Unknown,
                 })
             }
@@ -395,6 +401,7 @@ impl EspPartition {
     }
 
     /// Return the erase size block of the partition in bytes
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub fn erase_size(&self) -> usize {
         unsafe { (*self.0).erase_size as _ }
     }
@@ -518,6 +525,7 @@ impl EspPartition {
     ///
     /// # Safety
     /// TBD
+    #[cfg(not(esp_idf_version_major = "4"))]
     pub unsafe fn mmap(
         &mut self,
         offset: usize,
