@@ -560,6 +560,8 @@ impl RawHandle for EspPartition {
     }
 }
 
+unsafe impl Send for EspPartition {}
+
 /// Represents a partition mounted with the ESP-IDF Wear-Leveling algorithm on top
 pub struct EspWlMount<'a> {
     _partition: &'a mut EspPartition,
