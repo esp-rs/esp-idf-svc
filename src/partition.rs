@@ -716,8 +716,14 @@ mod embedded_storage {
         const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
         const ERASE_SIZE: usize = 4096;
 
-        fn erase(&mut self, offset: u32, size: u32) -> Result<(), Self::Error> {
-            EspPartition::erase(self, offset as _, size as _)?;
+        fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+            if to < from {
+                Err(EspFlashError(EspError::from_infallible::<
+                    ESP_ERR_INVALID_SIZE,
+                >()))?;
+            }
+
+            EspPartition::erase(self, from as _, (to - from) as _)?;
 
             Ok(())
         }
@@ -802,8 +808,14 @@ mod embedded_storage {
         const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
         const ERASE_SIZE: usize = 4096;
 
-        fn erase(&mut self, offset: u32, size: u32) -> Result<(), Self::Error> {
-            EspWlPartition::erase(self, offset as _, size as _)?;
+        fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+            if to < from {
+                Err(EspFlashError(EspError::from_infallible::<
+                    ESP_ERR_INVALID_SIZE,
+                >()))?;
+            }
+
+            EspWlPartition::erase(self, from as _, (to - from) as _)?;
 
             Ok(())
         }
