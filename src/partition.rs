@@ -1,6 +1,6 @@
 //! ESP IDF partitions API
 
-use core::ffi::CStr;
+use core::{borrow::BorrowMut, ffi::CStr};
 
 use esp_idf_hal::sys::*;
 
@@ -506,14 +506,6 @@ impl EspPartition {
         })
     }
 
-    /// Mount the partition with the ESP-IDF Wear-Leveling algorithm
-    ///
-    /// Return an error if the mount operation failed, or the mounted
-    /// WL partition if the mount operation succeeded.
-    pub fn mount_wl(&mut self) -> Result<EspWlMount<'_>, EspError> {
-        EspWlMount::new(self)
-    }
-
     /// Map a region of the partition to memory
     ///
     /// # Arguments
@@ -562,17 +554,27 @@ impl RawHandle for EspPartition {
 
 unsafe impl Send for EspPartition {}
 
-/// Represents a partition mounted with the ESP-IDF Wear-Leveling algorithm on top
-pub struct EspWlMount<'a> {
-    _partition: &'a mut EspPartition,
+/// Represents a partition wrapped with the ESP-IDF Wear-Leveling algorithm
+pub struct EspWlPartition<T> {
+    _partition: T,
     handle: wl_handle_t,
 }
 
-impl<'a> EspWlMount<'a> {
-    fn new(partition: &'a mut EspPartition) -> Result<Self, EspError> {
+impl<T> EspWlPartition<T>
+where
+    T: BorrowMut<EspPartition>,
+{
+    /// Wrap the provided raw partition with the ESP-IDF Wear-Leveling algorithm
+    ///
+    /// Return an error if the wrap operation failed, or the WL partition
+    /// if the operation succeeded.
+    ///
+    /// Arguments:
+    /// - `partition`: The partition to mount
+    pub fn new(mut partition: T) -> Result<Self, EspError> {
         let mut handle: wl_handle_t = Default::default();
 
-        esp!(unsafe { wl_mount(partition.0, &mut handle) })?;
+        esp!(unsafe { wl_mount(partition.borrow_mut().0, &mut handle) })?;
 
         Ok(Self {
             _partition: partition,
@@ -650,7 +652,7 @@ impl<'a> EspWlMount<'a> {
     }
 }
 
-impl RawHandle for EspWlMount<'_> {
+impl<T> RawHandle for EspWlPartition<T> {
     type Handle = wl_handle_t;
 
     fn handle(&self) -> Self::Handle {
@@ -658,14 +660,17 @@ impl RawHandle for EspWlMount<'_> {
     }
 }
 
-impl Drop for EspWlMount<'_> {
+impl<T> Drop for EspWlPartition<T> {
     fn drop(&mut self) {
         esp!(unsafe { wl_unmount(self.handle) }).unwrap();
     }
 }
 
+unsafe impl<T> Send for EspWlPartition<T> where T: Send {}
+
 #[cfg(feature = "embedded-storage")]
 mod embedded_storage {
+    use core::borrow::BorrowMut;
     use core::fmt;
 
     use embedded_storage::nor_flash::{
@@ -675,7 +680,7 @@ mod embedded_storage {
 
     use esp_idf_hal::sys::{EspError, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_SIZE};
 
-    use super::{EspPartition, EspWlMount};
+    use super::{EspPartition, EspWlPartition};
 
     impl ReadStorage for EspPartition {
         type Error = EspError;
@@ -754,11 +759,14 @@ mod embedded_storage {
         }
     }
 
-    impl ReadStorage for EspWlMount<'_> {
+    impl<T> ReadStorage for EspWlPartition<T>
+    where
+        T: BorrowMut<EspPartition>,
+    {
         type Error = EspError;
 
         fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
-            EspWlMount::read(self, offset as _, buf)
+            EspWlPartition::read(self, offset as _, buf)
         }
 
         fn capacity(&self) -> usize {
@@ -766,15 +774,18 @@ mod embedded_storage {
         }
     }
 
-    impl ErrorType for EspWlMount<'_> {
+    impl<T> ErrorType for EspWlPartition<T> {
         type Error = EspFlashError;
     }
 
-    impl ReadNorFlash for EspWlMount<'_> {
+    impl<T> ReadNorFlash for EspWlPartition<T>
+    where
+        T: BorrowMut<EspPartition>,
+    {
         const READ_SIZE: usize = 1;
 
         fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
-            EspWlMount::read(self, offset as _, buf)?;
+            EspWlPartition::read(self, offset as _, buf)?;
 
             Ok(())
         }
@@ -784,22 +795,25 @@ mod embedded_storage {
         }
     }
 
-    impl NorFlash for EspWlMount<'_> {
+    impl<T> NorFlash for EspWlPartition<T>
+    where
+        T: BorrowMut<EspPartition>,
+    {
         const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
         const ERASE_SIZE: usize = 4096;
 
         fn erase(&mut self, offset: u32, size: u32) -> Result<(), Self::Error> {
-            EspWlMount::erase(self, offset as _, size as _)?;
+            EspWlPartition::erase(self, offset as _, size as _)?;
 
             Ok(())
         }
 
         fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
-            EspWlMount::write(self, offset as _, bytes)?;
+            EspWlPartition::write(self, offset as _, bytes)?;
 
             Ok(())
         }
     }
 
-    impl MultiwriteNorFlash for EspWlMount<'_> {}
+    impl<T> MultiwriteNorFlash for EspWlPartition<T> where T: BorrowMut<EspPartition> {}
 }
