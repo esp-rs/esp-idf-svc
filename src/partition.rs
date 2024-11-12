@@ -6,6 +6,9 @@ use esp_idf_hal::sys::*;
 
 use crate::handle::RawHandle;
 
+#[cfg(feature = "embedded-storage")]
+pub use embedded_storage::{EspEncrypted, EspFlashError};
+
 /// The type of a partition
 #[non_exhaustive]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -713,7 +716,7 @@ mod embedded_storage {
     }
 
     impl NorFlash for EspPartition {
-        const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
+        const WRITE_SIZE: usize = 1;
         const ERASE_SIZE: usize = 4096;
 
         fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
@@ -805,7 +808,7 @@ mod embedded_storage {
     where
         T: BorrowMut<EspPartition>,
     {
-        const WRITE_SIZE: usize = 16; // Only for encrypted partitions but oh well
+        const WRITE_SIZE: usize = 1;
         const ERASE_SIZE: usize = 4096;
 
         fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
@@ -828,4 +831,81 @@ mod embedded_storage {
     }
 
     impl<T> MultiwriteNorFlash for EspWlPartition<T> where T: BorrowMut<EspPartition> {}
+
+    /// A wrapper marker type for encrypted partitions
+    ///
+    /// The reason why it is necessary is because for encrypted partitions
+    /// the write size is 16 bytes, while for non-encrypted partitions
+    /// the write size is 1 byte.
+    pub struct EspEncrypted<T>(T);
+
+    impl<T> EspEncrypted<T> {
+        /// Wrap the provided partition with the encrypted marker
+        pub const fn new(partition: T) -> Self {
+            Self(partition)
+        }
+
+        /// Release the partition from the encrypted marker
+        pub fn release(self) -> T {
+            self.0
+        }
+    }
+
+    impl<T> ErrorType for EspEncrypted<T>
+    where
+        T: ErrorType,
+    {
+        type Error = T::Error;
+    }
+
+    impl<T> ReadStorage for EspEncrypted<T>
+    where
+        T: ReadStorage,
+    {
+        type Error = T::Error;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            self.0.read(offset, buf)
+        }
+
+        fn capacity(&self) -> usize {
+            self.0.capacity()
+        }
+    }
+
+    impl<T> ReadNorFlash for EspEncrypted<T>
+    where
+        T: ReadNorFlash,
+    {
+        const READ_SIZE: usize = T::READ_SIZE;
+
+        fn read(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
+            self.0.read(offset, buf)
+        }
+
+        fn capacity(&self) -> usize {
+            self.0.capacity()
+        }
+    }
+
+    impl<T> NorFlash for EspEncrypted<T>
+    where
+        T: NorFlash,
+    {
+        // Because the partition is encrypted
+        // See https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/partition.html#_CPPv419esp_partition_writePK15esp_partition_t6size_tPKv6size_t
+        const WRITE_SIZE: usize = 16;
+
+        const ERASE_SIZE: usize = T::ERASE_SIZE;
+
+        fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+            self.0.erase(from, to)
+        }
+
+        fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+            self.0.write(offset, bytes)
+        }
+    }
+
+    impl<T> MultiwriteNorFlash for EspEncrypted<T> where T: MultiwriteNorFlash {}
 }
