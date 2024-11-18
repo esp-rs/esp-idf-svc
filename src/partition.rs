@@ -240,7 +240,7 @@ impl Iterator for EspPartitionIterator {
 pub struct EspPartition(*const esp_partition_t);
 
 impl EspPartition {
-    /// Wraps a raw pointer into a partition
+    /// Wrap a raw pointer into an `EspPartition` instance
     ///
     /// # Safety
     /// The raw pointer should be a valid one
@@ -249,7 +249,7 @@ impl EspPartition {
         Self(partition)
     }
 
-    /// Create a new partition by label
+    /// Create a new `EspPartition` instance for an existing partition identified by its label
     ///
     /// # Arguments
     /// - `label`: The label of the partition
@@ -266,7 +266,7 @@ impl EspPartition {
         Self::cnew(&cstr)
     }
 
-    /// Create a new partition by C-string label
+    /// Create a new `EspPartition` instance for an existing partition identified by its C-string label
     ///
     /// # Arguments
     /// - `clabel`: The label of the partition as a C string
