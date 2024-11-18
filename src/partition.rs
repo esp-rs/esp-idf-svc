@@ -431,7 +431,7 @@ impl EspPartition {
     /// data if the partition is encrypted.
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to read from
+    /// - `offset`: The offset in the partition to read from, in bytes
     /// - `buf`: The buffer to read the data into
     ///
     /// Return an error if the read operation failed.
@@ -450,7 +450,7 @@ impl EspPartition {
     /// data if the partition is encrypted.
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to write to
+    /// - `offset`: The offset in the partition to write to, in bytes
     /// - `data`: The data to write to the partition
     ///
     /// Return an error if the write operation failed.
@@ -473,7 +473,7 @@ impl EspPartition {
     /// Erase a region of the partition
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to start erasing from
+    /// - `offset`: The offset in the partition to start erasing from, in bytes
     /// - `size`: The size of the region to erase
     ///
     /// Return an error if the erase operation failed.
@@ -512,8 +512,8 @@ impl EspPartition {
     /// Map a region of the partition to memory
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to map from
-    /// - `size`: The size of the region to map
+    /// - `offset`: The offset in the partition to map from, in bytes
+    /// - `size`: The size of the region to map, in bytes
     /// - `mmap_type`: The type of memory mapping
     ///
     /// Return an error if the memory mapping operation failed.
@@ -598,7 +598,7 @@ where
     /// Read data from the mounted WL partition
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to read from
+    /// - `offset`: The offset in the partition to read from, in bytes
     /// - `buf`: The buffer to read the data into
     ///
     /// Return an error if the read operation failed.
@@ -621,7 +621,7 @@ where
     /// Write data to the mounted WL partition
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to write to
+    /// - `offset`: The offset in the partition to write to, in bytes
     /// - `data`: The data to write to the partition
     ///
     /// Return an error if the write operation failed.
@@ -644,8 +644,8 @@ where
     /// Erase a region of the mounted WL partition
     ///
     /// # Arguments
-    /// - `offset`: The offset in the partition to start erasing from
-    /// - `size`: The size of the region to erase
+    /// - `offset`: The offset in the partition to start erasing from, in bytes
+    /// - `size`: The size of the region to erase, in bytes
     ///
     /// Return an error if the erase operation failed.
     /// The erase operation would fail if the offset and size are
