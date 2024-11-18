@@ -906,6 +906,4 @@ mod embedded_storage {
             self.0.write(offset, bytes)
         }
     }
-
-    impl<T> MultiwriteNorFlash for EspEncrypted<T> where T: MultiwriteNorFlash {}
 }
