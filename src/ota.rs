@@ -160,7 +160,7 @@ impl EspFirmwareInfoLoad {
     ///
     /// Returns `true` if the information was successfully fetched.
     /// Returns `false` if the firmware data has not been loaded completely yet.
-    pub fn fetch(&self, data: &[u8], info: &mut FirmwareInfo) -> Result<bool, EspError> {
+    pub fn fetch(&self, data: &[u8], info: &mut FirmwareInfo) -> Result<bool, EspIOError> {
         let loaded = data.len()
             >= mem::size_of::<esp_image_header_t>()
                 + mem::size_of::<esp_image_segment_header_t>()
@@ -225,6 +225,10 @@ impl EspFirmwareInfoLoad {
 
         Ok(())
     }
+}
+
+impl io::ErrorType for EspFirmwareInfoLoad {
+    type Error = EspIOError;
 }
 
 #[derive(Debug)]
