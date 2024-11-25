@@ -24,7 +24,9 @@ esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 cmake = { git = "https://github.com/ivmarkov/cmake-rs" }
 
 [features]
-default = ["std", "binstart"]
+default = ["std", "binstart", "mdns_ipv6"]
+
+mdns_ipv6 = []
 
 std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std", "futures-io"]
 alloc = ["esp-idf-hal/alloc", "embedded-svc/alloc", "uncased/alloc"]
@@ -43,6 +45,7 @@ alloc_handler = ["esp-idf-hal/alloc_handler"]
 panic_handler = ["esp-idf-hal/panic_handler"]
 binstart = ["esp-idf-hal/binstart"]
 libstart = ["esp-idf-hal/libstart"]
+
 
 [dependencies]
 heapless = { version = "0.8", default-features = false }
