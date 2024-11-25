@@ -380,7 +380,7 @@ impl EspMdns {
         Ok(from_esp_ip4_addr_t(&addr))
     }
 
-    #[cfg(feature = enable_ipv6)]
+    #[cfg(feature = "mdns_ipv6")]
     pub fn query_aaaa(
         &self,
         hostname: impl AsRef<str>,
