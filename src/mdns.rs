@@ -9,9 +9,9 @@ use alloc::vec::Vec;
 
 use ::log::info;
 
-use embedded_svc::ipv4::{IpAddr, Ipv4Addr};
 #[cfg(feature = "mdns_ipv6")]
 use embedded_svc::ipv4::Ipv6Addr;
+use embedded_svc::ipv4::{IpAddr, Ipv4Addr};
 
 use crate::sys::*;
 
