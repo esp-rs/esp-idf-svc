@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use ::log::info;
 
-#[cfg(feature = "esp_idf_lwip_ipv6")]
+#[cfg(esp_idf_lwip_ipv6)]
 use embedded_svc::ipv4::Ipv6Addr;
 use embedded_svc::ipv4::{IpAddr, Ipv4Addr};
 
@@ -29,14 +29,14 @@ pub enum Interface {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Protocol {
     V4,
-    #[cfg(feature = "esp_idf_lwip_ipv6")]
+    #[cfg(esp_idf_lwip_ipv6)]
     V6,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Type {
     A = MDNS_TYPE_A as _,
-    #[cfg(feature = "esp_idf_lwip_ipv6")]
+    #[cfg(esp_idf_lwip_ipv6)]
     AAAA = MDNS_TYPE_AAAA as _,
     ANY = MDNS_TYPE_ANY as _,
     NSEC = MDNS_TYPE_NSEC as _,
@@ -87,7 +87,7 @@ impl From<mdns_result_t> for QueryResult {
             let a = unsafe { (*p).addr };
             let a = match a.type_ as _ {
                 ESP_IPADDR_TYPE_V4 => IpAddr::V4(from_esp_ip4_addr_t(unsafe { &a.u_addr.ip4 })),
-                #[cfg(feature = "esp_idf_lwip_ipv6")]
+                #[cfg(esp_idf_lwip_ipv6)]
                 ESP_IPADDR_TYPE_V6 => IpAddr::V6(from_esp_ip6_addr_t(unsafe { &a.u_addr.ip6 })),
                 _ => unreachable!(),
             };
@@ -118,7 +118,7 @@ impl From<mdns_result_t> for QueryResult {
 
         let ip_protocol = match result.ip_protocol {
             mdns_ip_protocol_t_MDNS_IP_PROTOCOL_V4 => Protocol::V4,
-            #[cfg(feature = "esp_idf_lwip_ipv6")]
+            #[cfg(esp_idf_lwip_ipv6)]
             mdns_ip_protocol_t_MDNS_IP_PROTOCOL_V6 => Protocol::V6,
             _ => unreachable!(),
         };
@@ -380,7 +380,7 @@ impl EspMdns {
         Ok(from_esp_ip4_addr_t(&addr))
     }
 
-    #[cfg(feature = "esp_idf_lwip_ipv6")]
+    #[cfg(esp_idf_lwip_ipv6)]
     pub fn query_aaaa(
         &self,
         hostname: impl AsRef<str>,
@@ -504,7 +504,7 @@ fn from_esp_ip4_addr_t(addr: &esp_ip4_addr_t) -> Ipv4Addr {
     Ipv4Addr::from(addr.addr.to_le_bytes())
 }
 
-#[cfg(feature = "esp_idf_lwip_ipv6")]
+#[cfg(esp_idf_lwip_ipv6)]
 fn from_esp_ip6_addr_t(addr: &esp_ip6_addr_t) -> Ipv6Addr {
     let mut buf = [0u8; 16];
     let mut i = 0;
