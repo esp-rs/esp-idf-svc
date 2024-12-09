@@ -176,7 +176,7 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
             bssid_set: conf.bssid.is_some(),
             bssid,
             channel: conf.channel.unwrap_or(0u8),
-            listen_interval: 0,
+            listen_interval: conf.listen_interval,
             sort_method: match conf.scan_method {
                 ScanMethod::CompleteScan(ScanSortMethod::Signal) => {
                     wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL
@@ -220,6 +220,7 @@ impl From<Newtype<wifi_sta_config_t>> for ClientConfiguration {
             } else {
                 None
             },
+            listen_interval: conf.0.listen_interval,
             #[allow(non_upper_case_globals)]
             scan_method: match conf.0.scan_method {
                 wifi_scan_method_t_WIFI_FAST_SCAN => ScanMethod::FastScan,
