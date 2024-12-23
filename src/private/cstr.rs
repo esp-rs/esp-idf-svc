@@ -33,6 +33,7 @@ pub fn set_str_no_termination_requirement(buf: &mut [u8], s: &str) -> Result<(),
     Ok(())
 }
 
+#[allow(clippy::unnecessary_cast)]
 pub fn c_char_to_u8_slice_mut(s: &mut [c_char]) -> &mut [u8] {
     let s_ptr = unsafe { s.as_mut_ptr() as *mut u8 };
     unsafe { core::slice::from_raw_parts_mut(s_ptr, s.len()) }
@@ -141,7 +142,7 @@ pub fn cstr_from_str_truncating<'a>(rust_str: &str, buf: &'a mut [u8]) -> &'a CS
 pub fn cstr_arr_from_str_slice<const N: usize>(
     rust_strs: &[&str],
     mut cbuf: &mut [u8],
-) -> Result<[*const i8; N], EspError> {
+) -> Result<[*const c_char; N], EspError> {
     assert!(N > 1);
     assert!(!cbuf.is_empty());
 

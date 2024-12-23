@@ -140,6 +140,7 @@ impl From<AuthMethod> for Newtype<wifi_auth_mode_t> {
 
 impl From<Newtype<wifi_auth_mode_t>> for Option<AuthMethod> {
     #[allow(non_upper_case_globals)]
+    #[allow(non_snake_case)]
     fn from(mode: Newtype<wifi_auth_mode_t>) -> Self {
         match mode.0 {
             wifi_auth_mode_t_WIFI_AUTH_OPEN => Some(AuthMethod::None),
@@ -165,6 +166,7 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
             None => [0; 6],
         };
 
+        #[allow(clippy::needless_update)]
         let mut result = wifi_sta_config_t {
             ssid: [0; 32],
             password: [0; 64],
@@ -189,6 +191,7 @@ impl TryFrom<&ClientConfiguration> for Newtype<wifi_sta_config_t> {
             threshold: wifi_scan_threshold_t {
                 rssi: -127,
                 authmode: Newtype::<wifi_auth_mode_t>::from(conf.auth_method).0,
+                ..Default::default()
             },
             pmf_cfg: wifi_pmf_config_t {
                 capable: false,
@@ -221,6 +224,7 @@ impl From<Newtype<wifi_sta_config_t>> for ClientConfiguration {
                 None
             },
             #[allow(non_upper_case_globals)]
+            #[allow(non_snake_case)]
             scan_method: match conf.0.scan_method {
                 wifi_scan_method_t_WIFI_FAST_SCAN => ScanMethod::FastScan,
                 wifi_scan_method_t_WIFI_ALL_CHANNEL_SCAN => match conf.0.sort_method {
@@ -298,6 +302,7 @@ impl TryFrom<Newtype<&wifi_ap_record_t>> for AccessPointInfo {
     type Error = Utf8Error;
 
     #[allow(non_upper_case_globals)]
+    #[allow(non_snake_case)]
     fn try_from(ap_info: Newtype<&wifi_ap_record_t>) -> Result<Self, Self::Error> {
         let a = ap_info.0;
 
@@ -757,6 +762,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     #[allow(non_upper_case_globals)]
+    #[allow(non_snake_case)]
     /// Returns the <`Configuration`> currently in use
     pub fn get_configuration(&self) -> Result<Configuration, EspError> {
         debug!("Getting configuration");
@@ -2153,6 +2159,7 @@ impl TryFrom<u32> for WifiSecondChan {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         #![allow(non_upper_case_globals)]
+        #[allow(non_snake_case)]
         match value {
             wifi_second_chan_t_WIFI_SECOND_CHAN_NONE => Ok(Self::None),
             wifi_second_chan_t_WIFI_SECOND_CHAN_ABOVE => Ok(Self::Above),

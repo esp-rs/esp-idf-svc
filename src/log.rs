@@ -66,6 +66,7 @@ impl core::fmt::Write for EspStdout {
 }
 
 #[allow(non_upper_case_globals)]
+#[allow(non_snake_case)]
 impl From<Newtype<esp_log_level_t>> for LevelFilter {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
@@ -94,6 +95,7 @@ impl From<LevelFilter> for Newtype<esp_log_level_t> {
 }
 
 #[allow(non_upper_case_globals)]
+#[allow(non_snake_case)]
 impl From<Newtype<esp_log_level_t>> for Level {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
@@ -193,10 +195,10 @@ impl EspLogger {
         }
     }
 
-    fn get_color(level: Level) -> Option<u8> {
+    fn get_color(_level: Level) -> Option<u8> {
         #[cfg(esp_idf_log_colors)]
         {
-            match level {
+            match _level {
                 Level::Error => Some(31), // LOG_COLOR_RED
                 Level::Warn => Some(33),  // LOG_COLOR_BROWN
                 Level::Info => Some(32),  // LOG_COLOR_GREEN,
