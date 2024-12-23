@@ -1032,7 +1032,7 @@ impl<'d, T> EthDriver<'d, T> {
         Ok(())
     }
 
-    pub fn set_promiscuous(&mut self, state: bool) -> Result<(), EspError> {
+    pub fn set_promiscuous(&self, state: bool) -> Result<(), EspError> {
         esp!(unsafe {
             esp_eth_ioctl(
                 self.handle(),
