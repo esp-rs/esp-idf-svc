@@ -1032,6 +1032,24 @@ impl<'d, T> EthDriver<'d, T> {
         Ok(())
     }
 
+    pub fn set_promiscuous(&mut self, state: bool) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_eth_ioctl(
+                self.handle(),
+                esp_eth_io_cmd_t_ETH_CMD_S_PROMISCUOUS,
+                &raw const state as *mut _,
+            )
+        })?;
+
+        if state {
+            log::warn!("Driver set in promiscuous mode");
+        } else {
+            log::info!("Driver set in non-promiscuous mode");
+        }
+
+        Ok(())
+    }
+
     fn eth_default_config(mac: *mut esp_eth_mac_t, phy: *mut esp_eth_phy_t) -> esp_eth_config_t {
         esp_eth_config_t {
             mac,
