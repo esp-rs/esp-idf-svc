@@ -79,6 +79,7 @@ pub struct Configuration {
     pub http_port: u16,
     pub ctrl_port: u16,
     pub https_port: u16,
+    pub core_id: i32,
     pub max_sessions: usize,
     pub session_timeout: Duration,
     pub stack_size: usize,
@@ -99,6 +100,7 @@ impl Default for Configuration {
             http_port: 80,
             ctrl_port: 32768,
             https_port: 443,
+            core_id: i32::MAX,
             max_sessions: 16,
             session_timeout: Duration::from_secs(20 * 60),
             #[cfg(not(esp_idf_esp_https_server_enable))]
@@ -137,7 +139,7 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             ))]
             task_caps: (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             stack_size: conf.stack_size,
-            core_id: i32::MAX,
+            core_id: conf.core_id,
             server_port: conf.http_port,
             ctrl_port: conf.ctrl_port,
             max_open_sockets: conf.max_open_sockets as _,
