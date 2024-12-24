@@ -1032,9 +1032,8 @@ impl<'d, T> EthDriver<'d, T> {
         Ok(())
     }
 
-
     /// Enables or disables promiscuous mode for the Ethernet driver.
-    /// 
+    ///
     /// When promiscuous mode is enabled, the driver captures all Ethernet frames
     /// on the network, regardless of their destination MAC address. This is useful for
     /// debugging or monitoring purposes.
