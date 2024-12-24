@@ -1032,7 +1032,13 @@ impl<'d, T> EthDriver<'d, T> {
         Ok(())
     }
 
-    pub fn set_promiscuous(&self, state: bool) -> Result<(), EspError> {
+
+    /// Enables or disables promiscuous mode for the Ethernet driver.
+    /// 
+    /// When promiscuous mode is enabled, the driver captures all Ethernet frames
+    /// on the network, regardless of their destination MAC address. This is useful for
+    /// debugging or monitoring purposes.
+    pub fn set_promiscuous(&mut self, state: bool) -> Result<(), EspError> {
         esp!(unsafe {
             esp_eth_ioctl(
                 self.handle(),
