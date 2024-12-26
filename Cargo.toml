@@ -53,10 +53,14 @@ uncased = { version = "0.9.7", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
 embedded-svc = { version = "0.28", default-features = false }
 esp-idf-hal = { version = "0.44", default-features = false }
-embassy-time-driver = { version = "0.1", optional = true, features = ["tick-hz-1_000_000"] }
+# esp-idf-hal = { path = "../esp-idf-hal" }
+embassy-time-driver = { version = "0.1", optional = true, features = [
+    "tick-hz-1_000_000",
+] }
 embassy-futures = "0.1"
 embedded-storage = { version = "0.3", optional = true }
 futures-io = { version = "0.3", optional = true }
+at-commands = "0.5.4"
 
 [build-dependencies]
 embuild = "0.32"
