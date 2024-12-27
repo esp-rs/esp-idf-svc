@@ -1210,7 +1210,7 @@ impl<'d> WifiDriver<'d> {
     }
 
     /// Gets the state of the promiscuous mode for the [`WifiDriver`].
-    pub fn get_promiscuous(&self) -> Result<bool, EspError> {
+    pub fn is_promiscuous(&self) -> Result<bool, EspError> {
         let mut en: bool = false;
 
         esp!(unsafe { esp_wifi_get_promiscuous(&mut en) })?;
