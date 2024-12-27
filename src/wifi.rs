@@ -1197,7 +1197,7 @@ impl<'d> WifiDriver<'d> {
     /// When promiscuous mode is enabled, the driver captures all Wifi frames
     /// on the network, regardless of their destination MAC address. This is useful for
     /// debugging or monitoring purposes.
-    pub fn set_promisucous(&mut self, state: bool) -> Result<(), EspError> {
+    pub fn set_promiscuous(&mut self, state: bool) -> Result<(), EspError> {
         esp!(unsafe { esp_wifi_set_promiscuous(state) })?;
 
         if state {
@@ -1217,7 +1217,7 @@ impl<'d> WifiDriver<'d> {
 
         Ok(en)
     }
-    
+
     //TODO: add safe wrappers for these three functions
     //https://docs.esp-rs.org/esp-idf-sys/esp_idf_sys/fn.esp_wifi_set_promiscuous_ctrl_filter.html
     //https://docs.esp-rs.org/esp-idf-sys/esp_idf_sys/fn.esp_wifi_set_promiscuous_filter.html
