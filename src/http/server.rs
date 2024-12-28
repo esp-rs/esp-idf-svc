@@ -35,6 +35,8 @@
 use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::marker::PhantomData;
+use core::mem;
+use core::net::Ipv4Addr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
 use core::{ffi, ptr};
@@ -798,6 +800,58 @@ impl EspHttpRawConnection<'_> {
         }
 
         Ok(())
+    }
+
+    /// Retrieves the source ip of the request.
+    ///
+    /// The ip is retrieved using the underlying session socket.
+    pub fn source_ip(&mut self) -> Result<Ipv4Addr, EspError> {
+        unsafe {
+            let sockfd = httpd_req_to_sockfd(self.0 as *mut _);
+
+            if sockfd == -1 {
+                //Unwrap is fine, this cannot fail.
+                return Err(EspError::from(-1).unwrap());
+            }
+
+            let mut address = sockaddr_in {
+                sin_len: mem::size_of::<sockaddr_in>() as u8,
+                sin_family: AF_INET as u8,
+                sin_port: 0,
+                sin_addr: in_addr { s_addr: 0 },
+                sin_zero: [0; 8],
+            };
+
+            let mut addr_len = mem::size_of::<sockaddr_in>() as socklen_t;
+
+            esp!(lwip_getpeername(
+                sockfd,
+                &mut address as *mut _ as *mut sockaddr,
+                &mut addr_len,
+            ))?;
+
+            //"255.255.255.255\0" = 16 bytes
+            let mut ip_string = [0i8; 16];
+
+            if lwip_inet_ntop(
+                AF_INET as _,
+                &address.sin_addr as *const _ as *const _,
+                ip_string.as_mut_ptr(),
+                ip_string.len() as _,
+            )
+            .is_null()
+            {
+                return Err(EspError::from(-1).unwrap());
+            }
+
+            let ip: Ipv4Addr = CStr::from_ptr(ip_string.as_ptr())
+                .to_str()
+                .map_err(|_| EspError::from(-1).unwrap())?
+                .parse()
+                .map_err(|_| EspError::from(-1).unwrap())?;
+
+            Ok(ip)
+        }
     }
 }
 
