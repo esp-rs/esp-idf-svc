@@ -893,13 +893,14 @@ impl EspHttpRawConnection<'_> {
                 &mut addr_len,
             ))?;
 
+            //We use c_char to be platform independent
             // IPv6 address = 39 bytes + null terminator
             let mut ip_string: [ffi::c_char; 40] = [0; 40];
 
             if lwip_inet_ntop(
                 AF_INET6 as _,
                 &address.sin6_addr as *const _ as *const _,
-                ip_string.as_mut_ptr(),
+                &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
                 ip_string.len() as _,
             )
             .is_null()
@@ -907,7 +908,7 @@ impl EspHttpRawConnection<'_> {
                 return Err(EspError::from(-1).unwrap());
             }
 
-            let ip: Ipv6Addr = CStr::from_ptr(ip_string.as_ptr())
+            let ip: Ipv6Addr = CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
                 .to_str()
                 .map_err(|_| EspError::from(-1).unwrap())?
                 .parse()
