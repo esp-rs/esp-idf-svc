@@ -802,10 +802,11 @@ impl EspHttpRawConnection<'_> {
         Ok(())
     }
 
-    /// Retrieves the source ip of the request.
+    /// Retrieves the source IPv4 of the request.
     ///
-    /// The ip is retrieved using the underlying session socket.
-    pub fn source_ip(&mut self) -> Result<Ipv4Addr, EspError> {
+    /// The IPv4 is retrieved using the underlying session socket.
+    #[cfg(esp_idf_lwip_ipv4)]
+    pub fn source_ip4(&mut self) -> Result<Ipv4Addr, EspError> {
         unsafe {
             let sockfd = httpd_req_to_sockfd(self.0 as *mut _);
 
@@ -830,13 +831,14 @@ impl EspHttpRawConnection<'_> {
                 &mut addr_len,
             ))?;
 
+            //We use c_char to be platform independent
             //"255.255.255.255\0" = 16 bytes
-            let mut ip_string = [0i8; 16];
+            let mut ip_string: [ffi::c_char; 16] = [0; 16];
 
             if lwip_inet_ntop(
                 AF_INET as _,
                 &address.sin_addr as *const _ as *const _,
-                ip_string.as_mut_ptr(),
+                &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
                 ip_string.len() as _,
             )
             .is_null()
@@ -844,11 +846,12 @@ impl EspHttpRawConnection<'_> {
                 return Err(EspError::from(-1).unwrap());
             }
 
-            let ip: Ipv4Addr = CStr::from_ptr(ip_string.as_ptr())
-                .to_str()
-                .map_err(|_| EspError::from(-1).unwrap())?
-                .parse()
-                .map_err(|_| EspError::from(-1).unwrap())?;
+            let ip: Ipv4Addr =
+                CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
+                    .to_str()
+                    .map_err(|_| EspError::from(-1).unwrap())?
+                    .parse()
+                    .map_err(|_| EspError::from(-1).unwrap())?;
 
             Ok(ip)
         }
