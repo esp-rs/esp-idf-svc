@@ -35,8 +35,6 @@
 use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::marker::PhantomData;
-#[cfg(any(esp_idf_lwip_ipv4, esp_idf_lwip_ipv6))]
-use core::mem;
 #[cfg(esp_idf_lwip_ipv4)]
 use core::net::Ipv4Addr;
 #[cfg(esp_idf_lwip_ipv6)]
@@ -820,14 +818,14 @@ impl EspHttpRawConnection<'_> {
             }
 
             let mut address = sockaddr_in {
-                sin_len: mem::size_of::<sockaddr_in>() as u8,
+                sin_len: core::mem::size_of::<sockaddr_in>() as u8,
                 sin_family: AF_INET as u8,
                 sin_port: 0,
                 sin_addr: in_addr { s_addr: 0 },
                 sin_zero: [0; 8],
             };
 
-            let mut addr_len = mem::size_of::<sockaddr_in>() as socklen_t;
+            let mut addr_len = core::mem::size_of::<sockaddr_in>() as socklen_t;
 
             esp!(lwip_getpeername(
                 sockfd,
