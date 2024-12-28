@@ -873,7 +873,7 @@ impl EspHttpRawConnection<'_> {
             }
 
             let mut address = sockaddr_in6 {
-                sin6_len: mem::size_of::<sockaddr_in6>() as u8,
+                sin6_len: core::mem::size_of::<sockaddr_in6>() as u8,
                 sin6_family: AF_INET6 as u8,
                 sin6_port: 0,
                 sin6_addr: in6_addr {
@@ -883,7 +883,7 @@ impl EspHttpRawConnection<'_> {
                 sin6_scope_id: 0,
             };
 
-            let mut addr_len = mem::size_of::<sockaddr_in6>() as socklen_t;
+            let mut addr_len = core::mem::size_of::<sockaddr_in6>() as socklen_t;
 
             esp!(lwip_getpeername(
                 sockfd,
