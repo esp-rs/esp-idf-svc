@@ -908,11 +908,12 @@ impl EspHttpRawConnection<'_> {
                 return Err(EspError::from(-1).unwrap());
             }
 
-            let ip: Ipv6Addr = CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
-                .to_str()
-                .map_err(|_| EspError::from(-1).unwrap())?
-                .parse()
-                .map_err(|_| EspError::from(-1).unwrap())?;
+            let ip: Ipv6Addr =
+                CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
+                    .to_str()
+                    .map_err(|_| EspError::from(-1).unwrap())?
+                    .parse()
+                    .map_err(|_| EspError::from(-1).unwrap())?;
 
             Ok(ip)
         }
