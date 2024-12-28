@@ -35,8 +35,12 @@
 use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::marker::PhantomData;
+#[cfg(any(esp_idf_lwip_ipv4, esp_idf_lwip_ipv6))]
 use core::mem;
+#[cfg(esp_idf_lwip_ipv4)]
 use core::net::Ipv4Addr;
+#[cfg(esp_idf_lwip_ipv6)]
+use core::net::Ipv6Addr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
 use core::{ffi, ptr};
@@ -852,6 +856,62 @@ impl EspHttpRawConnection<'_> {
                     .map_err(|_| EspError::from(-1).unwrap())?
                     .parse()
                     .map_err(|_| EspError::from(-1).unwrap())?;
+
+            Ok(ip)
+        }
+    }
+
+    /// Retrieves the source IPv6 of the request.
+    ///
+    /// The IPv6 is retrieved using the underlying session socket.
+    #[cfg(esp_idf_lwip_ipv6)]
+    pub fn source_ip6(&mut self) -> Result<Ipv6Addr, EspError> {
+        unsafe {
+            let sockfd = httpd_req_to_sockfd(self.0 as *mut _);
+
+            if sockfd == -1 {
+                // Unwrap is fine, this cannot fail.
+                return Err(EspError::from(-1).unwrap());
+            }
+
+            let mut address = sockaddr_in6 {
+                sin6_len: mem::size_of::<sockaddr_in6>() as u8,
+                sin6_family: AF_INET6 as u8,
+                sin6_port: 0,
+                sin6_addr: in6_addr {
+                    un: in6_addr__bindgen_ty_1 { u8_addr: [0; 16] },
+                },
+                sin6_flowinfo: 0,
+                sin6_scope_id: 0,
+            };
+
+            let mut addr_len = mem::size_of::<sockaddr_in6>() as socklen_t;
+
+            esp!(lwip_getpeername(
+                sockfd,
+                &mut address as *mut _ as *mut sockaddr,
+                &mut addr_len,
+            ))?;
+
+            // IPv6 address = 39 bytes + null terminator
+            let mut ip_string: [ffi::c_char; 40] = [0; 40];
+
+            if lwip_inet_ntop(
+                AF_INET6 as _,
+                &address.sin6_addr as *const _ as *const _,
+                ip_string.as_mut_ptr(),
+                ip_string.len() as _,
+            )
+            .is_null()
+            {
+                return Err(EspError::from(-1).unwrap());
+            }
+
+            let ip: Ipv6Addr = CStr::from_ptr(ip_string.as_ptr())
+                .to_str()
+                .map_err(|_| EspError::from(-1).unwrap())?
+                .parse()
+                .map_err(|_| EspError::from(-1).unwrap())?;
 
             Ok(ip)
         }
