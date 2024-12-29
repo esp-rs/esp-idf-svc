@@ -808,38 +808,34 @@ impl EspHttpRawConnection<'_> {
     ///
     /// The IPv4 is retrieved using the underlying session socket.
     #[cfg(esp_idf_lwip_ipv4)]
-    pub fn source_ip4(&mut self) -> Result<Ipv4Addr, EspError> {
+    pub fn source_ip4(&self) -> Result<Ipv4Addr, EspError> {
         unsafe {
-            let sockfd = httpd_req_to_sockfd(self.0 as *mut _);
+            let sockfd = httpd_req_to_sockfd(self.handle());
 
             if sockfd == -1 {
-                //Unwrap is fine, this cannot fail.
                 return Err(EspError::from(-1).unwrap());
             }
 
-            let mut address = sockaddr_in {
+            let mut addr = sockaddr_in {
                 sin_len: core::mem::size_of::<sockaddr_in>() as u8,
                 sin_family: AF_INET as u8,
-                sin_port: 0,
-                sin_addr: in_addr { s_addr: 0 },
-                sin_zero: [0; 8],
+                ..Default::default()
             };
 
             let mut addr_len = core::mem::size_of::<sockaddr_in>() as socklen_t;
 
             esp!(lwip_getpeername(
                 sockfd,
-                &mut address as *mut _ as *mut sockaddr,
+                &mut addr as *mut _ as *mut sockaddr,
                 &mut addr_len,
             ))?;
 
-            //We use c_char to be platform independent
             //"255.255.255.255\0" = 16 bytes
             let mut ip_string: [ffi::c_char; 16] = [0; 16];
 
             if lwip_inet_ntop(
                 AF_INET as _,
-                &address.sin_addr as *const _ as *const _,
+                &addr.sin_addr as *const _ as *const _,
                 &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
                 ip_string.len() as _,
             )
@@ -863,41 +859,34 @@ impl EspHttpRawConnection<'_> {
     ///
     /// The IPv6 is retrieved using the underlying session socket.
     #[cfg(esp_idf_lwip_ipv6)]
-    pub fn source_ip6(&mut self) -> Result<Ipv6Addr, EspError> {
+    pub fn source_ip6(&self) -> Result<Ipv6Addr, EspError> {
         unsafe {
-            let sockfd = httpd_req_to_sockfd(self.0 as *mut _);
+            let sockfd = httpd_req_to_sockfd(self.handle());
 
             if sockfd == -1 {
-                // Unwrap is fine, this cannot fail.
                 return Err(EspError::from(-1).unwrap());
             }
 
-            let mut address = sockaddr_in6 {
+            let mut addr = sockaddr_in6 {
                 sin6_len: core::mem::size_of::<sockaddr_in6>() as u8,
                 sin6_family: AF_INET6 as u8,
-                sin6_port: 0,
-                sin6_addr: in6_addr {
-                    un: in6_addr__bindgen_ty_1 { u8_addr: [0; 16] },
-                },
-                sin6_flowinfo: 0,
-                sin6_scope_id: 0,
+                ..Default::default()
             };
 
             let mut addr_len = core::mem::size_of::<sockaddr_in6>() as socklen_t;
 
             esp!(lwip_getpeername(
                 sockfd,
-                &mut address as *mut _ as *mut sockaddr,
+                &mut addr as *mut _ as *mut sockaddr,
                 &mut addr_len,
             ))?;
 
-            //We use c_char to be platform independent
             // IPv6 address = 39 bytes + null terminator
             let mut ip_string: [ffi::c_char; 40] = [0; 40];
 
             if lwip_inet_ntop(
                 AF_INET6 as _,
-                &address.sin6_addr as *const _ as *const _,
+                &addr.sin6_addr as *const _ as *const _,
                 &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
                 ip_string.len() as _,
             )
