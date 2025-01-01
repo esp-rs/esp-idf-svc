@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow using esp timer with skip_unhandled_events (#526)
 - OTA - Implements a new type `EspFirmwareInfoLoad` that has a reduced memory consumption (#531)
 - Added set_promiscuous function in EthDriver (#246)
+- Added set_promiscuous, is_promiscuous functions in WifiDriver (#246)
 - Add source_ip4, source_ip6 function in EspHttpRawConnection (#538)
 
 ### Fixed
@@ -54,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bugfix: crash on MQTT async client restart
 - Fix missing newline if CONFIG_LOG_COLORS=n is set (#521)
 - gatekeep mdns ipv6 behind feature flag (#523)
+- Fix emac_rx stack overflow when log verbosity is increased (#535)
 
 ## [0.49.1] - 2024-07-09
 ### Fixed
