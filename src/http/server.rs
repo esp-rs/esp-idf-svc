@@ -808,50 +808,27 @@ impl EspHttpRawConnection<'_> {
     ///
     /// The IPv4 is retrieved using the underlying session socket.
     #[cfg(esp_idf_lwip_ipv4)]
-    pub fn source_ip4(&self) -> Result<Ipv4Addr, EspError> {
+    pub fn source_ipv4(&self) -> Result<Ipv4Addr, EspError> {
         unsafe {
             let sockfd = httpd_req_to_sockfd(self.handle());
 
             if sockfd == -1 {
-                return Err(EspError::from(-1).unwrap());
+                return Err(EspError::from_infallible::<ESP_FAIL>());
             }
 
             let mut addr = sockaddr_in {
-                sin_len: core::mem::size_of::<sockaddr_in>() as u8,
-                sin_family: AF_INET as u8,
+                sin_len: core::mem::size_of::<sockaddr_in>() as _,
+                sin_family: AF_INET as _,
                 ..Default::default()
             };
 
-            let mut addr_len = core::mem::size_of::<sockaddr_in>() as socklen_t;
-
             esp!(lwip_getpeername(
                 sockfd,
-                &mut addr as *mut _ as *mut sockaddr,
-                &mut addr_len,
+                &mut addr as *mut _ as *mut _,
+                &mut core::mem::size_of::<sockaddr_in>() as *mut _ as *mut _,
             ))?;
 
-            //"255.255.255.255\0" = 16 bytes
-            let mut ip_string: [ffi::c_char; 16] = [0; 16];
-
-            if lwip_inet_ntop(
-                AF_INET as _,
-                &addr.sin_addr as *const _ as *const _,
-                &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
-                ip_string.len() as _,
-            )
-            .is_null()
-            {
-                return Err(EspError::from(-1).unwrap());
-            }
-
-            let ip: Ipv4Addr =
-                CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
-                    .to_str()
-                    .map_err(|_| EspError::from(-1).unwrap())?
-                    .parse()
-                    .map_err(|_| EspError::from(-1).unwrap())?;
-
-            Ok(ip)
+            Ok(Ipv4Addr::from(addr.sin_addr.s_addr))
         }
     }
 
@@ -859,50 +836,27 @@ impl EspHttpRawConnection<'_> {
     ///
     /// The IPv6 is retrieved using the underlying session socket.
     #[cfg(esp_idf_lwip_ipv6)]
-    pub fn source_ip6(&self) -> Result<Ipv6Addr, EspError> {
+    pub fn source_ipv6(&self) -> Result<Ipv6Addr, EspError> {
         unsafe {
             let sockfd = httpd_req_to_sockfd(self.handle());
 
             if sockfd == -1 {
-                return Err(EspError::from(-1).unwrap());
+                return Err(EspError::from_infallible::<ESP_FAIL>());
             }
 
             let mut addr = sockaddr_in6 {
-                sin6_len: core::mem::size_of::<sockaddr_in6>() as u8,
-                sin6_family: AF_INET6 as u8,
+                sin6_len: core::mem::size_of::<sockaddr_in6>() as _,
+                sin6_family: AF_INET6 as _,
                 ..Default::default()
             };
 
-            let mut addr_len = core::mem::size_of::<sockaddr_in6>() as socklen_t;
-
             esp!(lwip_getpeername(
                 sockfd,
-                &mut addr as *mut _ as *mut sockaddr,
-                &mut addr_len,
+                &mut addr as *mut _ as *mut _,
+                &mut core::mem::size_of::<sockaddr_in6>() as *mut _ as *mut _,
             ))?;
 
-            // IPv6 address = 39 bytes + null terminator
-            let mut ip_string: [ffi::c_char; 40] = [0; 40];
-
-            if lwip_inet_ntop(
-                AF_INET6 as _,
-                &addr.sin6_addr as *const _ as *const _,
-                &mut ip_string as *mut [ffi::c_char] as *mut ffi::c_char,
-                ip_string.len() as _,
-            )
-            .is_null()
-            {
-                return Err(EspError::from(-1).unwrap());
-            }
-
-            let ip: Ipv6Addr =
-                CStr::from_ptr(&ip_string as *const [ffi::c_char] as *const ffi::c_char)
-                    .to_str()
-                    .map_err(|_| EspError::from(-1).unwrap())?
-                    .parse()
-                    .map_err(|_| EspError::from(-1).unwrap())?;
-
-            Ok(ip)
+            Ok(Ipv6Addr::from(addr.sin6_addr.un.u8_addr))
         }
     }
 }
