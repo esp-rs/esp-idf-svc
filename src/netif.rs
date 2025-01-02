@@ -599,18 +599,16 @@ impl EspNetif {
         Ok(())
     }
 
+    #[cfg(esp_idf_lwip_ipv4_napt)]
     unsafe extern "C" fn napt_wrapper(ctx: *mut ffi::c_void) {
-        #[cfg(esp_idf_lwip_ipv4_napt)]
-        {
-            let ctx = unsafe { *(ctx as *mut (u8, i32)) };
+        let ctx = unsafe { *(ctx as *mut (u8, i32)) };
 
-            ip_napt_enable_no(ctx.0, ctx.1);
-        }
+        ip_napt_enable_no(ctx.0, ctx.1);
     }
 
     /// Enables or disables NAPT on this netif.
     ///
-    /// Enable operation can be performed only on one interface at a time.
+    /// Enable operation can be performed only on one interface at a time. 
     /// NAPT cannot be enabled on multiple interfaces according to this implementation.
     #[cfg(esp_idf_lwip_ipv4_napt)]
     pub fn enable_napt(&mut self, enable: bool) -> Result<(), EspError> {
