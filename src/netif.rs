@@ -600,15 +600,21 @@ impl EspNetif {
     }
 
     #[cfg(esp_idf_lwip_ipv4_napt)]
+    unsafe extern "C" fn napt_wrapper(ctx: *mut ffi::c_void) {
+        let ctx = unsafe { *(ctx as *mut (u8, i32)) };
+
+        ip_napt_enable_no(ctx.0, ctx.1);
+    }
+    
+    #[cfg(esp_idf_lwip_ipv4_napt)]
     pub fn enable_napt(&mut self, enable: bool) -> Result<(), EspError> {
         unsafe {
-            let if_index = (esp_netif_get_netif_impl_index(self.handle) - 1) as u8;
-            let ctx = (if_index, if enable { 1 } else { 0 });
+            let ctx = ((esp_netif_get_netif_impl_index(self.handle) - 1) as u8, if enable { 1 } else { 0 });
 
             esp!(esp_netif_tcpip_exec(
-                Some(ip_napt_enable_no),
+                Some(napt_wrapper),
                 &ctx as *const _ as *mut _
-            ));
+            ))?;
 
             Ok(())
         }
