@@ -605,7 +605,7 @@ impl EspNetif {
 
         ip_napt_enable_no(ctx.0, ctx.1);
 
-        0 
+        0
     }
 
     /// Enables or disables NAPT on this netif.
