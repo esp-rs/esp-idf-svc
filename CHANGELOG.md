@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.50.0] - 2025-01-02
 
 ### Deprecated
 - `EspFirmwareInfoLoader` use `EspFirmwareInfoLoad` instead
@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expose src_addr and dst_addr in espnow recv cb (#525)
 
 ### Added
+- Compatibility with ESP-IDF v5.3.X
 - feat(eth): Implement alternative polling mode (#452)
 - SD Card driver; SD Card host drivers (SPI and SDMMC) (#454)
 - Make EspAsyncMqttClient::wrap public. (#462)
@@ -34,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add option to specify initial caps for the MQTT async adaptor vectors
 - Allow using esp timer with skip_unhandled_events (#526)
 - OTA - Implements a new type `EspFirmwareInfoLoad` that has a reduced memory consumption (#531)
+- Added set_promiscuous function in EthDriver (#246)
+- Added set_promiscuous, is_promiscuous functions in WifiDriver (#246)
+- Blocking and buffered StdIo (#541) - i.e. easy reading/input from `std::io::stdin`
+- Added source_ipv4, source_ipv6 function in EspHttpRawConnection (#538)
 
 ### Fixed
 - The alloc::Vec version stomps the scan state from Done to Idle. (#459)
@@ -52,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bugfix: crash on MQTT async client restart
 - Fix missing newline if CONFIG_LOG_COLORS=n is set (#521)
 - gatekeep mdns ipv6 behind feature flag (#523)
+- Fix emac_rx stack overflow when log verbosity is increased (#535)
 
 ## [0.49.1] - 2024-07-09
 ### Fixed
