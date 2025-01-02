@@ -608,7 +608,7 @@ impl EspNetif {
 
     /// Enables or disables NAPT on this netif.
     ///
-    /// Enable operation can be performed only on one interface at a time. 
+    /// Enable operation can be performed only on one interface at a time.
     /// NAPT cannot be enabled on multiple interfaces according to this implementation.
     #[cfg(esp_idf_lwip_ipv4_napt)]
     pub fn enable_napt(&mut self, enable: bool) -> Result<(), EspError> {
@@ -619,7 +619,7 @@ impl EspNetif {
             );
 
             esp!(esp_netif_tcpip_exec(
-                Some(napt_wrapper),
+                Some(EspNetif::napt_wrapper),
                 &ctx as *const _ as *mut _
             ))?;
 
