@@ -600,10 +600,12 @@ impl EspNetif {
     }
 
     #[cfg(esp_idf_lwip_ipv4_napt)]
-    unsafe extern "C" fn napt_wrapper(ctx: *mut ffi::c_void) {
+    unsafe extern "C" fn napt_wrapper(ctx: *mut ffi::c_void) -> i32 {
         let ctx = unsafe { *(ctx as *mut (u8, i32)) };
 
         ip_napt_enable_no(ctx.0, ctx.1);
+
+        0 
     }
 
     /// Enables or disables NAPT on this netif.
