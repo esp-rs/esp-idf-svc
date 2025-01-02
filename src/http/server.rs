@@ -145,7 +145,7 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             ))]
             task_caps: (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             stack_size: conf.stack_size,
-            core: conf.core.map(|core| core.into()).unwrap_or(i32::MAX),
+            core_id: conf.core.map(|core| core.into()).unwrap_or(i32::MAX),
             server_port: conf.http_port,
             ctrl_port: conf.ctrl_port,
             max_open_sockets: conf.max_open_sockets as _,
