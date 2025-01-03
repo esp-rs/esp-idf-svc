@@ -599,14 +599,33 @@ impl EspNetif {
         Ok(())
     }
 
+    /// Enables or disables NAPT on this netif.
+    ///
+    /// Enable operation can be performed only on one interface at a time.
+    /// NAPT cannot be enabled on multiple interfaces according to this implementation.
     #[cfg(esp_idf_lwip_ipv4_napt)]
-    pub fn enable_napt(&mut self, enable: bool) {
+    pub fn enable_napt(&mut self, enable: bool) -> Result<(), EspError> {
+        unsafe extern "C" fn napt_wrapper(ctx: *mut ffi::c_void) -> i32 {
+            let ctx = unsafe { *(ctx as *mut (u8, i32)) };
+
+            ip_napt_enable_no(ctx.0, ctx.1);
+
+            0
+        }
+
         unsafe {
-            crate::sys::ip_napt_enable_no(
+            let ctx = (
                 (esp_netif_get_netif_impl_index(self.handle) - 1) as u8,
                 if enable { 1 } else { 0 },
-            )
-        };
+            );
+
+            esp!(esp_netif_tcpip_exec(
+                Some(napt_wrapper),
+                &ctx as *const _ as *mut _
+            ))?;
+        }
+
+        Ok(())
     }
 }
 
