@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Crash when enabling napt in EspNetif (#545)
 
+### Added
+- New example, `wifi_dhcp_with_hostname` to demonstrate setting a custom hostname when establishing a DHCP connection
+
+## [0.50.1] - 2025-01-06
+### Fixed
+- Fix ambiguous name error (a compilation issue when the NimBLE component is enabled in esp-idf-sys)
+
 ## [0.50.0] - 2025-01-02
 
 ### Deprecated
