@@ -1,0 +1,24 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="@brief esp_bt_mem_release release controller memory and BSS and data section of the BT/BLE host stack as per the mode"><title>esp_bt_mem_release in esp_idf_sys - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="esp_idf_sys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (8361aef0d 2025-01-14)" data-channel="nightly" data-search-js="search-75f5ac3e.js" data-settings-js="settings-0f613d39.js" ><script src="../static.files/storage-59e33391.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../esp_idf_sys/index.html">esp_<wbr>idf_<wbr>sys</a><span class="version">0.36.1</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><span class="rustdoc-breadcrumbs"><a href="index.html">esp_idf_sys</a></span><h1>Function <span class="fn">esp_bt_mem_release</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/esp_idf_sys/home/runner/work/esp-idf-svc/esp-idf-svc/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys-ae6cbb6b4646f16c/out/bindings.rs.html#90122">Source</a> </span></div><pre class="rust item-decl"><code>pub unsafe extern &quot;C&quot; fn esp_bt_mem_release(
+    mode: <a class="type" href="type.esp_bt_mode_t.html" title="type esp_idf_sys::esp_bt_mode_t">esp_bt_mode_t</a>,
+) -&gt; <a class="type" href="type.esp_err_t.html" title="type esp_idf_sys::esp_err_t">esp_err_t</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>@brief esp_bt_mem_release
+release controller memory and BSS and data section of the BT/BLE host stack as per the mode</p>
+<p>This function first releases controller memory by internally calling esp_bt_controller_mem_release().
+Additionally, if the mode is set to ESP_BT_MODE_BTDM, it also releases the BSS and data consumed by the BT/BLE host stack to heap</p>
+<p>Note that once BT memory is released, the process cannot be reversed. It means you cannot use the bluetooth
+mode which you have released by this function.</p>
+<p>If your firmware will later upgrade the Bluetooth controller mode (BLE -&gt; BT Classic or disabled -&gt; enabled)
+then do not call this function.</p>
+<p>If you never intend to use bluetooth in a current boot-up cycle, you can call esp_bt_mem_release(ESP_BT_MODE_BTDM)
+before esp_bt_controller_init or after esp_bt_controller_deinit.</p>
+<p>For example, if a user only uses bluetooth for setting the WiFi configuration, and does not use bluetooth in the rest of the product operation“.
+In such cases, after receiving the WiFi configuration, you can disable/deinit bluetooth and release its memory.
+Below is the sequence of APIs to be called for such scenarios:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code> esp_bluedroid_disable();
+ esp_bluedroid_deinit();
+ esp_bt_controller_disable();
+ esp_bt_controller_deinit();
+ esp_bt_mem_release(ESP_BT_MODE_BTDM);</code></pre></div>
+<p>@param mode : the mode whose memory is to be released
+@return ESP_OK - success, other - failed</p>
+</div></details></section></div></main></body></html>

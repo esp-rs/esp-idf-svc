@@ -1,0 +1,35 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Sets the rx-on-when-idle state to the radio platform."><title>otPlatRadioSetRxOnWhenIdle in esp_idf_sys - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="esp_idf_sys" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0-nightly (8361aef0d 2025-01-14)" data-channel="nightly" data-search-js="search-75f5ac3e.js" data-settings-js="settings-0f613d39.js" ><script src="../static.files/storage-59e33391.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../esp_idf_sys/index.html">esp_<wbr>idf_<wbr>sys</a><span class="version">0.36.1</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><span class="rustdoc-breadcrumbs"><a href="index.html">esp_idf_sys</a></span><h1>Function <span class="fn">otPlatRadioSetRxOnWhenIdle</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/esp_idf_sys/home/runner/work/esp-idf-svc/esp-idf-svc/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys-ae6cbb6b4646f16c/out/bindings.rs.html#32995">Source</a> </span></div><pre class="rust item-decl"><code>pub unsafe extern &quot;C&quot; fn otPlatRadioSetRxOnWhenIdle(
+    aInstance: *mut <a class="struct" href="struct.otInstance.html" title="struct esp_idf_sys::otInstance">otInstance</a>,
+    aEnable: bool,
+)</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Sets the rx-on-when-idle state to the radio platform.</p>
+<p>There are a few situations that the radio can enter sleep state if the device is in rx-off-when-idle state but
+it’s hard and costly for the SubMac to identify these situations and instruct the radio to enter sleep:</p>
+<ul>
+<li>Finalization of a regular frame reception task, provided that:
+<ul>
+<li>The frame is received without errors and passes the filtering and it’s not an spurious ACK.</li>
+<li>ACK is not requested or transmission of ACK is not possible due to internal conditions.</li>
+</ul>
+</li>
+<li>Finalization of a frame transmission or transmission of an ACK frame, when ACK is not requested in the transmitted
+frame.</li>
+<li>Finalization of the reception operation of a requested ACK due to:
+<ul>
+<li>ACK timeout expiration.</li>
+<li>Reception of an invalid ACK or not an ACK frame.</li>
+<li>Reception of the proper ACK, unless the transmitted frame was a Data Request Command and the frame pending bit
+on the received ACK is set to true. In this case the radio platform implementation SHOULD keep the receiver on
+until a determined timeout which triggers an idle period start.<code>OPENTHREAD_CONFIG_MAC_DATA_POLL_TIMEOUT</code> can be
+taken as a reference for this.</li>
+</ul>
+</li>
+<li>Finalization of a stand alone CCA task.</li>
+<li>Finalization of a CCA operation with busy result during CSMA/CA procedure.</li>
+<li>Finalization of an Energy Detection task.</li>
+<li>Finalization of a radio reception window scheduled with <code>otPlatRadioReceiveAt</code>.</li>
+</ul>
+<p>If a platform supports <code>OT_RADIO_CAPS_RX_ON_WHEN_IDLE</code> it must also support <code>OT_RADIO_CAPS_CSMA_BACKOFF</code> and handle
+idle periods after CCA as described above.</p>
+<p>@param[in]  aInstance    The OpenThread instance structure.
+@param[in]  aEnable      TRUE to keep radio in Receive state, FALSE to put to Sleep state during idle periods.</p>
+</div></details></section></div></main></body></html>

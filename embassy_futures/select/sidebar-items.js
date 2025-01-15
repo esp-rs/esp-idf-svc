@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Either","Either3","Either4"],"fn":["select","select3","select4","select_array","select_slice"],"struct":["Select","Select3","Select4","SelectArray","SelectSlice"]};
