@@ -30,9 +30,11 @@ use esp_idf_svc::{
 
 use log::{error, info};
 
+const VERSION: &str = "1.0.0"; // You can pull this from an environment variable at build time using env! macro.
+const OTA_FIRMWARE_URI: &str = "http://your.domain/path/to/firmware";
+
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
-const OTA_FIRMWARE_URI: &str = env!("OTA_FIRMWARE_URI");
 
 mod http_status {
     pub const OK: u16 = 200;
@@ -89,7 +91,10 @@ fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Resu
         .request(
             Method::Get,
             OTA_FIRMWARE_URI,
-            &[("Accept", "application/octet-stream")],
+            &[
+                ("Accept", "application/octet-stream"),
+                ("X-Esp32-Version", VERSION),
+            ],
         )
         .context("failed to create update request")?;
     let response = request.submit().context("failed to send update request")?;
