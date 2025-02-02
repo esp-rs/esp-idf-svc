@@ -4,6 +4,34 @@
 //! received while the normal firmware is running (for example, over Wi-Fi or
 //! Bluetooth.)
 //!
+//! # Requirements
+//!
+//! OTA updates needs a different partition table than the default one. For being able to update
+//! the firmware while running, we need to have at least 2 OTA partitions. Learn more about
+//! partition tables on [esp-idf documentation](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/kconfig.html#config-partition-table-type).
+//!
+//! To use a different partition than the default, you should create a CSV file (or download one
+//! from [the esp-idf repository](https://github.com/espressif/esp-idf/tree/master/components/partition_table)).
+//! For example, you can use this partition table that defines 2 OTA partitions of 1,7Mb:
+//!
+//! ```
+//! nvs,      data, nvs,     ,        0x6000,
+//! otadata,  data, ota,     ,        0x2000,
+//! phy_init, data, phy,     ,        0x1000,
+//! ota_0,    app,  ota_0,   ,        1700K,
+//! ota_1,    app,  ota_1,   ,        1700K,
+//! ```
+//!
+//! Then, configure `espflash` to use this partition table by creating an `espflash.toml`:
+//!
+//! ```
+//! partition_table = "./partition-table.csv"
+//! ```
+//!
+//! Once an OTA update have been done, the ESP will continue to boot on the second OTA partition.
+//! You can reset the booting partition by using the `--erase-parts otadata` option of `espflash`.
+//! Add it to the `runner` command in your project `.cargo/config.yml` file.
+//!
 //! # Examples
 //!
 //! The following example shows approximate steps for performing an OTA update.
