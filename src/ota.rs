@@ -32,6 +32,17 @@
 //! You can reset the booting partition by using the `--erase-parts otadata` option of `espflash`.
 //! Add it to the `runner` command in your project `.cargo/config.yml` file.
 //!
+//! # Rollback
+//!
+//! Once an OTA update happened and the ESP reboots, you have the opportunity to mark the new
+//! firmware has valid, or rollback to a previously working firmware.
+//!
+//! By default, a new firmware will continue to be selected by the bootloader until it is explicitly
+//! marked as invalid. You can change this behavior by setting the
+//! `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` option. When enabled, if a reset happen before the
+//! firmware is marked as valid, the bootloader will automatically rollback to the previous valid
+//! firmware.
+//!
 //! # Examples
 //!
 //! The following example shows approximate steps for performing an OTA update.

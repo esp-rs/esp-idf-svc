@@ -28,6 +28,7 @@ use esp_idf_svc::{
     ota::{EspOta, SlotState},
 };
 
+use esp_idf_sys::esp_app_desc;
 use log::{error, info};
 
 const VERSION: &str = "1.0.0"; // You can pull this from an environment variable at build time using env! macro.
@@ -35,6 +36,9 @@ const OTA_FIRMWARE_URI: &str = "http://your.domain/path/to/firmware";
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
+
+// Add package metadata from Cargo.toml. This will be use to determine running firmware version.
+esp_app_desc!();
 
 mod http_status {
     pub const OK: u16 = 200;
@@ -62,12 +66,20 @@ fn main() -> anyhow::Result<()> {
 
     check_for_updates(&mut client)?;
 
-    check_valid_state();
+    // Once an OTA update happened, you have the opportunity to validate that the new firmware is
+    // working as expected, and rollback if it's not the case.
+    //
+    // By default, a firmware will continue to boot until it is marked as invalid.
+    // You can change this behavior by setting the `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` option.
+    // When enabled, if a reset happen before the firmware have been marked valid, the bootloader
+    // will automatically rollback to the previous valid firmware. This is recommended to limit the
+    // risk of loosing access the device and requiring a manual flash to fix it.
+    check_firmware_is_valid();
 
     Ok(())
 }
 
-fn check_valid_state() -> anyhow::Result<()> {
+fn check_firmware_is_valid() -> anyhow::Result<()> {
     let mut ota = EspOta::new()?;
 
     if ota.get_running_slot()?.state != SlotState::Valid {
@@ -87,15 +99,14 @@ fn check_valid_state() -> anyhow::Result<()> {
 }
 
 fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
+    let current_version = std::str::from_utf8(&esp_app_desc.version)
+        .context("failed to parse version from package metadata")?;
+    let headers = [
+        ("Accept", "application/octet-stream"),
+        ("X-Esp32-Version", current_version),
+    ];
     let request = client
-        .request(
-            Method::Get,
-            OTA_FIRMWARE_URI,
-            &[
-                ("Accept", "application/octet-stream"),
-                ("X-Esp32-Version", VERSION),
-            ],
-        )
+        .request(Method::Get, OTA_FIRMWARE_URI, &headers)
         .context("failed to create update request")?;
     let response = request.submit().context("failed to send update request")?;
 
