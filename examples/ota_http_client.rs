@@ -66,6 +66,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut client = HttpClient::wrap(EspHttpConnection::new(&Default::default())?);
 
+    // Check for available updates. This function reboots the ESP once update is complete.
     check_for_updates(&mut client)?;
 
     // Once an OTA update happened, you have the opportunity to validate that the new firmware is
@@ -83,8 +84,16 @@ fn main() -> anyhow::Result<()> {
 
 fn check_firmware_is_valid() -> anyhow::Result<()> {
     let mut ota = EspOta::new()?;
+    let running_slot = ota.get_running_slot()?;
 
-    if ota.get_running_slot()?.state != SlotState::Valid {
+    // Factory Reset slots should not be marked. Trying to mark it will not crash but will display
+    // some errors in the logs.
+    if running_slot.state == SlotState::Factory {
+        info!("Factory slot can't be marked");
+        return Ok(());
+    }
+
+    if running_slot.state != SlotState::Valid {
         let is_app_valid = true;
 
         // Do the necessary checks to validate that your app is working as expected.
