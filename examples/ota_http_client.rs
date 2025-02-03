@@ -15,12 +15,14 @@
 //! After a successful OTA update, you will need to reset the `otadata` partition. Otherwise, the ESP
 //! will continue to boot on the second partition, while `cargo run` is flashing the first one by default.
 //! To reset the `otadata` partition, add `--erase-parts otadata` to the runner command in `.cargo/config.toml`.
+#![allow(unexpected_cfgs)]
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use embedded_svc::http::client::Client as HttpClient;
-use esp_idf_svc::http::client::{EspHttpConnection, Method};
+use esp_idf_svc::http::client::{EspHttpConnection, Method, Response};
 use esp_idf_svc::io;
 use esp_idf_svc::log::EspLogger;
+use esp_idf_svc::ota::{EspFirmwareInfoLoad, EspOtaUpdate, FirmwareInfo};
 use esp_idf_svc::wifi::{BlockingWifi, ClientConfiguration, Configuration, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 use esp_idf_svc::{
@@ -37,7 +39,7 @@ const OTA_FIRMWARE_URI: &str = "http://your.domain/path/to/firmware";
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
 
-// Add package metadata from Cargo.toml. This will be use to determine running firmware version.
+// Add package metadata from Cargo.toml. that will be used to create the App Image and used for OTA.
 esp_app_desc!();
 
 mod http_status {
@@ -98,12 +100,17 @@ fn check_firmware_is_valid() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
-    let current_version = std::str::from_utf8(&esp_app_desc.version)
-        .context("failed to parse version from package metadata")?;
+pub fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Result<()> {
+    let mut ota = EspOta::new().context("failed to obtain OTA instance")?;
+
+    let current_version = get_running_version(&ota)?;
+    info!("Current version: {current_version}");
+
+    info!("Checking for updates...");
+
     let headers = [
         ("Accept", "application/octet-stream"),
-        ("X-Esp32-Version", current_version),
+        ("X-Esp32-Version", &current_version),
     ];
     let request = client
         .request(Method::Get, OTA_FIRMWARE_URI, &headers)
@@ -114,13 +121,9 @@ fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Resu
         info!("Already up to date");
     } else if response.status() == http_status::OK {
         info!("An update is available, updating...");
-        let mut ota = EspOta::new().context("failed to obtain OTA instance")?;
-
         let mut update = ota.initiate_update().context("failed to initiate update")?;
 
-        match io::utils::copy(response, &mut update, &mut [0; 1024])
-            .context("failed to download update")
-        {
+        match download_update(response, &mut update).context("failed to download update") {
             Ok(_) => {
                 info!("Update done. Restarting...");
                 update.complete().context("failed to complete update")?;
@@ -134,6 +137,53 @@ fn check_for_updates(client: &mut HttpClient<EspHttpConnection>) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+fn download_update(
+    mut response: Response<&mut EspHttpConnection>,
+    update: &mut EspOtaUpdate<'_>,
+) -> anyhow::Result<()> {
+    let mut buffer = [0 as u8; 1024];
+
+    // You can optionally read the firmware metadata header.
+    // It contains information like version and signature you can check before continuing the update
+    let update_info = read_firmware_info(&mut buffer, &mut response, update)?;
+    info!("Update version: {}", update_info.version);
+
+    io::utils::copy(response, update, &mut buffer)?;
+
+    Ok(())
+}
+
+fn read_firmware_info(
+    buffer: &mut [u8],
+    response: &mut Response<&mut EspHttpConnection>,
+    update: &mut EspOtaUpdate,
+) -> anyhow::Result<FirmwareInfo> {
+    let update_info_load = EspFirmwareInfoLoad {};
+    let mut update_info = FirmwareInfo {
+        version: Default::default(),
+        released: Default::default(),
+        description: Default::default(),
+        signature: Default::default(),
+        download_id: Default::default(),
+    };
+
+    loop {
+        let n = response.read(buffer)?;
+        update.write(&buffer[0..n])?;
+        if update_info_load.fetch(&buffer[0..n], &mut update_info)? {
+            return Ok(update_info);
+        }
+    }
+}
+
+fn get_running_version(ota: &EspOta) -> anyhow::Result<heapless::String<24>> {
+    Ok(ota
+        .get_running_slot()?
+        .firmware
+        .ok_or(anyhow!("missing firmware info for running slot"))?
+        .version)
 }
 
 fn connect_wifi(wifi: &mut BlockingWifi<EspWifi<'static>>) -> anyhow::Result<()> {
