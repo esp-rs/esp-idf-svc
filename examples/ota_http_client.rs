@@ -77,6 +77,10 @@ fn main() -> anyhow::Result<()> {
     // When enabled, if a reset happen before the firmware have been marked valid, the bootloader
     // will automatically rollback to the previous valid firmware. This is recommended to limit the
     // risk of loosing access the device and requiring a manual flash to fix it.
+    //
+    // Note: to enable this feature, you need to also flash the bootloader when flashing your image.
+    //       Add `--bootloader ./target/<your arch target>/debug/bootloader.bin` to your runner
+    //       command in `.cargo/config.toml`
     check_firmware_is_valid();
 
     Ok(())

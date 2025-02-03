@@ -43,6 +43,18 @@
 //! firmware is marked as valid, the bootloader will automatically rollback to the previous valid
 //! firmware.
 //!
+//! To enable this option, add this line to your `sdkconfig.defaults` file:
+//! ```
+//! CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+//! ```
+//! Then add `--bootloader ./target/<your arch>/debug/bootloader.bin` option to the `runner` command
+//! of your `.cargo/config.yml` file. For example:
+//!
+//! ```
+//! [target.xtensa-esp32-espidf]
+//! runner = "espflash flash --monitor --erase-parts otadata --bootloader ./target/xtensa-esp32-espidf/debug/bootloader.bin"
+//! ```
+//!
 //! # Examples
 //!
 //! The following example shows approximate steps for performing an OTA update.
