@@ -67,6 +67,7 @@ pub struct MqttClientConfiguration<'a> {
     pub task_stack: usize,
     pub buffer_size: usize,
     pub out_buffer_size: usize,
+    pub outbox_limit: u64,
 
     pub username: Option<&'a str>,
     pub password: Option<&'a str>,
@@ -108,6 +109,7 @@ impl Default for MqttClientConfiguration<'_> {
             task_stack: 0,
             buffer_size: 0,
             out_buffer_size: 0,
+            outbox_limit: 0,
 
             username: None,
             password: None,
@@ -269,6 +271,9 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
                 size: conf.buffer_size as _,
                 out_size: conf.out_buffer_size as _,
                 ..Default::default()
+            },
+            outbox: esp_mqtt_client_config_t_outbox_config_t {
+                limit: conf.outbox_limit,
             },
             ..Default::default()
         };
