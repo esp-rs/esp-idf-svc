@@ -67,7 +67,7 @@ pub struct MqttClientConfiguration<'a> {
     pub task_stack: usize,
     pub buffer_size: usize,
     pub out_buffer_size: usize,
-    pub outbox_limit: u64,
+    pub outbox_limit: Option<u64>,
 
     pub username: Option<&'a str>,
     pub password: Option<&'a str>,
@@ -109,7 +109,7 @@ impl Default for MqttClientConfiguration<'_> {
             task_stack: 0,
             buffer_size: 0,
             out_buffer_size: 0,
-            outbox_limit: 0,
+            outbox_limit: None,
 
             username: None,
             password: None,
@@ -272,9 +272,6 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
                 out_size: conf.out_buffer_size as _,
                 ..Default::default()
             },
-            outbox: esp_mqtt_client_config_t_outbox_config_t {
-                limit: conf.outbox_limit,
-            },
             ..Default::default()
         };
 
@@ -319,6 +316,10 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
                 c_conf.credentials.authentication.key_password = pass.as_ptr() as _;
                 c_conf.credentials.authentication.key_password_len = pass.len() as _;
             }
+        }
+
+        if let Some(outbox_limit) = conf.outbox_limit {
+            c_conf.outbox.limit = outbox_limit;
         }
 
         #[cfg(all(esp_idf_esp_tls_psk_verification, feature = "alloc"))]
