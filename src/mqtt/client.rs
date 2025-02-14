@@ -625,6 +625,10 @@ impl<'a> EspMqttClient<'a> {
         Self::check(unsafe { esp_mqtt_client_set_uri(self.raw_client, uri.as_ptr()) })
     }
 
+    pub fn get_outbox_size(&self) -> i32 {
+        unsafe { esp_mqtt_client_get_outbox_size(self.raw_client) }
+    }
+
     extern "C" fn handle(
         event_handler_arg: *mut c_void,
         _event_base: esp_event_base_t,
