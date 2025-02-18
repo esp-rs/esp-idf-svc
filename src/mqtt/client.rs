@@ -67,7 +67,7 @@ pub struct MqttClientConfiguration<'a> {
     pub task_stack: usize,
     pub buffer_size: usize,
     pub out_buffer_size: usize,
-    pub outbox_limit: Option<u64>,
+    pub outbox_limit: Option<usize>,
 
     pub username: Option<&'a str>,
     pub password: Option<&'a str>,
@@ -319,7 +319,7 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
         }
 
         if let Some(outbox_limit) = conf.outbox_limit {
-            c_conf.outbox.limit = outbox_limit;
+            c_conf.outbox.limit = outbox_limit as _;
         }
 
         #[cfg(all(esp_idf_esp_tls_psk_verification, feature = "alloc"))]
@@ -631,8 +631,10 @@ impl<'a> EspMqttClient<'a> {
         Self::check(unsafe { esp_mqtt_client_set_uri(self.raw_client, uri.as_ptr()) })
     }
 
-    pub fn get_outbox_size(&self) -> i32 {
-        unsafe { esp_mqtt_client_get_outbox_size(self.raw_client) }
+    pub fn get_outbox_size(&self) -> usize {
+        // this is always positive as internally this is converting uint64_t to int (defaults to 0)
+        let outbox_size = unsafe { esp_mqtt_client_get_outbox_size(self.raw_client) };
+        outbox_size.max(0) as usize
     }
 
     extern "C" fn handle(
