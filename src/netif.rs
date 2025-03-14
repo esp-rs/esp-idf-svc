@@ -479,6 +479,30 @@ impl EspNetif {
         }
     }
 
+    pub fn stop_dhcpc(&self) -> Result<(), EspError> {
+        unsafe {
+            esp!(esp_netif_dhcpc_stop(self.handle))?;
+        }
+        Ok(())
+    }
+
+    pub fn start_dhcpc(&self) -> Result<(), EspError> {
+        unsafe {
+            esp!(esp_netif_dhcpc_start(self.handle))?;
+        }
+        Ok(())
+    }
+
+    pub fn set_ip_info(&self, ip_info: ipv4::IpInfo) -> Result<(), EspError> {
+        let esp_ip_info = esp_netif_ip_info_t {
+            gw: Newtype::<esp_ip4_addr_t>::from(ip_info.subnet.gateway).0,
+            ip: Newtype::<esp_ip4_addr_t>::from(ip_info.ip).0,
+            netmask: Newtype::<esp_ip4_addr_t>::from(ip_info.subnet.mask).0,
+        };
+        unsafe { esp!(esp_netif_set_ip_info(self.handle, &esp_ip_info)) }?;
+        Ok(())
+    }
+
     pub fn get_ip_info(&self) -> Result<ipv4::IpInfo, EspError> {
         let mut ip_info = Default::default();
         unsafe { esp!(esp_netif_get_ip_info(self.handle, &mut ip_info)) }?;
