@@ -1,24 +1,20 @@
 use core::cell::UnsafeCell;
-use core::fmt::{self, Debug};
+use core::fmt::{self, Debug, Display, Formatter};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use alloc::boxed::Box;
-use alloc::sync::Arc;
-
-use ::log::info;
-
-use num_enum::TryFromPrimitive;
-
 use crate::hal::modem::BluetoothModemPeripheral;
 use crate::hal::peripheral::Peripheral;
+use ::log::{info, trace};
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use bt_hci::FromHciBytesError;
 
 use crate::private::mutex::{self, Mutex};
 use crate::sys::*;
 
 #[cfg(all(feature = "alloc", esp_idf_comp_nvs_flash_enabled))]
 use crate::nvs::EspDefaultNvsPartition;
-use crate::private::cstr::to_cstring_arg;
 
 extern crate alloc;
 
@@ -32,121 +28,229 @@ pub mod gap;
 #[cfg(all(esp32, esp_idf_bt_classic_enabled, esp_idf_bt_hfp_enable))]
 pub mod hfp;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct BdAddr(esp_bd_addr_t);
+#[cfg(esp_idf_bt_bluedroid_enabled)]
+pub use bluedroid::*;
 
-impl BdAddr {
-    pub const fn raw(&self) -> esp_bd_addr_t {
-        self.0
-    }
+/// includes common bt definitions provided by the bluedroid stack
+#[cfg(esp_idf_bt_bluedroid_enabled)]
+mod bluedroid {
+    use super::*;
+    use crate::private::cstr::to_cstring_arg;
+    use num_enum::TryFromPrimitive;
 
-    pub const fn from_bytes(bytes: [u8; 6]) -> Self {
-        Self(bytes)
-    }
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    #[repr(transparent)]
+    pub struct BdAddr(esp_bd_addr_t);
 
-    pub const fn addr(&self) -> [u8; 6] {
-        self.0
-    }
-}
+    impl BdAddr {
+        pub const fn raw(&self) -> esp_bd_addr_t {
+            self.0
+        }
 
-impl fmt::Display for BdAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
-}
+        pub const fn from_bytes(bytes: [u8; 6]) -> Self {
+            Self(bytes)
+        }
 
-impl From<BdAddr> for esp_bd_addr_t {
-    fn from(value: BdAddr) -> Self {
-        value.0
-    }
-}
-
-impl From<esp_bd_addr_t> for BdAddr {
-    fn from(value: esp_bd_addr_t) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Clone)]
-#[repr(transparent)]
-pub struct BtUuid(esp_bt_uuid_t);
-
-impl BtUuid {
-    pub const fn raw(&self) -> esp_bt_uuid_t {
-        self.0
-    }
-
-    pub const fn uuid16(uuid: u16) -> Self {
-        let esp_uuid = esp_bt_uuid_t {
-            len: 2,
-            uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid16: uuid },
-        };
-
-        Self(esp_uuid)
-    }
-
-    pub const fn uuid32(uuid: u32) -> Self {
-        let esp_uuid = esp_bt_uuid_t {
-            len: 4,
-            uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid32: uuid },
-        };
-
-        Self(esp_uuid)
-    }
-
-    pub const fn uuid128(uuid: u128) -> Self {
-        let esp_uuid = esp_bt_uuid_t {
-            len: 16,
-            uuid: esp_bt_uuid_t__bindgen_ty_1 {
-                uuid128: uuid.to_le_bytes(),
-            },
-        };
-
-        Self(esp_uuid)
-    }
-
-    pub const fn as_bytes(&self) -> &[u8] {
-        match self.0.len {
-            2 => unsafe {
-                core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 2)
-            },
-            4 => unsafe {
-                core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 4)
-            },
-            16 => unsafe { &self.0.uuid.uuid128 },
-            _ => unreachable!(),
+        pub const fn addr(&self) -> [u8; 6] {
+            self.0
         }
     }
-}
 
-impl Debug for BtUuid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BtUuid {{{:?}}}", self.as_bytes())
+    impl fmt::Display for BdAddr {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
+            )
+        }
     }
-}
 
-impl PartialEq for BtUuid {
-    fn eq(&self, other: &BtUuid) -> bool {
-        self.as_bytes() == other.as_bytes()
+    impl From<BdAddr> for esp_bd_addr_t {
+        fn from(value: BdAddr) -> Self {
+            value.0
+        }
     }
-}
 
-impl Eq for BtUuid {}
-
-impl From<BtUuid> for esp_bt_uuid_t {
-    fn from(uuid: BtUuid) -> Self {
-        uuid.0
+    impl From<esp_bd_addr_t> for BdAddr {
+        fn from(value: esp_bd_addr_t) -> Self {
+            Self(value)
+        }
     }
-}
 
-impl From<esp_bt_uuid_t> for BtUuid {
-    fn from(uuid: esp_bt_uuid_t) -> Self {
-        Self(uuid)
+    #[derive(Clone)]
+    #[repr(transparent)]
+    pub struct BtUuid(esp_bt_uuid_t);
+
+    impl BtUuid {
+        pub const fn raw(&self) -> esp_bt_uuid_t {
+            self.0
+        }
+
+        pub const fn uuid16(uuid: u16) -> Self {
+            let esp_uuid = esp_bt_uuid_t {
+                len: 2,
+                uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid16: uuid },
+            };
+
+            Self(esp_uuid)
+        }
+
+        pub const fn uuid32(uuid: u32) -> Self {
+            let esp_uuid = esp_bt_uuid_t {
+                len: 4,
+                uuid: esp_bt_uuid_t__bindgen_ty_1 { uuid32: uuid },
+            };
+
+            Self(esp_uuid)
+        }
+
+        pub const fn uuid128(uuid: u128) -> Self {
+            let esp_uuid = esp_bt_uuid_t {
+                len: 16,
+                uuid: esp_bt_uuid_t__bindgen_ty_1 {
+                    uuid128: uuid.to_le_bytes(),
+                },
+            };
+
+            Self(esp_uuid)
+        }
+
+        pub const fn as_bytes(&self) -> &[u8] {
+            match self.0.len {
+                2 => unsafe {
+                    core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 2)
+                },
+                4 => unsafe {
+                    core::slice::from_raw_parts(&self.0.uuid.uuid128 as *const _ as *const _, 4)
+                },
+                16 => unsafe { &self.0.uuid.uuid128 },
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Debug for BtUuid {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "BtUuid {{{:?}}}", self.as_bytes())
+        }
+    }
+
+    impl PartialEq for BtUuid {
+        fn eq(&self, other: &BtUuid) -> bool {
+            self.as_bytes() == other.as_bytes()
+        }
+    }
+
+    impl Eq for BtUuid {}
+
+    impl From<BtUuid> for esp_bt_uuid_t {
+        fn from(uuid: BtUuid) -> Self {
+            uuid.0
+        }
+    }
+
+    impl From<esp_bt_uuid_t> for BtUuid {
+        fn from(uuid: esp_bt_uuid_t) -> Self {
+            Self(uuid)
+        }
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+    #[repr(u32)]
+    pub enum BtStatus {
+        Success = esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
+        Fail = esp_bt_status_t_ESP_BT_STATUS_FAIL,
+        NotReady = esp_bt_status_t_ESP_BT_STATUS_NOT_READY,
+        NoMem = esp_bt_status_t_ESP_BT_STATUS_NOMEM,
+        Busy = esp_bt_status_t_ESP_BT_STATUS_BUSY,
+        Done = esp_bt_status_t_ESP_BT_STATUS_DONE,
+        Unsupported = esp_bt_status_t_ESP_BT_STATUS_UNSUPPORTED,
+        InvalidParam = esp_bt_status_t_ESP_BT_STATUS_PARM_INVALID,
+        Unhandled = esp_bt_status_t_ESP_BT_STATUS_UNHANDLED,
+        AuthFailure = esp_bt_status_t_ESP_BT_STATUS_AUTH_FAILURE,
+        RemoteDeviceDown = esp_bt_status_t_ESP_BT_STATUS_RMT_DEV_DOWN,
+        AuthRejected = esp_bt_status_t_ESP_BT_STATUS_AUTH_REJECTED,
+        InvalidStaticRandAddr = esp_bt_status_t_ESP_BT_STATUS_INVALID_STATIC_RAND_ADDR,
+        Pending = esp_bt_status_t_ESP_BT_STATUS_PENDING,
+        UnacceptedConnInterval = esp_bt_status_t_ESP_BT_STATUS_UNACCEPT_CONN_INTERVAL,
+        ParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_PARAM_OUT_OF_RANGE,
+        Timeout = esp_bt_status_t_ESP_BT_STATUS_TIMEOUT,
+        UnsupportedPeerLeDataLen = esp_bt_status_t_ESP_BT_STATUS_PEER_LE_DATA_LEN_UNSUPPORTED,
+        UnsupportedControlLeDataLen = esp_bt_status_t_ESP_BT_STATUS_CONTROL_LE_DATA_LEN_UNSUPPORTED,
+        IllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_ERR_ILLEGAL_PARAMETER_FMT,
+        MemoryFull = esp_bt_status_t_ESP_BT_STATUS_MEMORY_FULL,
+        EirTooLarge = esp_bt_status_t_ESP_BT_STATUS_EIR_TOO_LARGE,
+        HciSuccess = esp_bt_status_t_ESP_BT_STATUS_HCI_SUCCESS,
+        HciIllegalCommand = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_COMMAND,
+        HciNoConnection = esp_bt_status_t_ESP_BT_STATUS_HCI_NO_CONNECTION,
+        HciHwFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_HW_FAILURE,
+        HciPageTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_PAGE_TIMEOUT,
+        HciAuthFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_AUTH_FAILURE,
+        HciKeyMissing = esp_bt_status_t_ESP_BT_STATUS_HCI_KEY_MISSING,
+        HciMemoryFull = esp_bt_status_t_ESP_BT_STATUS_HCI_MEMORY_FULL,
+        HciConnTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_TOUT,
+        HciConnectionsExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_CONNECTIONS,
+        HciScosExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_SCOS,
+        HciConnectionExists = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_EXISTS,
+        HciCommandDisallowed = esp_bt_status_t_ESP_BT_STATUS_HCI_COMMAND_DISALLOWED,
+        HciHostResourcesRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_RESOURCES,
+        HciHostSecurityRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_SECURITY,
+        HciHostDevideRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_DEVICE,
+        HciHostTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_TIMEOUT,
+        HciUnsupportedValue = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_VALUE,
+        HciIllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_PARAMETER_FMT,
+        HciPeerUser = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_USER,
+        HciPeerLowResources = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_LOW_RESOURCES,
+        HciPeerPowerOff = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_POWER_OFF,
+        HciConnectionCauseLocalHost = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_CAUSE_LOCAL_HOST,
+        HciRepeatedAttempts = esp_bt_status_t_ESP_BT_STATUS_HCI_REPEATED_ATTEMPTS,
+        HciPairingNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_NOT_ALLOWED,
+        HciUnkownLmpPdu = esp_bt_status_t_ESP_BT_STATUS_HCI_UNKNOWN_LMP_PDU,
+        HciUnsupportedRemFeature = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_REM_FEATURE,
+        HciScoOffsetRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_OFFSET_REJECTED,
+        HciScoInternalRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_INTERVAL_REJECTED,
+        HciScoAirMode = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_AIR_MODE,
+        HciInvalidLmpParam = esp_bt_status_t_ESP_BT_STATUS_HCI_INVALID_LMP_PARAM,
+        HciUnspecified = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSPECIFIED,
+        HciUnsupportedLmpParameters = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_LMP_PARAMETERS,
+        HciRoleChangeNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_CHANGE_NOT_ALLOWED,
+        HciLmpResponseTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_RESPONSE_TIMEOUT,
+        HciLmpErrTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_ERR_TRANS_COLLISION,
+        HciLmpPduNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_PDU_NOT_ALLOWED,
+        HciEntryModeNotAcceptable = esp_bt_status_t_ESP_BT_STATUS_HCI_ENCRY_MODE_NOT_ACCEPTABLE,
+        HciUnitKeyUsed = esp_bt_status_t_ESP_BT_STATUS_HCI_UNIT_KEY_USED,
+        HciUnsupportedQos = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_NOT_SUPPORTED,
+        HciInstantPassed = esp_bt_status_t_ESP_BT_STATUS_HCI_INSTANT_PASSED,
+        HciUnsupportedPairingWithUnitKey =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_WITH_UNIT_KEY_NOT_SUPPORTED,
+        HciDiffTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_DIFF_TRANSACTION_COLLISION,
+        HciUndefined0x2b = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x2B,
+        HciQosInvalidParam = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_UNACCEPTABLE_PARAM,
+        HciQosRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_REJECTED,
+        HciUnsupportedChanClassification =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_CHAN_CLASSIF_NOT_SUPPORTED,
+        HciInsufficientSecurity = esp_bt_status_t_ESP_BT_STATUS_HCI_INSUFFCIENT_SECURITY,
+        HciParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_HCI_PARAM_OUT_OF_RANGE,
+        HciUndefined0x31 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x31,
+        HciRoleSwitchPending = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_PENDING,
+        HciUndefined0x33 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x33,
+        HciReservedSlotViolation = esp_bt_status_t_ESP_BT_STATUS_HCI_RESERVED_SLOT_VIOLATION,
+        HciRoleSwitchFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_FAILED,
+        HciInqRespDataTooLarge = esp_bt_status_t_ESP_BT_STATUS_HCI_INQ_RSP_DATA_TOO_LARGE,
+        HciSimplePairingNotSupported =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_SIMPLE_PAIRING_NOT_SUPPORTED,
+        HciHostBusyPairing = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_BUSY_PAIRING,
+        HciRejNoSuitableChannel = esp_bt_status_t_ESP_BT_STATUS_HCI_REJ_NO_SUITABLE_CHANNEL,
+        HciControllerBusy = esp_bt_status_t_ESP_BT_STATUS_HCI_CONTROLLER_BUSY,
+        HciUnsupportedConnectionInterval = esp_bt_status_t_ESP_BT_STATUS_HCI_UNACCEPT_CONN_INTERVAL,
+        HciDirectedAdvertisingTimeout =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_DIRECTED_ADVERTISING_TIMEOUT,
+        HciConnectionTimeoutDueToMiscFailure =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_TOUT_DUE_TO_MIC_FAILURE,
+        HciConnectionEstablishmentFailed =
+            esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_FAILED_ESTABLISHMENT,
+        HciMacConnectionFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_MAC_CONNECTION_FAILED,
     }
 }
 
@@ -290,99 +394,6 @@ impl BtMode for BtDual {
     fn mode() -> esp_bt_mode_t {
         esp_bt_mode_t_ESP_BT_MODE_BTDM
     }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
-#[repr(u32)]
-pub enum BtStatus {
-    Success = esp_bt_status_t_ESP_BT_STATUS_SUCCESS,
-    Fail = esp_bt_status_t_ESP_BT_STATUS_FAIL,
-    NotReady = esp_bt_status_t_ESP_BT_STATUS_NOT_READY,
-    NoMem = esp_bt_status_t_ESP_BT_STATUS_NOMEM,
-    Busy = esp_bt_status_t_ESP_BT_STATUS_BUSY,
-    Done = esp_bt_status_t_ESP_BT_STATUS_DONE,
-    Unsupported = esp_bt_status_t_ESP_BT_STATUS_UNSUPPORTED,
-    InvalidParam = esp_bt_status_t_ESP_BT_STATUS_PARM_INVALID,
-    Unhandled = esp_bt_status_t_ESP_BT_STATUS_UNHANDLED,
-    AuthFailure = esp_bt_status_t_ESP_BT_STATUS_AUTH_FAILURE,
-    RemoteDeviceDown = esp_bt_status_t_ESP_BT_STATUS_RMT_DEV_DOWN,
-    AuthRejected = esp_bt_status_t_ESP_BT_STATUS_AUTH_REJECTED,
-    InvalidStaticRandAddr = esp_bt_status_t_ESP_BT_STATUS_INVALID_STATIC_RAND_ADDR,
-    Pending = esp_bt_status_t_ESP_BT_STATUS_PENDING,
-    UnacceptedConnInterval = esp_bt_status_t_ESP_BT_STATUS_UNACCEPT_CONN_INTERVAL,
-    ParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_PARAM_OUT_OF_RANGE,
-    Timeout = esp_bt_status_t_ESP_BT_STATUS_TIMEOUT,
-    UnsupportedPeerLeDataLen = esp_bt_status_t_ESP_BT_STATUS_PEER_LE_DATA_LEN_UNSUPPORTED,
-    UnsupportedControlLeDataLen = esp_bt_status_t_ESP_BT_STATUS_CONTROL_LE_DATA_LEN_UNSUPPORTED,
-    IllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_ERR_ILLEGAL_PARAMETER_FMT,
-    MemoryFull = esp_bt_status_t_ESP_BT_STATUS_MEMORY_FULL,
-    EirTooLarge = esp_bt_status_t_ESP_BT_STATUS_EIR_TOO_LARGE,
-    HciSuccess = esp_bt_status_t_ESP_BT_STATUS_HCI_SUCCESS,
-    HciIllegalCommand = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_COMMAND,
-    HciNoConnection = esp_bt_status_t_ESP_BT_STATUS_HCI_NO_CONNECTION,
-    HciHwFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_HW_FAILURE,
-    HciPageTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_PAGE_TIMEOUT,
-    HciAuthFailure = esp_bt_status_t_ESP_BT_STATUS_HCI_AUTH_FAILURE,
-    HciKeyMissing = esp_bt_status_t_ESP_BT_STATUS_HCI_KEY_MISSING,
-    HciMemoryFull = esp_bt_status_t_ESP_BT_STATUS_HCI_MEMORY_FULL,
-    HciConnTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_TOUT,
-    HciConnectionsExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_CONNECTIONS,
-    HciScosExhausted = esp_bt_status_t_ESP_BT_STATUS_HCI_MAX_NUM_OF_SCOS,
-    HciConnectionExists = esp_bt_status_t_ESP_BT_STATUS_HCI_CONNECTION_EXISTS,
-    HciCommandDisallowed = esp_bt_status_t_ESP_BT_STATUS_HCI_COMMAND_DISALLOWED,
-    HciHostResourcesRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_RESOURCES,
-    HciHostSecurityRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_SECURITY,
-    HciHostDevideRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_REJECT_DEVICE,
-    HciHostTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_TIMEOUT,
-    HciUnsupportedValue = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_VALUE,
-    HciIllegalParamFormat = esp_bt_status_t_ESP_BT_STATUS_HCI_ILLEGAL_PARAMETER_FMT,
-    HciPeerUser = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_USER,
-    HciPeerLowResources = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_LOW_RESOURCES,
-    HciPeerPowerOff = esp_bt_status_t_ESP_BT_STATUS_HCI_PEER_POWER_OFF,
-    HciConnectionCauseLocalHost = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_CAUSE_LOCAL_HOST,
-    HciRepeatedAttempts = esp_bt_status_t_ESP_BT_STATUS_HCI_REPEATED_ATTEMPTS,
-    HciPairingNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_NOT_ALLOWED,
-    HciUnkownLmpPdu = esp_bt_status_t_ESP_BT_STATUS_HCI_UNKNOWN_LMP_PDU,
-    HciUnsupportedRemFeature = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_REM_FEATURE,
-    HciScoOffsetRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_OFFSET_REJECTED,
-    HciScoInternalRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_INTERVAL_REJECTED,
-    HciScoAirMode = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_AIR_MODE,
-    HciInvalidLmpParam = esp_bt_status_t_ESP_BT_STATUS_HCI_INVALID_LMP_PARAM,
-    HciUnspecified = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSPECIFIED,
-    HciUnsupportedLmpParameters = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_LMP_PARAMETERS,
-    HciRoleChangeNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_CHANGE_NOT_ALLOWED,
-    HciLmpResponseTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_RESPONSE_TIMEOUT,
-    HciLmpErrTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_ERR_TRANS_COLLISION,
-    HciLmpPduNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_LMP_PDU_NOT_ALLOWED,
-    HciEntryModeNotAcceptable = esp_bt_status_t_ESP_BT_STATUS_HCI_ENCRY_MODE_NOT_ACCEPTABLE,
-    HciUnitKeyUsed = esp_bt_status_t_ESP_BT_STATUS_HCI_UNIT_KEY_USED,
-    HciUnsupportedQos = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_NOT_SUPPORTED,
-    HciInstantPassed = esp_bt_status_t_ESP_BT_STATUS_HCI_INSTANT_PASSED,
-    HciUnsupportedPairingWithUnitKey =
-        esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_WITH_UNIT_KEY_NOT_SUPPORTED,
-    HciDiffTransactionCollision = esp_bt_status_t_ESP_BT_STATUS_HCI_DIFF_TRANSACTION_COLLISION,
-    HciUndefined0x2b = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x2B,
-    HciQosInvalidParam = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_UNACCEPTABLE_PARAM,
-    HciQosRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_QOS_REJECTED,
-    HciUnsupportedChanClassification = esp_bt_status_t_ESP_BT_STATUS_HCI_CHAN_CLASSIF_NOT_SUPPORTED,
-    HciInsufficientSecurity = esp_bt_status_t_ESP_BT_STATUS_HCI_INSUFFCIENT_SECURITY,
-    HciParamOutOfRange = esp_bt_status_t_ESP_BT_STATUS_HCI_PARAM_OUT_OF_RANGE,
-    HciUndefined0x31 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x31,
-    HciRoleSwitchPending = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_PENDING,
-    HciUndefined0x33 = esp_bt_status_t_ESP_BT_STATUS_HCI_UNDEFINED_0x33,
-    HciReservedSlotViolation = esp_bt_status_t_ESP_BT_STATUS_HCI_RESERVED_SLOT_VIOLATION,
-    HciRoleSwitchFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_ROLE_SWITCH_FAILED,
-    HciInqRespDataTooLarge = esp_bt_status_t_ESP_BT_STATUS_HCI_INQ_RSP_DATA_TOO_LARGE,
-    HciSimplePairingNotSupported = esp_bt_status_t_ESP_BT_STATUS_HCI_SIMPLE_PAIRING_NOT_SUPPORTED,
-    HciHostBusyPairing = esp_bt_status_t_ESP_BT_STATUS_HCI_HOST_BUSY_PAIRING,
-    HciRejNoSuitableChannel = esp_bt_status_t_ESP_BT_STATUS_HCI_REJ_NO_SUITABLE_CHANNEL,
-    HciControllerBusy = esp_bt_status_t_ESP_BT_STATUS_HCI_CONTROLLER_BUSY,
-    HciUnsupportedConnectionInterval = esp_bt_status_t_ESP_BT_STATUS_HCI_UNACCEPT_CONN_INTERVAL,
-    HciDirectedAdvertisingTimeout = esp_bt_status_t_ESP_BT_STATUS_HCI_DIRECTED_ADVERTISING_TIMEOUT,
-    HciConnectionTimeoutDueToMiscFailure =
-        esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_TOUT_DUE_TO_MIC_FAILURE,
-    HciConnectionEstablishmentFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_FAILED_ESTABLISHMENT,
-    HciMacConnectionFailed = esp_bt_status_t_ESP_BT_STATUS_HCI_MAC_CONNECTION_FAILED,
 }
 
 static MEM_FREED: mutex::Mutex<bool> = mutex::Mutex::new(false);
@@ -702,21 +713,40 @@ where
             ..Default::default()
         };
 
-        info!("Init bluetooth controller");
+        // TODO: find out why last 6 bools in bt_cfg are hidden and check all targets / esp-idf versions
+        #[cfg(esp32c3)]
+        {
+            // documentations says this confis are only used if the BT controller is used in flash only mode
+            bt_cfg.scan_en = true;
+            bt_cfg.master_en = true;
+        }
+
         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
 
         info!("Enable bluetooth controller");
         esp!(unsafe { esp_bt_controller_enable(M::mode()) })?;
 
-        info!("Init bluedroid");
-        esp!(unsafe { esp_bluedroid_init() })?;
+        #[cfg(esp_idf_bt_bluedroid_enabled)]
+        {
+            info!("Init bluedroid");
+            esp!(unsafe { esp_bluedroid_init() })?;
 
-        info!("Enable bluedroid");
-        esp!(unsafe { esp_bluedroid_enable() })?;
+            info!("Enable bluedroid");
+            esp!(unsafe { esp_bluedroid_enable() })?;
+        }
+
+        #[cfg(esp_idf_bt_controller_only)]
+        {
+            let status = unsafe { esp_bt_controller_get_status() };
+            trace!("Ble controller status: {status:?}");
+            init_bt_receive_buffer()?;
+            esp!(unsafe { crate::sys::esp_vhci_host_register_callback(&VHCI_HOST_CALLBACK) })?;
+        }
 
         Ok(())
     }
 
+    #[cfg(esp_idf_bt_bluedroid_enabled)]
     pub fn set_device_name(&self, device_name: &str) -> Result<(), EspError> {
         let device_name = to_cstring_arg(device_name)?;
 
@@ -729,9 +759,20 @@ where
     M: BtMode,
 {
     fn drop(&mut self) {
-        let _ = esp!(unsafe { esp_bluedroid_disable() });
+        #[cfg(esp_idf_bt_bluedroid_enabled)]
+        {
+            let _ = esp!(unsafe { esp_bluedroid_disable() });
 
-        esp!(unsafe { esp_bluedroid_deinit() }).unwrap();
+            esp!(unsafe { esp_bluedroid_deinit() }).unwrap();
+        }
+
+        #[cfg(esp_idf_bt_controller_only)]
+        {
+            // Unclear if the VHCI callbacks also needs to be reset.
+            // E.g if we should call esp_vhci_host_register_callback with null ptr
+            destroy_bt_receive_buffer();
+            reset_notifiers();
+        }
 
         esp!(unsafe { esp_bt_controller_disable() }).unwrap();
 
@@ -741,3 +782,274 @@ where
 
 unsafe impl<M> Send for BtDriver<'_, M> where M: BtMode {}
 unsafe impl<M> Sync for BtDriver<'_, M> where M: BtMode {}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum EspBtError {
+    InitializationFailed,
+    AlreadyInitialized,
+    NotInitialized,
+    InvalidState,
+    IoError(crate::io::ErrorKind),
+    HciByteError(FromHciBytesError),
+    InternalError(EspError),
+}
+
+impl From<EspError> for EspBtError {
+    fn from(error: EspError) -> Self {
+        EspBtError::InternalError(error)
+    }
+}
+
+impl From<EspBtError> for EspError {
+    fn from(e: EspBtError) -> Self {
+        ::log::debug!("Bt error: {e:?}");
+        // Convert to generic error
+        EspError::from_infallible::<ESP_FAIL>()
+    }
+}
+
+impl core::error::Error for EspBtError {}
+
+impl crate::io::Error for EspBtError {
+    fn kind(&self) -> crate::io::ErrorKind {
+        match self {
+            EspBtError::IoError(err) => err.kind(),
+            EspBtError::InternalError(err) => {
+                if err.code() == ESP_ERR_NO_MEM {
+                    crate::io::ErrorKind::OutOfMemory
+                } else {
+                    crate::io::ErrorKind::Other
+                }
+            }
+            _ => crate::io::ErrorKind::Other,
+        }
+    }
+}
+
+impl Display for EspBtError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EspBtError::InternalError(err) => core::fmt::Display::fmt(err, f),
+            EspBtError::HciByteError(err) => err.fmt(f),
+            EspBtError::AlreadyInitialized => write!(f, "AlreadyInit"),
+            EspBtError::InitializationFailed => write!(f, "InitFailed"),
+            EspBtError::NotInitialized => write!(f, "NotInit"),
+            EspBtError::InvalidState => write!(f, "InvalidState"),
+            EspBtError::IoError(err) => err.fmt(f),
+        }
+    }
+}
+
+impl crate::io::ErrorType for BtDriver<'_, Ble> {
+    type Error = EspBtError;
+}
+
+#[cfg(esp_idf_bt_controller_only)]
+use hci::*;
+#[cfg(esp_idf_bt_controller_only)]
+mod hci {
+    use super::*;
+    use crate::hal::task::asynch::Notification;
+    use bt_hci::{
+        transport::{Transport, WithIndicator},
+        ControllerToHostPacket, FromHciBytes, HostToControllerPacket, WriteHci,
+    };
+    use std::ptr;
+    use std::sync::atomic::AtomicPtr;
+
+    use crate::sys::esp_vhci_host_callback;
+
+    use ::log::warn;
+
+    // Maximum PDU is 251 Byte
+    // Assuming 2Mbps PHY
+    // Minimum connection intervall: 7.5ms
+    // Per connection intervall within 150us ifs (interframe spacing) sub packets can be send.
+    // 251 Bytes take 1400us to send @ 2Mbps Phy
+    // 7.5ms ~ (1400us + 150us ifs + 40us rescv +150us ifs) * 4
+    // In other words per connection intervall we will get a maximum of 4 packets (if MTU max is used).
+    const MAX_PDU: usize = 251;
+    const RECEIVE_BUFFER_SIZE: usize = 4 * MAX_PDU;
+
+    const PD_TRUE: BaseType_t = 1;
+    const PD_FALSE: BaseType_t = 0;
+    // In the MessageBuffer api that would be a MessageBufferHandle_t == *mut StreamBufferDef_t
+    static BT_RECEIVE_BUFFER: AtomicPtr<crate::sys::StreamBufferDef_t> =
+        AtomicPtr::new(ptr::null_mut());
+    static HCI_NOTIFER: Notification = Notification::new();
+
+    static HCI_RDY: Notification = Notification::new();
+
+    // Init a SINGELTON buffer, that hold up to RECEIVE_BUFFER_SIZE bytes worth of packets
+    pub(crate) fn init_bt_receive_buffer() -> Result<(), EspBtError> {
+        // check if we already are init
+        if !BT_RECEIVE_BUFFER.load(Ordering::Acquire).is_null() {
+            return Err(EspBtError::AlreadyInitialized);
+        }
+
+        // Bindgen can we have Message Buffer?
+        // Bindgen: We have Message Buffer at home
+
+        // allocates space dynamically up to RECEIVE_BUFFER_SIZE
+        let buffer = unsafe {
+            crate::sys::xStreamBufferGenericCreate(RECEIVE_BUFFER_SIZE, 0, PD_TRUE, None, None)
+        };
+        if buffer.is_null() {
+            return Err(EspBtError::InternalError(EspError::from_infallible::<
+                ESP_ERR_NO_MEM,
+            >()));
+        }
+
+        // assumes init_bt_receive_buffer will not be called concurently.
+        // E.g we do not check again after we first check if we already are init.
+        BT_RECEIVE_BUFFER.store(buffer, Ordering::Release);
+
+        Ok(())
+    }
+
+    pub(crate) fn destroy_bt_receive_buffer() {
+        let buffer = BT_RECEIVE_BUFFER.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !buffer.is_null() {
+            // we reset to check if handels are still held, if we are sure we would not need the check
+            let reset_ok = unsafe { crate::sys::xStreamBufferReset(buffer) };
+            if reset_ok != PD_TRUE {
+                panic!("Failed to reset the stream buffer");
+            }
+            unsafe { crate::sys::vStreamBufferDelete(buffer) };
+        }
+    }
+
+    pub(crate) fn reset_notifiers() {
+        HCI_NOTIFER.reset();
+        HCI_RDY.reset();
+    }
+
+    pub(crate) fn receive_buffer_is_empty(handle: *mut crate::sys::StreamBufferDef_t) -> bool {
+        let is_empty = unsafe { crate::sys::xStreamBufferIsEmpty(handle) };
+        match is_empty {
+            PD_TRUE => true,
+            PD_FALSE => false,
+            _ => unreachable!(),
+        }
+    }
+
+    pub(crate) static VHCI_HOST_CALLBACK: esp_vhci_host_callback = esp_vhci_host_callback {
+        // callback used to notify that the host can send packet to controller
+        notify_host_send_available: Some(controller_rdy_for_packets),
+        // callback used to notify that the controller has a packet for the host
+        notify_host_recv: Some(controller_got_packet_for_host),
+    };
+
+    extern "C" fn controller_rdy_for_packets() {
+        HCI_RDY.notify_lsb();
+    }
+
+    extern "C" fn controller_got_packet_for_host(data: *mut u8, len: u16) -> i32 {
+        let handle = BT_RECEIVE_BUFFER.load(Ordering::Acquire);
+        if handle.is_null() {
+            return -1;
+        }
+        // write without blocking
+        let len_written = unsafe { xStreamBufferSend(handle, data as *const u8 as _, len as _, 0) };
+        if len_written == len.into() {
+            HCI_NOTIFER.notify_lsb();
+            // indicate that we sucsessfully read out the data
+            0
+        } else if len_written != 0 {
+            // edge-case when we partially wrote into StreamBuffer but it could not write everything.
+            // parse_hci should handle this case upstream
+            HCI_NOTIFER.notify_lsb();
+            return -1;
+        } else {
+            // no readout
+            return -1;
+        }
+    }
+
+    fn parse_hci(data: &[u8]) -> Result<Option<ControllerToHostPacket<'_>>, EspBtError> {
+        match ControllerToHostPacket::from_hci_bytes_complete(data) {
+            Ok(packet) => Ok(Some(packet)),
+            Err(e) => {
+                if e == bt_hci::FromHciBytesError::InvalidSize {
+                    use bt_hci::{event::EventPacketHeader, PacketKind};
+
+                    // Some controllers emit a suprious command complete event at startup.
+                    let (kind, data) = PacketKind::from_hci_bytes(data).map_err(|err| {
+                        trace!("[hci] Parsing failed: {:?}", err);
+                        EspBtError::HciByteError(err)
+                    })?;
+                    if kind == PacketKind::Event {
+                        let (header, _) =
+                            EventPacketHeader::from_hci_bytes(data).map_err(|err| {
+                                trace!("[hci] Failed to parse event header: {:?}", err);
+                                EspBtError::HciByteError(err)
+                            })?;
+                        const COMMAND_COMPLETE: u8 = 0x0E;
+                        if header.code == COMMAND_COMPLETE && header.params_len < 4 {
+                            return Ok(None);
+                        }
+                    }
+                }
+                warn!("[hci] error parsing packet: {:?}", e);
+                Err(EspBtError::HciByteError(e))
+            }
+        }
+    }
+
+    impl Transport for BtDriver<'_, Ble> {
+        async fn read<'a>(
+            &self,
+            rx: &'a mut [u8],
+        ) -> Result<ControllerToHostPacket<'a>, Self::Error> {
+            let buffer = BT_RECEIVE_BUFFER.load(Ordering::Acquire);
+            if buffer.is_null() {
+                return Err(EspBtError::NotInitialized);
+            }
+
+            loop {
+                if receive_buffer_is_empty(buffer) {
+                    HCI_NOTIFER.wait().await;
+                }
+
+                // non blocking read
+                let len_received = unsafe {
+                    crate::sys::xStreamBufferReceive(buffer, rx.as_mut_ptr() as _, rx.len(), 0)
+                };
+
+                if len_received == 0 {
+                    log::trace!("[hci] empty StreamBufferReceiver")
+                } else {
+                    // Workaround for borrow checker.
+                    // Safety: we only return a reference to rx once, if parsing is successful.
+                    let rx = unsafe {
+                        &mut *core::ptr::slice_from_raw_parts_mut(rx.as_mut_ptr(), rx.len())
+                    };
+
+                    if let Some(packet) = parse_hci(&rx[..len_received])? {
+                        return Ok(packet);
+                    }
+                }
+            }
+        }
+
+        async fn write<T: HostToControllerPacket>(&self, val: &T) -> Result<(), Self::Error> {
+            let mut buf: [u8; 259] = [0; 259];
+
+            let w = WithIndicator::new(val);
+            w.write_hci(&mut buf[..]).map_err(|err| {
+                log::error!("[hci] error writing to {:?}", err);
+                EspBtError::IoError(crate::io::ErrorKind::WriteZero)
+            })?;
+
+            if unsafe { esp_vhci_host_check_send_available() } {
+                unsafe { crate::sys::esp_vhci_host_send_packet(buf.as_mut_ptr(), w.size() as _) };
+                // wait for controller to be ready, to send packates again
+                HCI_RDY.wait().await;
+                Ok(())
+            } else {
+                // should not be reached since after we call send_packet we wait till we are rdy again
+                Err(EspBtError::InvalidState)
+            }
+        }
+    }
+}
