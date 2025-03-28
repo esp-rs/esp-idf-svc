@@ -394,8 +394,8 @@ impl EspNetif {
     pub fn set_ip_info(&mut self, ip_info: ipv4::IpInfo) -> Result<(), EspError> {
         let raw_ip_info: Newtype<esp_netif_ip_info_t> = ip_info.into();
 
-        unsafe { esp_netif_dhcpc_stop(self.0) }; // ignore error
-        unsafe { esp!(esp_netif_set_ip_info(self.0, &raw_ip_info.0)) }?;
+        unsafe { esp_netif_dhcpc_stop(self.handle) }; // ignore error
+        unsafe { esp!(esp_netif_set_ip_info(self.handle, &raw_ip_info.0)) }?;
         if let Some(dns) = ip_info.dns {
             self.set_dns(dns);
         }
