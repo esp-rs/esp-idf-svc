@@ -331,6 +331,7 @@ where
     }
 }
 
+#[must_use = "Event subscription is unregistered when handle is dropped"]
 pub struct EspSubscription<'a, T>
 where
     T: EspEventLoopType,
@@ -486,6 +487,7 @@ where
     }
 }
 
+#[must_use = "Event loop is deleted when handle is dropped"]
 #[derive(Debug)]
 struct EventLoopHandle<T>(T)
 where
