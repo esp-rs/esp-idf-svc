@@ -487,7 +487,6 @@ where
     }
 }
 
-#[must_use = "Event loop is deleted when handle is dropped"]
 #[derive(Debug)]
 struct EventLoopHandle<T>(T)
 where
