@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     panic!("Use `--features trouble,critical-section` when building this example");
 }
 
-#[cfg(all(not(esp32s2), feature = "experimental", feature = "trouble"))]
+#[cfg(all(not(esp32s2), feature = "critical-section", feature = "trouble"))]
 mod example {
     use bt_hci::controller::ExternalController;
     use esp_idf_hal::peripherals::Peripherals;
