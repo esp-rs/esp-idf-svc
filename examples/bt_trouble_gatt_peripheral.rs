@@ -1,8 +1,38 @@
 #![allow(unexpected_cfgs)]
+//! Example using the embassy trouble BLE Host stack over VHCI
+//! on top of the esp ble controller.
+//!
+//! Build with `--features trouble,critical-section` (for now).
+//!
+//! This examples aims to show how in general the trouble BLE stack
+//! can run ontop of esp-idf-svc. For more examples visit the
+//! trouble git repository https://github.com/embassy-rs/trouble/tree/main/examples
+//!
+//! Note that initializing the stack consumes a lot of memory, so `sdkconfig.defaults` should be carefully configured
+//! to avoid running out of memory.
+//!
+//! Here's a working configuration, but you might need to adjust further to your concrete use-case:
+//!
+//! CONFIG_ESP_MAIN_TASK_STACK_SIZE=50000
+//! CONFIG_BT_ENABLED=y
+//! CONFIG_BT_BLUEDROID_ENABLED=n
+//! CONFIG_BT_CONTROLLER_ONLY=y
+//! CONFIG_BT_CTRL_HCI_MODE_VHCI=y
+//! CONFIG_BT_CONTROLLER_ENABLED=y
+//! CONFIG_BT_CTRL_BLE_SCAN=y
 
 #[cfg(all(not(esp32s2), feature = "experimental", feature = "trouble"))]
 fn main() -> anyhow::Result<()> {
     example::main()
+}
+
+#[cfg(any(esp32s2, not(feature = "critical-section", feature = "trouble")))]
+fn main() -> anyhow::Result<()> {
+    #[cfg(esp32s2)]
+    panic!("ESP32-S2 does not have a BLE radio");
+
+    #[cfg(not(feature = "critical-section", feature = "trouble"))]
+    panic!("Use `--features trouble,critical-section` when building this example");
 }
 
 #[cfg(all(not(esp32s2), feature = "experimental", feature = "trouble"))]

@@ -2,7 +2,7 @@
 //! Example using the embassy trouble BLE Host stack over VHCI
 //! on top of the esp ble controller.
 //!
-//! Build with `--features experimental,trouble,embassy-time-driver` (for now).
+//! Build with `--features trouble,critical-section` (for now).
 //!
 //! This examples aims to show how in general the trouble BLE stack
 //! can run ontop of esp-idf-svc. For more examples visit the
@@ -26,13 +26,13 @@ fn main() -> anyhow::Result<()> {
     example::main()
 }
 
-#[cfg(any(esp32s2, not(feature = "experimental"), not(feature = "trouble")))]
+#[cfg(any(esp32s2, not(feature = "critical-section", feature = "trouble")))]
 fn main() -> anyhow::Result<()> {
     #[cfg(esp32s2)]
     panic!("ESP32-S2 does not have a BLE radio");
 
-    #[cfg(not(feature = "experimental"), not(feature = "trouble"))]
-    panic!("Use `--features experimental,trouble` when building this example");
+    #[cfg(not(feature = "critical-section", feature = "trouble"))]
+    panic!("Use `--features trouble,critical-section` when building this example");
 }
 
 #[cfg(all(not(esp32s2), feature = "experimental", feature = "trouble"))]
