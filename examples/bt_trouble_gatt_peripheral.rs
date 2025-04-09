@@ -31,7 +31,10 @@ fn main() -> anyhow::Result<()> {
     #[cfg(esp32s2)]
     panic!("ESP32-S2 does not have a BLE radio");
 
-    #[cfg(any(not(feature = "critical-section"), not(feature = "trouble")))]
+    #[cfg(all(
+        not(esp32s2),
+        any(not(feature = "critical-section"), not(feature = "trouble"))
+    ))]
     panic!("Use `--features trouble,critical-section` when building this example");
 }
 
