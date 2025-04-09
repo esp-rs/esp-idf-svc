@@ -20,8 +20,8 @@
 //! CONFIG_BT_CTRL_HCI_MODE_VHCI=y
 //! CONFIG_BT_CONTROLLER_ENABLED=y
 //! CONFIG_BT_CTRL_BLE_SCAN=y
-//! 
-//! 
+//!
+//!
 #[cfg(all(not(esp32s2), feature = "critical-section", feature = "trouble"))]
 fn main() -> anyhow::Result<()> {
     example::main()
