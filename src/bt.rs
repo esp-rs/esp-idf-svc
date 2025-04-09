@@ -1,14 +1,13 @@
 use core::cell::UnsafeCell;
-use core::fmt::{self, Debug, Display, Formatter};
+use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::hal::modem::BluetoothModemPeripheral;
 use crate::hal::peripheral::Peripheral;
-use ::log::{info, trace};
+use ::log::info;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
-use bt_hci::FromHciBytesError;
 
 use crate::private::mutex::{self, Mutex};
 use crate::sys::*;
@@ -35,7 +34,6 @@ pub use bluedroid::*;
 #[cfg(esp_idf_bt_bluedroid_enabled)]
 mod bluedroid {
     use super::*;
-    use crate::private::cstr::to_cstring_arg;
     use num_enum::TryFromPrimitive;
 
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -206,7 +204,7 @@ mod bluedroid {
         HciConnectionCauseLocalHost = esp_bt_status_t_ESP_BT_STATUS_HCI_CONN_CAUSE_LOCAL_HOST,
         HciRepeatedAttempts = esp_bt_status_t_ESP_BT_STATUS_HCI_REPEATED_ATTEMPTS,
         HciPairingNotAllowed = esp_bt_status_t_ESP_BT_STATUS_HCI_PAIRING_NOT_ALLOWED,
-        HciUnkownLmpPdu = esp_bt_status_t_ESP_BT_STATUS_HCI_UNKNOWN_LMP_PDU,
+        HciUnknownLmpPdu = esp_bt_status_t_ESP_BT_STATUS_HCI_UNKNOWN_LMP_PDU,
         HciUnsupportedRemFeature = esp_bt_status_t_ESP_BT_STATUS_HCI_UNSUPPORTED_REM_FEATURE,
         HciScoOffsetRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_OFFSET_REJECTED,
         HciScoInternalRejected = esp_bt_status_t_ESP_BT_STATUS_HCI_SCO_INTERVAL_REJECTED,
@@ -714,12 +712,12 @@ where
         };
 
         // TODO: find out why last 6 bools in bt_cfg are hidden and check all targets / esp-idf versions
-        #[cfg(esp32c3)]
-        {
-            // documentations says this confis are only used if the BT controller is used in flash only mode
-            bt_cfg.scan_en = true;
-            bt_cfg.master_en = true;
-        }
+        //#[cfg(esp32c3)]
+        //{
+        //    // documentations says this confis are only used if the BT controller is used in flash only mode
+        //    bt_cfg.scan_en = true;
+        //    bt_cfg.master_en = true;
+        //}
 
         esp!(unsafe { esp_bt_controller_init(&mut bt_cfg) })?;
 
@@ -738,7 +736,7 @@ where
         #[cfg(esp_idf_bt_controller_only)]
         {
             let status = unsafe { esp_bt_controller_get_status() };
-            trace!("Ble controller status: {status:?}");
+            ::log::trace!("Ble controller status: {status:?}");
             init_bt_receive_buffer()?;
             esp!(unsafe { crate::sys::esp_vhci_host_register_callback(&VHCI_HOST_CALLBACK) })?;
         }
@@ -748,6 +746,7 @@ where
 
     #[cfg(esp_idf_bt_bluedroid_enabled)]
     pub fn set_device_name(&self, device_name: &str) -> Result<(), EspError> {
+        use crate::private::cstr::to_cstring_arg;
         let device_name = to_cstring_arg(device_name)?;
 
         esp!(unsafe { esp_bt_dev_set_device_name(device_name.as_ptr()) })
@@ -783,67 +782,6 @@ where
 unsafe impl<M> Send for BtDriver<'_, M> where M: BtMode {}
 unsafe impl<M> Sync for BtDriver<'_, M> where M: BtMode {}
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum EspBtError {
-    InitializationFailed,
-    AlreadyInitialized,
-    NotInitialized,
-    InvalidState,
-    IoError(crate::io::ErrorKind),
-    HciByteError(FromHciBytesError),
-    InternalError(EspError),
-}
-
-impl From<EspError> for EspBtError {
-    fn from(error: EspError) -> Self {
-        EspBtError::InternalError(error)
-    }
-}
-
-impl From<EspBtError> for EspError {
-    fn from(e: EspBtError) -> Self {
-        ::log::debug!("Bt error: {e:?}");
-        // Convert to generic error
-        EspError::from_infallible::<ESP_FAIL>()
-    }
-}
-
-impl core::error::Error for EspBtError {}
-
-impl crate::io::Error for EspBtError {
-    fn kind(&self) -> crate::io::ErrorKind {
-        match self {
-            EspBtError::IoError(err) => err.kind(),
-            EspBtError::InternalError(err) => {
-                if err.code() == ESP_ERR_NO_MEM {
-                    crate::io::ErrorKind::OutOfMemory
-                } else {
-                    crate::io::ErrorKind::Other
-                }
-            }
-            _ => crate::io::ErrorKind::Other,
-        }
-    }
-}
-
-impl Display for EspBtError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            EspBtError::InternalError(err) => core::fmt::Display::fmt(err, f),
-            EspBtError::HciByteError(err) => err.fmt(f),
-            EspBtError::AlreadyInitialized => write!(f, "AlreadyInit"),
-            EspBtError::InitializationFailed => write!(f, "InitFailed"),
-            EspBtError::NotInitialized => write!(f, "NotInit"),
-            EspBtError::InvalidState => write!(f, "InvalidState"),
-            EspBtError::IoError(err) => err.fmt(f),
-        }
-    }
-}
-
-impl crate::io::ErrorType for BtDriver<'_, Ble> {
-    type Error = EspBtError;
-}
-
 #[cfg(esp_idf_bt_controller_only)]
 use hci::*;
 #[cfg(esp_idf_bt_controller_only)]
@@ -854,12 +792,13 @@ mod hci {
         transport::{Transport, WithIndicator},
         ControllerToHostPacket, FromHciBytes, HostToControllerPacket, WriteHci,
     };
-    use std::ptr;
-    use std::sync::atomic::AtomicPtr;
+    use core::fmt::{Display, Formatter};
+    use core::ptr;
+    use core::sync::atomic::AtomicPtr;
 
     use crate::sys::esp_vhci_host_callback;
 
-    use ::log::warn;
+    use ::log::{trace, warn};
 
     // Maximum PDU is 251 Byte
     // Assuming 2Mbps PHY
@@ -892,7 +831,26 @@ mod hci {
 
         // allocates space dynamically up to RECEIVE_BUFFER_SIZE
         let buffer = unsafe {
-            crate::sys::xStreamBufferGenericCreate(RECEIVE_BUFFER_SIZE, 0, PD_TRUE, None, None)
+            #[cfg(any(
+                esp_idf_version_major = "4",
+                all(
+                    esp_idf_version_major = "5",
+                    any(esp_idf_version_minor = "0", esp_idf_version_minor = "1",)
+                )
+            ))]
+            {
+                crate::sys::xStreamBufferGenericCreate(RECEIVE_BUFFER_SIZE, 0, PD_TRUE)
+            }
+            #[cfg(not(any(
+                esp_idf_version_major = "4",
+                all(
+                    esp_idf_version_major = "5",
+                    any(esp_idf_version_minor = "0", esp_idf_version_minor = "1",)
+                )
+            )))]
+            {
+                crate::sys::xStreamBufferGenericCreate(RECEIVE_BUFFER_SIZE, 0, PD_TRUE, None, None)
+            }
         };
         if buffer.is_null() {
             return Err(EspBtError::InternalError(EspError::from_infallible::<
@@ -1051,5 +1009,66 @@ mod hci {
                 Err(EspBtError::InvalidState)
             }
         }
+    }
+
+    #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+    pub enum EspBtError {
+        InitializationFailed,
+        AlreadyInitialized,
+        NotInitialized,
+        InvalidState,
+        IoError(crate::io::ErrorKind),
+        HciByteError(::bt_hci::FromHciBytesError),
+        InternalError(EspError),
+    }
+
+    impl From<EspError> for EspBtError {
+        fn from(error: EspError) -> Self {
+            EspBtError::InternalError(error)
+        }
+    }
+
+    impl From<EspBtError> for EspError {
+        fn from(e: EspBtError) -> Self {
+            ::log::debug!("Bt error: {e:?}");
+            // Convert to generic error
+            EspError::from_infallible::<ESP_FAIL>()
+        }
+    }
+
+    impl core::error::Error for EspBtError {}
+
+    impl crate::io::Error for EspBtError {
+        fn kind(&self) -> crate::io::ErrorKind {
+            match self {
+                EspBtError::IoError(err) => err.kind(),
+                EspBtError::InternalError(err) => {
+                    if err.code() == ESP_ERR_NO_MEM {
+                        crate::io::ErrorKind::OutOfMemory
+                    } else {
+                        crate::io::ErrorKind::Other
+                    }
+                }
+                _ => crate::io::ErrorKind::Other,
+            }
+        }
+    }
+
+    impl Display for EspBtError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            match self {
+                EspBtError::InternalError(err) => core::fmt::Display::fmt(err, f),
+                EspBtError::HciByteError(err) => err.fmt(f),
+                EspBtError::AlreadyInitialized => write!(f, "AlreadyInit"),
+                EspBtError::InitializationFailed => write!(f, "InitFailed"),
+                EspBtError::NotInitialized => write!(f, "NotInit"),
+                EspBtError::InvalidState => write!(f, "InvalidState"),
+                EspBtError::IoError(err) => err.fmt(f),
+            }
+        }
+    }
+
+    impl crate::io::ErrorType for BtDriver<'_, Ble> {
+        type Error = EspBtError;
     }
 }

@@ -128,4 +128,4 @@ jobs:
           ESP_IDF_VERSION: ${{ matrix.idf-version }}
           ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig_trouble.defaults"
           RUSTFLAGS: "${{ !startsWith(matrix.idf-version, 'v4') && '--cfg espidf_time64' || startsWith(matrix.idf-version, 'v4') && '--cfg espidf_time32' }}"
-        run: cargo build  --features trouble,critical-section  --example bt_trouble_gatt_central --example bt_trouble_scan  --features trouble --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo build  --features trouble,critical-section  --example bt_trouble_gatt_central --example bt_trouble_scan  --example bt_trouble_gatt_peripheral --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
