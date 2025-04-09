@@ -106,7 +106,7 @@ jobs:
           ESP_DEVICE_IP: "192.168.1.250"
           GATEWAY_IP: "192.168.1.1"
           GATEWAY_NETMASK: "24"
-        run: cargo clippy --examples --features experimental --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Dwarnings
+        run: cargo clippy --examples --features trouble,critical-section --target ${{ matrix.target }} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Dwarnings
 
       - name: Build | Examples
         if: matrix.target != 'riscv32imac-esp-espidf' || matrix.idf-version != 'v4.4.8'
@@ -119,7 +119,7 @@ jobs:
           ESP_DEVICE_IP: "192.168.1.250"
           GATEWAY_IP: "192.168.1.1"
           GATEWAY_NETMASK: "24"
-        run: cargo build --examples --exclude trouble,critical-section  --exclude bt_trouble_gatt_central --exclude bt_trouble_scan  --features experimental --target ${{ matrix.target}} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
+        run: cargo build --examples --features trouble,critical-section  --exclude bt_trouble_gatt_central --exclude bt_trouble_scan  --exclude bt_trouble_gatt_peripheral --target ${{ matrix.target}} -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort
 
 
       - name: Build | Example Trouble BLE HCI
