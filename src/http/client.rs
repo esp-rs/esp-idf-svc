@@ -86,7 +86,7 @@ pub struct Configuration {
     pub use_global_ca_store: bool,
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut core::ffi::c_void) -> esp_err_t>,
     pub raw_request_body: bool,
-    pub keep_alive_enable: Option<bool>
+    pub keep_alive_enable: Option<bool>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
