@@ -653,7 +653,9 @@ where
     }
 
     pub fn set_encryption(&self, addr: BdAddr, encryption: BleEncryption) -> Result<(), EspError> {
-        esp!(unsafe { esp_ble_set_encryption(&addr.0 as *const _ as *mut _, encryption as u32) })
+        esp!(unsafe {
+            esp_ble_set_encryption(&addr.raw() as *const _ as *mut _, encryption as u32)
+        })
     }
 
     pub fn start_scanning(&self, duration: u32) -> Result<(), EspError> {
@@ -698,7 +700,7 @@ where
                 max_int: (max_int_ms * 100 / 125) as _,
                 latency: (latency_ms / 10) as _,
                 timeout: (timeout_ms / 10) as _,
-                bda: addr.0,
+                bda: addr.raw(),
             } as *const _ as *mut _)
         })
     }

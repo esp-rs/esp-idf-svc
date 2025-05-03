@@ -12,7 +12,7 @@
 //! but also how to broadcast data to all clients that have subscribed to a characteristic, including
 //! handling indication confirmations.
 //!
-//! Note that the Buedroid stack consumes a lot of memory, so `sdkconfig.defaults` should be carefully configured
+//! Note that the Bluedroid stack consumes a lot of memory, so `sdkconfig.defaults` should be carefully configured
 //! to avoid running out of memory.
 //!
 //! Here's a working configuration, but you might need to adjust further to your concrete use-case:

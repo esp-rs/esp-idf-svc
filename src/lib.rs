@@ -26,13 +26,8 @@ extern crate std;
 #[macro_use]
 extern crate alloc;
 
-#[cfg(not(esp32s2))]
-#[cfg(all(
-    esp_idf_bt_enabled,
-    esp_idf_bt_bluedroid_enabled,
-    feature = "alloc",
-    feature = "experimental"
-))]
+#[cfg(all(not(esp32s2), feature = "alloc", feature = "experimental"))]
+#[cfg(any(esp_idf_bt_bluedroid_enabled, esp_idf_bt_controller_only))]
 pub mod bt;
 #[cfg(all(
     not(esp32h2),
