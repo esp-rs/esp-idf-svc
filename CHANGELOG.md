@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix wrong BT configuration version on the c6 (issue #556)
 - Fix inconsistent mutability in NVS (#567)
 - Fix #570 (c_char vs i8 mismatch on newer rustc toolchains)
+- Remove panic of the assert_initial() function in the http client (connection is reset by the esp-idf-sys http client in case of errors)
 
 ### Added
 - OTA: New method - `EspFirmwareInfoLoad::fetch_native` - returning the full native ESP-IDF image descriptor structures
