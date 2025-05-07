@@ -86,6 +86,7 @@ pub struct Configuration {
     pub use_global_ca_store: bool,
     pub crt_bundle_attach: Option<unsafe extern "C" fn(conf: *mut core::ffi::c_void) -> esp_err_t>,
     pub raw_request_body: bool,
+    pub keep_alive_enable: Option<bool>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -136,6 +137,10 @@ impl EspHttpConnection {
 
         if let Some(timeout) = configuration.timeout {
             native_config.timeout_ms = timeout.as_millis() as _;
+        }
+
+        if let Some(keep_alive_enable) = configuration.keep_alive_enable {
+            native_config.keep_alive_enable = keep_alive_enable as _;
         }
 
         if let (Some(cert), Some(private_key)) =
