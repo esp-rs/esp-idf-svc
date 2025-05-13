@@ -2747,8 +2747,8 @@ where
     /// driver posts a Wifi event on the system event loop. The reasoning behind
     /// this is that changes to the state of the Wifi driver are always
     /// accompanied by posting Wifi events.
-    pub async fn wifi_wait<F: FnMut(&mut Self) -> Result<bool, EspError>>(
-        &mut self,
+    pub async fn wifi_wait<F: FnMut(&Self) -> Result<bool, EspError>>(
+        &self,
         mut matcher: F,
         timeout: Option<Duration>,
     ) -> Result<(), EspError> {
@@ -2791,15 +2791,15 @@ where
     }
 
     /// Waits until the underlaying network interface is up.
-    pub async fn wait_netif_up(&mut self) -> Result<(), EspError> {
+    pub async fn wait_netif_up(&self) -> Result<(), EspError> {
         self.ip_wait_while(|this| this.wifi.is_up().map(|s| !s), Some(CONNECT_TIMEOUT))
             .await
     }
 
     /// As [`AsyncWifi::wifi_wait()`], but for `EspWifi` events related to the
     /// IP layer, instead of `WifiDriver` events on the data link layer.
-    pub async fn ip_wait_while<F: FnMut(&mut Self) -> Result<bool, EspError>>(
-        &mut self,
+    pub async fn ip_wait_while<F: FnMut(&Self) -> Result<bool, EspError>>(
+        &self,
         mut matcher: F,
         timeout: Option<core::time::Duration>,
     ) -> Result<(), EspError> {
