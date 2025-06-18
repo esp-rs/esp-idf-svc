@@ -1170,6 +1170,24 @@ impl<'d> WifiDriver<'d> {
         esp!(unsafe { esp_wifi_set_mac(interface.into(), mac.as_ptr() as *mut _) })
     }
 
+    /// Sets the maximum transmission power of WiFi. \
+    /// The `power` unit is 0.25dBm. \
+    /// As per [`crate::sys::esp_wifi_set_max_tx_power`](crate::sys::esp_wifi_set_max_tx_power)
+    pub fn set_max_tx_power(&mut self, power: i8) -> Result<(), EspError> {
+        ::log::debug!("Set tx power to {power}*0.25dBm");
+        esp!(unsafe { esp_wifi_set_max_tx_power(power) })?;
+        Ok(())
+    }
+
+    /// Gets the maximum transmission power of WiFi. \
+    /// The returned `power` unit is 0.25dBm. \
+    /// As per [`crate::sys::esp_wifi_get_max_tx_power`](crate::sys::esp_wifi_get_max_tx_power)
+    pub fn get_max_tx_power(&self) -> Result<i8, EspError> {
+        let mut value = 0_i8;
+        esp!(unsafe { esp_wifi_get_max_tx_power(&mut value) })?;
+        Ok(value)
+    }
+
     /// Enable and start WPS
     pub fn start_wps(&mut self, config: &WpsConfig) -> Result<(), EspError> {
         let config = Newtype::<esp_wps_config_t>::try_from(config)?;
@@ -1803,6 +1821,16 @@ impl<'d> EspWifi<'d> {
     /// As per [`WifiDriver::set_mac()`].
     pub fn set_mac(&mut self, interface: WifiDeviceId, mac: [u8; 6]) -> Result<(), EspError> {
         self.driver_mut().set_mac(interface, mac)
+    }
+
+    /// As per [`WifiDriver::set_max_tx_power()`]
+    pub fn set_max_tx_power(&mut self, power: i8) -> Result<(), EspError> {
+        self.driver_mut().set_max_tx_power(power)
+    }
+
+    /// As per [`WifiDriver::get_max_tx_power()`]
+    pub fn get_max_tx_power(&self) -> Result<i8, EspError> {
+        self.driver().get_max_tx_power()
     }
 
     fn attach_netif(&mut self) -> Result<(), EspError> {
