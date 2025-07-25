@@ -416,14 +416,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
-        let result = unsafe { nvs_get_type(self.1, c_key.as_ptr(), &mut entry_type as *mut _) };
+        let result = self.find_key_type(name)?;
         match result {
-            ESP_OK => Ok(true),
-            ESP_ERR_NVS_NOT_FOUND => Ok(false),
-            err => {
-                esp!(err)?;
-                Ok(false)
-            }
+            Some(_) => Ok(true),
+            None => Ok(false),
         }
     }
 
@@ -435,18 +431,13 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
-        let result = unsafe { nvs_get_type(self.1, c_key.as_ptr(), &mut entry_type as *mut _) };
-
+        let result = self.find_key_type(name)?;
         match result {
-            ESP_OK => Ok(NvsDataType::from(entry_type) == data_type),
-            ESP_ERR_NVS_NOT_FOUND => Ok(false),
-            err => {
-                esp!(err)?;
-                Ok(false)
-            }
+            Some(entry_type) => Ok(entry_type == data_type),
+            None => Ok(false),
         }
     }
-
+           
     pub fn find_key_type(&self, name: &str) -> Result<Option<NvsDataType>, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
