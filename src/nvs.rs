@@ -412,8 +412,6 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
-        let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
-
         let result = self.find_key_type(name)?;
         match result {
             Some(_) => Ok(true),
@@ -453,13 +451,13 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let c_key = to_cstring_arg(name)?;
 
         // nvs_erase_key is not scoped by datatype
-        let result = unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
+        let result = unsafe { nvs_erase_key(self.1, c_key.as_ptr()) };
 
         if result == ESP_ERR_NVS_NOT_FOUND {
             Ok(false)
         } else {
             esp!(result)?;
-            esp!(unsafe { nvs_commit(self.0 .1) })?;
+            esp!(unsafe { nvs_commit(self.1) })?;
 
             Ok(true)
         }
@@ -804,7 +802,7 @@ impl RawHandle for EspNvs<NvsEncrypted> {
     }
 }
 
-impl<T: NvsPartitionId> StorageBase for EspNvs<T> {
+impl<T: NvsPartitionId> StorageBase for EspKeyValueStorage<T> {
     type Error = EspError;
 
     fn contains(&self, name: &str) -> Result<bool, Self::Error> {
@@ -961,7 +959,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut u64value: u_int64_t = 0;
 
         // start by just clearing this key
-        unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
+        unsafe { nvs_erase_key(self.0.1, c_key.as_ptr()) };
 
         if buf.len() < 8 {
             for v in buf.iter().rev() {
