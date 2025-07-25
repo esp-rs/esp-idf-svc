@@ -959,7 +959,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut u64value: u_int64_t = 0;
 
         // start by just clearing this key
-        unsafe { nvs_erase_key(self.0.1, c_key.as_ptr()) };
+        unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
 
         if buf.len() < 8 {
             for v in buf.iter().rev() {
