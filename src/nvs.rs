@@ -100,7 +100,19 @@ pub enum NvsDataType {
 
 impl From<nvs_type_t> for NvsDataType {
     fn from(nvs_type: nvs_type_t) -> Self {
-        nvs_type as _
+        match nvs_type {
+            nvs_type_t_NVS_TYPE_U8 => NvsDataType::U8,
+            nvs_type_t_NVS_TYPE_I8 => NvsDataType::I8,
+            nvs_type_t_NVS_TYPE_U16 => NvsDataType::U16,
+            nvs_type_t_NVS_TYPE_I16 => NvsDataType::I16,
+            nvs_type_t_NVS_TYPE_U32 => NvsDataType::U32,
+            nvs_type_t_NVS_TYPE_I32 => NvsDataType::I32,
+            nvs_type_t_NVS_TYPE_U64 => NvsDataType::U64,
+            nvs_type_t_NVS_TYPE_I64 => NvsDataType::I64,
+            nvs_type_t_NVS_TYPE_STR => NvsDataType::Str,
+            nvs_type_t_NVS_TYPE_BLOB => NvsDataType::Blob,
+            _ => NvsDataType::Any,
+        }
     }
 }
 
