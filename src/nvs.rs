@@ -832,6 +832,10 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         self.len(name).map(|v| v.is_some())
     }
 
+    pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
+        self.0 .remove(name)
+    }
+
     fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
         let c_key = to_cstring_arg(name)?;
 
