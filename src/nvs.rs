@@ -83,6 +83,7 @@ pub struct NvsDefault(());
 pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum NvsDataType {
     U8 = 1,
     I8 = 17,
@@ -99,21 +100,7 @@ pub enum NvsDataType {
 
 impl From<nvs_type_t> for NvsDataType {
     fn from(nvs_type: nvs_type_t) -> Self {
-        match nvs_type {
-            nvs_type_t_NVS_TYPE_U8 => Self::U8,
-            nvs_type_t_NVS_TYPE_I8 => Self::I8,
-            nvs_type_t_NVS_TYPE_U16 => Self::U16,
-            nvs_type_t_NVS_TYPE_I16 => Self::I16,
-            nvs_type_t_NVS_TYPE_U32 => Self::U32,
-            nvs_type_t_NVS_TYPE_I32 => Self::I32,
-            nvs_type_t_NVS_TYPE_U64 => Self::U64,
-            nvs_type_t_NVS_TYPE_I64 => Self::I64,
-            nvs_type_t_NVS_TYPE_STR => Self::Str,
-            nvs_type_t_NVS_TYPE_BLOB => Self::Blob,
-            nvs_type_t_NVS_TYPE_ANY => Self::Any,
-            // In case a new type is added in the future, we halt here to avoid unnoticed issues
-            _ => todo!("Unknown NVS type, defaulting to Any"),
-        }
+        nvs_type as _
     }
 }
 
