@@ -83,6 +83,7 @@ pub struct NvsDefault(());
 
 pub struct EspKeyValueStorage<T>(EspNvs<T>);
 
+#[Derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NvsDataType {
     U8 = 1u8,
     I8 = 17u8,
@@ -421,7 +422,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
             ESP_ERR_NVS_NOT_FOUND => Ok(false),
             err => {
                 esp!(err)?;
-                Ok(false) // This line should never be reached due to esp!() macro
+                Ok(false)
             }
         }
     }
@@ -441,7 +442,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
             ESP_ERR_NVS_NOT_FOUND => Ok(false),
             err => {
                 esp!(err)?;
-                Ok(false) // This line should never be reached due to esp!() macro
+                Ok(false)
             }
         }
     }
@@ -457,7 +458,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 esp!(err)?;
-                Ok(None) // This line should never be reached due to esp!() macro
+                Ok(None)
             }
         }
     }
