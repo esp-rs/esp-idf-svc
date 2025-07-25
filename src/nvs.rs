@@ -840,7 +840,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     }
 
     pub fn partition(&self) -> &EspNvsPartition<T> {
-        &self.0.0
+        &self.0 .0
     }
 
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
@@ -853,13 +853,13 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.0.1, c_key.as_ptr(), &mut value as *mut _) } {
+        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut value as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
                     nvs_get_blob(
-                        self.0.1,
+                        self.0 .1,
                         c_key.as_ptr(),
                         ptr::null_mut(),
                         &mut len as *mut _,
@@ -892,13 +892,13 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut u64value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.0.1, c_key.as_ptr(), &mut u64value as *mut _) } {
+        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut u64value as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
                     nvs_get_blob(
-                        self.0.1,
+                        self.0 .1,
                         c_key.as_ptr(),
                         ptr::null_mut(),
                         &mut len as *mut _,
@@ -914,7 +914,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
                         // fetch value if no error
                         esp!(unsafe {
                             nvs_get_blob(
-                                self.0.1,
+                                self.0 .1,
                                 c_key.as_ptr(),
                                 buf.as_mut_ptr() as *mut _,
                                 &mut len as *mut _,
