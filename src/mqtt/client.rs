@@ -29,6 +29,8 @@ pub use super::*;
 pub enum MqttProtocolVersion {
     V3_1,
     V3_1_1,
+    #[cfg(esp_idf_mqtt_protocol_5)]
+    V5,
 }
 
 impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
@@ -36,6 +38,8 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
         match pv {
             MqttProtocolVersion::V3_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1,
             MqttProtocolVersion::V3_1_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1_1,
+            #[cfg(esp_idf_mqtt_protocol_5)]
+            MqttProtocolVersion::V5 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_5,
         }
     }
 }
