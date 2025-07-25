@@ -80,22 +80,21 @@ pub struct NvsDefault(());
 /// - **Large values (>7 bytes)**: Stored as ESP-IDF blobs
 /// - **Memory efficient**: No unnecessary allocations for small values
 /// - **Flash efficient**: Optimized storage format reduces wear on flash memory
+pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
 
-pub struct EspKeyValueStorage<T>(EspNvs<T>);
-
-#[Derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NvsDataType {
-    U8 = 1u8,
-    I8 = 17u8,
-    U16 = 2u8,
-    I16 = 18u8,
-    U32 = 4u8,
-    I32 = 20u8,
-    U64 = 8u8,
-    I64 = 24u8,
-    Str = 33u8,
-    Blob = 66u8,
-    Any = 255u8,
+    U8 = 1,
+    I8 = 17,
+    U16 = 2,
+    I16 = 18,
+    U32 = 4,
+    I32 = 20,
+    U64 = 8,
+    I64 = 24,
+    Str = 33,
+    Blob = 66,
+    Any = 255,
 }
 
 impl From<nvs_type_t> for NvsDataType {
@@ -413,7 +412,6 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
-        let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
         let result = self.find_key_type(name)?;
@@ -428,9 +426,6 @@ impl<T: NvsPartitionId> EspNvs<T> {
         name: &str,
         data_type: NvsDataType,
     ) -> Result<bool, EspError> {
-        let c_key = to_cstring_arg(name)?;
-        let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
-
         let result = self.find_key_type(name)?;
         match result {
             Some(entry_type) => Ok(entry_type == data_type),
@@ -451,6 +446,22 @@ impl<T: NvsPartitionId> EspNvs<T> {
                 esp!(err)?;
                 Ok(None)
             }
+        }
+    }
+
+    pub fn remove(&self, name: &str) -> Result<bool, EspError> {
+        let c_key = to_cstring_arg(name)?;
+
+        // nvs_erase_key is not scoped by datatype
+        let result = unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
+
+        if result == ESP_ERR_NVS_NOT_FOUND {
+            Ok(false)
+        } else {
+            esp!(result)?;
+            esp!(unsafe { nvs_commit(self.0 .1) })?;
+
+            Ok(true)
         }
     }
 
@@ -805,17 +816,17 @@ impl<T: NvsPartitionId> StorageBase for EspNvs<T> {
     }
 }
 
-impl<T: NvsPartitionId> RawStorage for EspNvs<T> {
+impl<T: NvsPartitionId> RawStorage for EspKeyValueStorage<T> {
     fn len(&self, name: &str) -> Result<Option<usize>, Self::Error> {
-        EspNvs::len(self, name)
+        EspKeyValueStorage::len(self, name)
     }
 
     fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Self::Error> {
-        EspNvs::get_raw(self, name, buf)
+        EspKeyValueStorage::get_raw(self, name, buf)
     }
 
     fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
-        EspNvs::set_raw(self, name, buf)
+        EspKeyValueStorage::set_raw(self, name, buf)
     }
 }
 
@@ -829,27 +840,11 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     }
 
     pub fn partition(&self) -> &EspNvsPartition<T> {
-        &self.0
+        &self.0.0
     }
 
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
         self.len(name).map(|v| v.is_some())
-    }
-
-    pub fn remove(&self, name: &str) -> Result<bool, EspError> {
-        let c_key = to_cstring_arg(name)?;
-
-        // nvs_erase_key is not scoped by datatype
-        let result = unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
-
-        if result == ESP_ERR_NVS_NOT_FOUND {
-            Ok(false)
-        } else {
-            esp!(result)?;
-            esp!(unsafe { nvs_commit(self.0 .1) })?;
-
-            Ok(true)
-        }
     }
 
     fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
@@ -858,13 +853,13 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut value as *mut _) } {
+        match unsafe { nvs_get_u64(self.0.1, c_key.as_ptr(), &mut value as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
                     nvs_get_blob(
-                        self.0 .1,
+                        self.0.1,
                         c_key.as_ptr(),
                         ptr::null_mut(),
                         &mut len as *mut _,
@@ -897,13 +892,13 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         let mut u64value: u_int64_t = 0;
 
         // check for u64 value
-        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut u64value as *mut _) } {
+        match unsafe { nvs_get_u64(self.0.1, c_key.as_ptr(), &mut u64value as *mut _) } {
             ESP_ERR_NVS_NOT_FOUND => {
                 // check for blob value, by getting blob length
                 let mut len = 0;
                 match unsafe {
                     nvs_get_blob(
-                        self.0 .1,
+                        self.0.1,
                         c_key.as_ptr(),
                         ptr::null_mut(),
                         &mut len as *mut _,
@@ -919,7 +914,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
                         // fetch value if no error
                         esp!(unsafe {
                             nvs_get_blob(
-                                self.0 .1,
+                                self.0.1,
                                 c_key.as_ptr(),
                                 buf.as_mut_ptr() as *mut _,
                                 &mut len as *mut _,
