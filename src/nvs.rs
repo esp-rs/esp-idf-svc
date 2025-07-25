@@ -34,37 +34,37 @@ pub struct NvsDefault(());
 
 /// A specialized key-value storage wrapper around `EspNvs` that provides a simplified interface
 /// for storing and retrieving arbitrary data as byte arrays.
-/// 
+///
 /// This struct was introduced to solve issue [#585](https://github.com/esp-rs/esp-idf-svc/issues/585)
 /// where the `contains()` method in `EspNvs` incorrectly returned `false` for string values
 /// that actually existed in NVS partitions. The root cause was that `EspNvs` implements
 /// two different storage strategies:
-/// 
+///
 /// 1. **Native ESP-IDF NVS API**: Direct access to ESP-IDF's native types (u8, u16, u32, u64, i8, i16, i32, i64, str, blob)
 /// 2. **Serialized storage**: Everything stored as either u64 (≤7 bytes) or blob (>7 bytes) for compatibility with serde
-/// 
+///
 /// `EspKeyValueStorage` focuses on the second approach, providing a clean interface for:
 /// - Storing any data that can be represented as `&[u8]`
 /// - Automatic optimization: values ≤7 bytes stored as u64, larger values as blobs
 /// - Consistent `contains()` method that works correctly with this storage strategy
 /// - Full compatibility with Rust serde implementations (postcard, json, etc.)
-/// 
+///
 /// ## Usage
-/// 
+///
 /// ```rust,no_run
 /// use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspKeyValueStorage};
-/// 
+///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let partition = EspDefaultNvsPartition::take()?;
 /// let storage = EspKeyValueStorage::new(partition, "my_namespace", true)?;
-/// 
+///
 /// // Store data as bytes
 /// let data = b"hello world";
 /// storage.set_raw("my_key", data)?;
-/// 
+///
 /// // Check if key exists (this works correctly, unlike the original EspNvs bug)
 /// assert!(storage.contains("my_key")?);
-/// 
+///
 /// // Retrieve data
 /// let mut buffer = [0u8; 64];
 /// if let Some(retrieved) = storage.get_raw("my_key", &mut buffer)? {
@@ -73,9 +73,9 @@ pub struct NvsDefault(());
 /// # Ok(())
 /// # }
 /// ```
-/// 
+///
 /// ## Performance Characteristics
-/// 
+///
 /// - **Small values (≤7 bytes)**: Stored as u64 for efficiency
 /// - **Large values (>7 bytes)**: Stored as ESP-IDF blobs
 /// - **Memory efficient**: No unnecessary allocations for small values
@@ -411,7 +411,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         Ok(Self(partition, handle))
     }
 
-    pub fn contains(&self, name:&str) -> Result<bool, EspError> {
+    pub fn contains(&self, name: &str) -> Result<bool, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
@@ -426,7 +426,11 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
-    pub fn contains_key_of_type(&self, name:&str, data_type: NvsDataType) -> Result<bool, EspError> {
+    pub fn contains_key_of_type(
+        &self,
+        name: &str,
+        data_type: NvsDataType,
+    ) -> Result<bool, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
@@ -822,7 +826,6 @@ impl<T: NvsPartitionId> RawStorage for EspNvs<T> {
         EspNvs::set_raw(self, name, buf)
     }
 }
-
 
 impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     pub fn new(
