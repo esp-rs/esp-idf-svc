@@ -98,6 +98,7 @@ pub enum NvsDataType {
     Any = 255,
 }
 
+#[allow(non_upper_case_globals)]
 impl From<nvs_type_t> for NvsDataType {
     fn from(nvs_type: nvs_type_t) -> Self {
         match nvs_type {
