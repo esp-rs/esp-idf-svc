@@ -806,11 +806,11 @@ impl<T: NvsPartitionId> StorageBase for EspKeyValueStorage<T> {
     type Error = EspError;
 
     fn contains(&self, name: &str) -> Result<bool, Self::Error> {
-        EspNvs::contains(self, name)
+        EspKeyValueStorage::contains(self, name)
     }
 
     fn remove(&mut self, name: &str) -> Result<bool, Self::Error> {
-        EspNvs::remove(self, name)
+        EspKeyValueStorage::remove(self, name)
     }
 }
 
