@@ -437,7 +437,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
             None => Ok(false),
         }
     }
-           
+
     pub fn find_key_type(&self, name: &str) -> Result<Option<NvsDataType>, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
