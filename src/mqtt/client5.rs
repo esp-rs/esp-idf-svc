@@ -1,11 +1,19 @@
-#[cfg(esp_idf_mqtt_protocol_5)]
-
-
-use crate::sys::*;
-
+use std::string::ToString;
+use std::vec::Vec;
 
 #[allow(unused_imports)]
 pub use super::*;
+
+extern crate alloc;
+use alloc::ffi::CString;
+
+use embedded_svc::mqtt::{client::ErrorType, client5::{EventProperty, UserPropertyItem, UserPropertyList}};
+#[allow(unused_imports)]
+use esp_idf_hal::sys::*;
+
+pub struct EspEventProperty{}
+
+pub struct EspUserPropertyList(pub(crate) mqtt5_user_property_handle_t);
 
 /// MQTT5 protocol error reason codes as defined in MQTT5 protocol document section 2.4
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -94,43 +102,90 @@ impl TryFrom<mqtt5_error_reason_code> for ErrorReasonCode {
     type Error = ();
 
     fn try_from(code: mqtt5_error_reason_code) -> Result<Self, Self::Error> {
-
         match code {
-            mqtt5_error_reason_code_MQTT5_UNSPECIFIED_ERROR => Ok(ErrorReasonCode::UnspecifiedError),
+            mqtt5_error_reason_code_MQTT5_UNSPECIFIED_ERROR => {
+                Ok(ErrorReasonCode::UnspecifiedError)
+            }
             mqtt5_error_reason_code_MQTT5_MALFORMED_PACKET => Ok(ErrorReasonCode::MalformedPacket),
             mqtt5_error_reason_code_MQTT5_PROTOCOL_ERROR => Ok(ErrorReasonCode::ProtocolError),
-            mqtt5_error_reason_code_MQTT5_IMPLEMENT_SPECIFIC_ERROR => Ok(ErrorReasonCode::ImplementSpecificError),
-            mqtt5_error_reason_code_MQTT5_UNSUPPORTED_PROTOCOL_VER => Ok(ErrorReasonCode::UnsupportedProtocolVersion),
+            mqtt5_error_reason_code_MQTT5_IMPLEMENT_SPECIFIC_ERROR => {
+                Ok(ErrorReasonCode::ImplementSpecificError)
+            }
+            mqtt5_error_reason_code_MQTT5_UNSUPPORTED_PROTOCOL_VER => {
+                Ok(ErrorReasonCode::UnsupportedProtocolVersion)
+            }
             mqtt5_error_reason_code_MQTT5_INVALID_CLIENT_ID => Ok(ErrorReasonCode::InvalidClientId),
-            mqtt5_error_reason_code_MQTT5_BAD_USERNAME_OR_PWD => Ok(ErrorReasonCode::BadUsernameOrPassword),
+            mqtt5_error_reason_code_MQTT5_BAD_USERNAME_OR_PWD => {
+                Ok(ErrorReasonCode::BadUsernameOrPassword)
+            }
             mqtt5_error_reason_code_MQTT5_NOT_AUTHORIZED => Ok(ErrorReasonCode::NotAuthorized),
-            mqtt5_error_reason_code_MQTT5_SERVER_UNAVAILABLE => Ok(ErrorReasonCode::ServerUnavailable),
+            mqtt5_error_reason_code_MQTT5_SERVER_UNAVAILABLE => {
+                Ok(ErrorReasonCode::ServerUnavailable)
+            }
             mqtt5_error_reason_code_MQTT5_SERVER_BUSY => Ok(ErrorReasonCode::ServerBusy),
             mqtt5_error_reason_code_MQTT5_BANNED => Ok(ErrorReasonCode::Banned),
-            mqtt5_error_reason_code_MQTT5_SERVER_SHUTTING_DOWN => Ok(ErrorReasonCode::ServerShuttingDown),
+            mqtt5_error_reason_code_MQTT5_SERVER_SHUTTING_DOWN => {
+                Ok(ErrorReasonCode::ServerShuttingDown)
+            }
             mqtt5_error_reason_code_MQTT5_BAD_AUTH_METHOD => Ok(ErrorReasonCode::BadAuthMethod),
-            mqtt5_error_reason_code_MQTT5_KEEP_ALIVE_TIMEOUT => Ok(ErrorReasonCode::KeepAliveTimeout),
-            mqtt5_error_reason_code_MQTT5_SESSION_TAKEN_OVER => Ok(ErrorReasonCode::SessionTakenOver),
-            mqtt5_error_reason_code_MQTT5_TOPIC_FILTER_INVALID => Ok(ErrorReasonCode::TopicFilterInvalid),
-            mqtt5_error_reason_code_MQTT5_TOPIC_NAME_INVALID => Ok(ErrorReasonCode::TopicNameInvalid),
-            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_IN_USE => Ok(ErrorReasonCode::PacketIdentifierInUse),
-            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_NOT_FOUND => Ok(ErrorReasonCode::PacketIdentifierNotFound),
-            mqtt5_error_reason_code_MQTT5_RECEIVE_MAXIMUM_EXCEEDED => Ok(ErrorReasonCode::ReceiveMaximumExceeded),
-            mqtt5_error_reason_code_MQTT5_TOPIC_ALIAS_INVALID => Ok(ErrorReasonCode::TopicAliasInvalid),
+            mqtt5_error_reason_code_MQTT5_KEEP_ALIVE_TIMEOUT => {
+                Ok(ErrorReasonCode::KeepAliveTimeout)
+            }
+            mqtt5_error_reason_code_MQTT5_SESSION_TAKEN_OVER => {
+                Ok(ErrorReasonCode::SessionTakenOver)
+            }
+            mqtt5_error_reason_code_MQTT5_TOPIC_FILTER_INVALID => {
+                Ok(ErrorReasonCode::TopicFilterInvalid)
+            }
+            mqtt5_error_reason_code_MQTT5_TOPIC_NAME_INVALID => {
+                Ok(ErrorReasonCode::TopicNameInvalid)
+            }
+            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_IN_USE => {
+                Ok(ErrorReasonCode::PacketIdentifierInUse)
+            }
+            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_NOT_FOUND => {
+                Ok(ErrorReasonCode::PacketIdentifierNotFound)
+            }
+            mqtt5_error_reason_code_MQTT5_RECEIVE_MAXIMUM_EXCEEDED => {
+                Ok(ErrorReasonCode::ReceiveMaximumExceeded)
+            }
+            mqtt5_error_reason_code_MQTT5_TOPIC_ALIAS_INVALID => {
+                Ok(ErrorReasonCode::TopicAliasInvalid)
+            }
             mqtt5_error_reason_code_MQTT5_PACKET_TOO_LARGE => Ok(ErrorReasonCode::PacketTooLarge),
-            mqtt5_error_reason_code_MQTT5_MESSAGE_RATE_TOO_HIGH => Ok(ErrorReasonCode::MessageRateTooHigh),
+            mqtt5_error_reason_code_MQTT5_MESSAGE_RATE_TOO_HIGH => {
+                Ok(ErrorReasonCode::MessageRateTooHigh)
+            }
             mqtt5_error_reason_code_MQTT5_QUOTA_EXCEEDED => Ok(ErrorReasonCode::QuotaExceeded),
-            mqtt5_error_reason_code_MQTT5_ADMINISTRATIVE_ACTION => Ok(ErrorReasonCode::AdministrativeAction),
-            mqtt5_error_reason_code_MQTT5_PAYLOAD_FORMAT_INVALID => Ok(ErrorReasonCode::PayloadFormatInvalid),
-            mqtt5_error_reason_code_MQTT5_RETAIN_NOT_SUPPORT => Ok(ErrorReasonCode::RetainNotSupported),
+            mqtt5_error_reason_code_MQTT5_ADMINISTRATIVE_ACTION => {
+                Ok(ErrorReasonCode::AdministrativeAction)
+            }
+            mqtt5_error_reason_code_MQTT5_PAYLOAD_FORMAT_INVALID => {
+                Ok(ErrorReasonCode::PayloadFormatInvalid)
+            }
+            mqtt5_error_reason_code_MQTT5_RETAIN_NOT_SUPPORT => {
+                Ok(ErrorReasonCode::RetainNotSupported)
+            }
             mqtt5_error_reason_code_MQTT5_QOS_NOT_SUPPORT => Ok(ErrorReasonCode::QosNotSupported),
-            mqtt5_error_reason_code_MQTT5_USE_ANOTHER_SERVER => Ok(ErrorReasonCode::UseAnotherServer),
+            mqtt5_error_reason_code_MQTT5_USE_ANOTHER_SERVER => {
+                Ok(ErrorReasonCode::UseAnotherServer)
+            }
             mqtt5_error_reason_code_MQTT5_SERVER_MOVED => Ok(ErrorReasonCode::ServerMoved),
-            mqtt5_error_reason_code_MQTT5_SHARED_SUBSCR_NOT_SUPPORTED => Ok(ErrorReasonCode::SharedSubscriptionNotSupported),
-            mqtt5_error_reason_code_MQTT5_CONNECTION_RATE_EXCEEDED => Ok(ErrorReasonCode::ConnectionRateExceeded),
-            mqtt5_error_reason_code_MQTT5_MAXIMUM_CONNECT_TIME => Ok(ErrorReasonCode::MaximumConnectTime),
-            mqtt5_error_reason_code_MQTT5_SUBSCRIBE_IDENTIFIER_NOT_SUPPORT => Ok(ErrorReasonCode::SubscribeIdentifierNotSupported),
-            mqtt5_error_reason_code_MQTT5_WILDCARD_SUBSCRIBE_NOT_SUPPORT => Ok(ErrorReasonCode::WildcardSubscriptionNotSupported),
+            mqtt5_error_reason_code_MQTT5_SHARED_SUBSCR_NOT_SUPPORTED => {
+                Ok(ErrorReasonCode::SharedSubscriptionNotSupported)
+            }
+            mqtt5_error_reason_code_MQTT5_CONNECTION_RATE_EXCEEDED => {
+                Ok(ErrorReasonCode::ConnectionRateExceeded)
+            }
+            mqtt5_error_reason_code_MQTT5_MAXIMUM_CONNECT_TIME => {
+                Ok(ErrorReasonCode::MaximumConnectTime)
+            }
+            mqtt5_error_reason_code_MQTT5_SUBSCRIBE_IDENTIFIER_NOT_SUPPORT => {
+                Ok(ErrorReasonCode::SubscribeIdentifierNotSupported)
+            }
+            mqtt5_error_reason_code_MQTT5_WILDCARD_SUBSCRIBE_NOT_SUPPORT => {
+                Ok(ErrorReasonCode::WildcardSubscriptionNotSupported)
+            }
             _ => Err(()),
         }
     }
@@ -144,7 +199,9 @@ impl core::fmt::Display for ErrorReasonCode {
             ErrorReasonCode::MalformedPacket => write!(f, "Malformed packet"),
             ErrorReasonCode::ProtocolError => write!(f, "Protocol error"),
             ErrorReasonCode::ImplementSpecificError => write!(f, "Implementation specific error"),
-            ErrorReasonCode::UnsupportedProtocolVersion => write!(f, "Unsupported protocol version"),
+            ErrorReasonCode::UnsupportedProtocolVersion => {
+                write!(f, "Unsupported protocol version")
+            }
             ErrorReasonCode::InvalidClientId => write!(f, "Invalid client ID"),
             ErrorReasonCode::BadUsernameOrPassword => write!(f, "Bad username or password"),
             ErrorReasonCode::NotAuthorized => write!(f, "Not authorized"),
@@ -170,16 +227,21 @@ impl core::fmt::Display for ErrorReasonCode {
             ErrorReasonCode::QosNotSupported => write!(f, "QoS not supported"),
             ErrorReasonCode::UseAnotherServer => write!(f, "Use another server"),
             ErrorReasonCode::ServerMoved => write!(f, "Server moved"),
-            ErrorReasonCode::SharedSubscriptionNotSupported => write!(f, "Shared subscription not supported"),
+            ErrorReasonCode::SharedSubscriptionNotSupported => {
+                write!(f, "Shared subscription not supported")
+            }
             ErrorReasonCode::ConnectionRateExceeded => write!(f, "Connection rate exceeded"),
             ErrorReasonCode::MaximumConnectTime => write!(f, "Maximum connect time"),
-            ErrorReasonCode::SubscribeIdentifierNotSupported => write!(f, "Subscribe identifier not supported"),
-            ErrorReasonCode::WildcardSubscriptionNotSupported => write!(f, "Wildcard subscription not supported"),
+            ErrorReasonCode::SubscribeIdentifierNotSupported => {
+                write!(f, "Subscribe identifier not supported")
+            }
+            ErrorReasonCode::WildcardSubscriptionNotSupported => {
+                write!(f, "Wildcard subscription not supported")
+            }
         }
     }
 }
 
-#[cfg(esp_idf_mqtt_protocol_5)]
 impl ErrorReasonCode {
     /// Returns the numeric code value for this error reason
     pub fn code(&self) -> u32 {
@@ -205,5 +267,143 @@ impl ErrorReasonCode {
                 | ErrorReasonCode::UseAnotherServer
                 | ErrorReasonCode::ConnectionRateExceeded
         )
+    }
+}
+
+impl EspEventProperty {
+    pub(crate) fn event_property<'a, E>(
+        ptr: *mut esp_mqtt5_event_property_t,
+    ) -> Option<EventProperty<'a, E>>
+    {
+        if ptr.is_null() {
+            None
+        } else {
+            let response_topic = unsafe {
+                let topic = (*ptr).response_topic;
+                if topic.is_null() {
+                    None
+                } else {
+                    Some(
+                        core::ffi::CStr::from_ptr(topic)
+                            .to_str()
+                            .unwrap()
+                    )
+                }
+            };
+            
+            let correlation_data = unsafe {
+                let data = (*ptr).correlation_data;
+                if data.is_null() {
+                    None
+                } else {
+                    Some(core::slice::from_raw_parts(data, (*ptr).correlation_data_len as usize))
+                }
+            };
+            
+            let content_type = unsafe {
+                let content_type = (*ptr).content_type;
+                if content_type.is_null() {
+                    None
+                } else {
+                    Some(
+                        core::ffi::CStr::from_ptr(content_type)
+                            .to_str()
+                            .unwrap()
+                    )
+                }
+            };
+            
+            let subscribe_id = unsafe { (*ptr).subscribe_id };
+            
+            let event_property = EventProperty::new(
+                response_topic,
+                correlation_data,
+                content_type,
+                subscribe_id,
+            );
+            Some(event_property)
+        }
+    }
+    
+}
+
+impl EspUserPropertyList {
+    fn from_ptr(ptr: mqtt5_user_property_handle_t) -> Option<Self> {
+        if ptr.is_null() {
+            None
+        } else {
+            Some(EspUserPropertyList(ptr))
+        }
+    }
+
+    pub(crate) fn as_ptr(&self) -> mqtt5_user_property_handle_t {
+        self.0
+    }
+}
+
+fn to_user_property(item: esp_mqtt5_user_property_item_t) -> UserPropertyItem {
+    let key = unsafe { core::ffi::CStr::from_ptr(item.key) }
+        .to_str()
+        .unwrap()
+        .to_string();
+    let value = unsafe { core::ffi::CStr::from_ptr(item.value) }
+        .to_str()
+        .unwrap()
+        .to_string();
+    UserPropertyItem { key, value }
+}
+
+impl UserPropertyList<EspError> for EspUserPropertyList {
+    fn set_items(&mut self, properties: &[UserPropertyItem]) -> Result<(), EspError> {
+        let mut items: Vec<esp_mqtt5_user_property_item_t> = properties
+            .iter()
+            .map(|item| {
+                let key_cstr = CString::new(item.key.as_str()).unwrap();
+                let value_cstr = CString::new(item.value.as_str()).unwrap();
+
+                let item = esp_mqtt5_user_property_item_t {
+                    key: key_cstr.as_ptr(),
+                    value: value_cstr.as_ptr(),
+                };
+                item
+            })
+            .collect();
+
+        let error = unsafe {
+            let items_ptr = items.as_mut_ptr();
+            let result =
+                esp_mqtt5_client_set_user_property(&mut self.0, items_ptr, items.len() as u8);
+            result
+        };
+        esp!(error)?;
+        Ok(())
+    }
+
+    fn get_items(&self) -> Result<Option<Vec<UserPropertyItem>>, EspError> {
+        let count = unsafe { esp_mqtt5_client_get_user_property_count(self.0) };
+        if count == 0 {
+            return Ok(None);
+        }
+        let mut items: Vec<esp_mqtt5_user_property_item_t> = Vec::with_capacity(count as usize);
+        items.resize_with(count as usize, || esp_mqtt5_user_property_item_t {
+            key: core::ptr::null(),
+            value: core::ptr::null(),
+        });
+        let error = unsafe {
+            esp_mqtt5_client_get_user_property(
+                self.0,
+                items.as_mut_ptr(),
+                &mut items.len() as *mut usize as *mut u8,
+            )
+        };
+        esp!(error)?;
+        let result: Vec<UserPropertyItem> = items.into_iter().map(to_user_property).collect();
+        Ok(Some(result))
+    }
+
+    fn clear(&self) {
+        unsafe {
+            esp_mqtt5_client_delete_user_property(self.0);
+        }
     }
 }
