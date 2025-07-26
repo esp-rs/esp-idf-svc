@@ -1,5 +1,4 @@
 //! Non-Volatile Storage (NVS)
-use core::ops::DerefMut;
 use core::ptr;
 
 extern crate alloc;
