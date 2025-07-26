@@ -411,6 +411,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         Ok(Self(partition, handle))
     }
 
+    #[cfg(all(
+        not(esp_idf_version_major = "4"),
+        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
+    ))]
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
         let result = self.find_key_type(name)?;
         match result {
@@ -419,6 +423,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
+    #[cfg(all(
+        not(esp_idf_version_major = "4"),
+        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
+    ))]
     pub fn contains_key_of_type(
         &self,
         name: &str,
@@ -431,6 +439,10 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
     }
 
+    #[cfg(all(
+        not(esp_idf_version_major = "4"),
+        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
+    ))]
     pub fn find_key_type(&self, name: &str) -> Result<Option<NvsDataType>, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
