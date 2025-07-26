@@ -928,7 +928,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
                 Ok(Some(len as _))
             }
             None => {
-                return self.0.blob_len(name);
+                self.0.blob_len(name)
             }
         }
     }
