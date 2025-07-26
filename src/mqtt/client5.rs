@@ -7,10 +7,7 @@ pub use super::*;
 extern crate alloc;
 use alloc::ffi::CString;
 
-use embedded_svc::mqtt::{
-    client::ErrorType,
-    client5::{EventProperty, UserPropertyItem, UserPropertyList},
-};
+use embedded_svc::mqtt::client5::{EventProperty, UserPropertyItem, UserPropertyList};
 #[allow(unused_imports)]
 use esp_idf_hal::sys::*;
 
@@ -101,95 +98,45 @@ impl From<ErrorReasonCode> for mqtt5_error_reason_code {
 }
 
 #[allow(non_upper_case_globals)]
-impl TryFrom<mqtt5_error_reason_code> for ErrorReasonCode {
-    type Error = ();
-
-    fn try_from(code: mqtt5_error_reason_code) -> Result<Self, Self::Error> {
+impl From<mqtt5_error_reason_code> for ErrorReasonCode {
+    fn from(code: mqtt5_error_reason_code) -> Self {
         match code {
-            mqtt5_error_reason_code_MQTT5_UNSPECIFIED_ERROR => {
-                Ok(ErrorReasonCode::UnspecifiedError)
-            }
-            mqtt5_error_reason_code_MQTT5_MALFORMED_PACKET => Ok(ErrorReasonCode::MalformedPacket),
-            mqtt5_error_reason_code_MQTT5_PROTOCOL_ERROR => Ok(ErrorReasonCode::ProtocolError),
-            mqtt5_error_reason_code_MQTT5_IMPLEMENT_SPECIFIC_ERROR => {
-                Ok(ErrorReasonCode::ImplementSpecificError)
-            }
-            mqtt5_error_reason_code_MQTT5_UNSUPPORTED_PROTOCOL_VER => {
-                Ok(ErrorReasonCode::UnsupportedProtocolVersion)
-            }
-            mqtt5_error_reason_code_MQTT5_INVALID_CLIENT_ID => Ok(ErrorReasonCode::InvalidClientId),
-            mqtt5_error_reason_code_MQTT5_BAD_USERNAME_OR_PWD => {
-                Ok(ErrorReasonCode::BadUsernameOrPassword)
-            }
-            mqtt5_error_reason_code_MQTT5_NOT_AUTHORIZED => Ok(ErrorReasonCode::NotAuthorized),
-            mqtt5_error_reason_code_MQTT5_SERVER_UNAVAILABLE => {
-                Ok(ErrorReasonCode::ServerUnavailable)
-            }
-            mqtt5_error_reason_code_MQTT5_SERVER_BUSY => Ok(ErrorReasonCode::ServerBusy),
-            mqtt5_error_reason_code_MQTT5_BANNED => Ok(ErrorReasonCode::Banned),
-            mqtt5_error_reason_code_MQTT5_SERVER_SHUTTING_DOWN => {
-                Ok(ErrorReasonCode::ServerShuttingDown)
-            }
-            mqtt5_error_reason_code_MQTT5_BAD_AUTH_METHOD => Ok(ErrorReasonCode::BadAuthMethod),
-            mqtt5_error_reason_code_MQTT5_KEEP_ALIVE_TIMEOUT => {
-                Ok(ErrorReasonCode::KeepAliveTimeout)
-            }
-            mqtt5_error_reason_code_MQTT5_SESSION_TAKEN_OVER => {
-                Ok(ErrorReasonCode::SessionTakenOver)
-            }
-            mqtt5_error_reason_code_MQTT5_TOPIC_FILTER_INVALID => {
-                Ok(ErrorReasonCode::TopicFilterInvalid)
-            }
-            mqtt5_error_reason_code_MQTT5_TOPIC_NAME_INVALID => {
-                Ok(ErrorReasonCode::TopicNameInvalid)
-            }
-            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_IN_USE => {
-                Ok(ErrorReasonCode::PacketIdentifierInUse)
-            }
-            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_NOT_FOUND => {
-                Ok(ErrorReasonCode::PacketIdentifierNotFound)
-            }
-            mqtt5_error_reason_code_MQTT5_RECEIVE_MAXIMUM_EXCEEDED => {
-                Ok(ErrorReasonCode::ReceiveMaximumExceeded)
-            }
-            mqtt5_error_reason_code_MQTT5_TOPIC_ALIAS_INVALID => {
-                Ok(ErrorReasonCode::TopicAliasInvalid)
-            }
-            mqtt5_error_reason_code_MQTT5_PACKET_TOO_LARGE => Ok(ErrorReasonCode::PacketTooLarge),
-            mqtt5_error_reason_code_MQTT5_MESSAGE_RATE_TOO_HIGH => {
-                Ok(ErrorReasonCode::MessageRateTooHigh)
-            }
-            mqtt5_error_reason_code_MQTT5_QUOTA_EXCEEDED => Ok(ErrorReasonCode::QuotaExceeded),
-            mqtt5_error_reason_code_MQTT5_ADMINISTRATIVE_ACTION => {
-                Ok(ErrorReasonCode::AdministrativeAction)
-            }
-            mqtt5_error_reason_code_MQTT5_PAYLOAD_FORMAT_INVALID => {
-                Ok(ErrorReasonCode::PayloadFormatInvalid)
-            }
-            mqtt5_error_reason_code_MQTT5_RETAIN_NOT_SUPPORT => {
-                Ok(ErrorReasonCode::RetainNotSupported)
-            }
-            mqtt5_error_reason_code_MQTT5_QOS_NOT_SUPPORT => Ok(ErrorReasonCode::QosNotSupported),
-            mqtt5_error_reason_code_MQTT5_USE_ANOTHER_SERVER => {
-                Ok(ErrorReasonCode::UseAnotherServer)
-            }
-            mqtt5_error_reason_code_MQTT5_SERVER_MOVED => Ok(ErrorReasonCode::ServerMoved),
-            mqtt5_error_reason_code_MQTT5_SHARED_SUBSCR_NOT_SUPPORTED => {
-                Ok(ErrorReasonCode::SharedSubscriptionNotSupported)
-            }
-            mqtt5_error_reason_code_MQTT5_CONNECTION_RATE_EXCEEDED => {
-                Ok(ErrorReasonCode::ConnectionRateExceeded)
-            }
-            mqtt5_error_reason_code_MQTT5_MAXIMUM_CONNECT_TIME => {
-                Ok(ErrorReasonCode::MaximumConnectTime)
-            }
-            mqtt5_error_reason_code_MQTT5_SUBSCRIBE_IDENTIFIER_NOT_SUPPORT => {
-                Ok(ErrorReasonCode::SubscribeIdentifierNotSupported)
-            }
-            mqtt5_error_reason_code_MQTT5_WILDCARD_SUBSCRIBE_NOT_SUPPORT => {
-                Ok(ErrorReasonCode::WildcardSubscriptionNotSupported)
-            }
-            _ => Err(()),
+            mqtt5_error_reason_code_MQTT5_UNSPECIFIED_ERROR => ErrorReasonCode::UnspecifiedError,
+            mqtt5_error_reason_code_MQTT5_MALFORMED_PACKET => ErrorReasonCode::MalformedPacket,
+            mqtt5_error_reason_code_MQTT5_PROTOCOL_ERROR => ErrorReasonCode::ProtocolError,
+            mqtt5_error_reason_code_MQTT5_IMPLEMENT_SPECIFIC_ERROR => ErrorReasonCode::ImplementSpecificError,
+            mqtt5_error_reason_code_MQTT5_UNSUPPORTED_PROTOCOL_VER => ErrorReasonCode::UnsupportedProtocolVersion,
+            mqtt5_error_reason_code_MQTT5_INVALID_CLIENT_ID => ErrorReasonCode::InvalidClientId,
+            mqtt5_error_reason_code_MQTT5_BAD_USERNAME_OR_PWD => ErrorReasonCode::BadUsernameOrPassword,
+            mqtt5_error_reason_code_MQTT5_NOT_AUTHORIZED => ErrorReasonCode::NotAuthorized,
+            mqtt5_error_reason_code_MQTT5_SERVER_UNAVAILABLE => ErrorReasonCode::ServerUnavailable,
+            mqtt5_error_reason_code_MQTT5_SERVER_BUSY => ErrorReasonCode::ServerBusy,
+            mqtt5_error_reason_code_MQTT5_BANNED => ErrorReasonCode::Banned,
+            mqtt5_error_reason_code_MQTT5_SERVER_SHUTTING_DOWN => ErrorReasonCode::ServerShuttingDown,
+            mqtt5_error_reason_code_MQTT5_BAD_AUTH_METHOD => ErrorReasonCode::BadAuthMethod,
+            mqtt5_error_reason_code_MQTT5_KEEP_ALIVE_TIMEOUT => ErrorReasonCode::KeepAliveTimeout,
+            mqtt5_error_reason_code_MQTT5_SESSION_TAKEN_OVER => ErrorReasonCode::SessionTakenOver,
+            mqtt5_error_reason_code_MQTT5_TOPIC_FILTER_INVALID => ErrorReasonCode::TopicFilterInvalid,
+            mqtt5_error_reason_code_MQTT5_TOPIC_NAME_INVALID => ErrorReasonCode::TopicNameInvalid,
+            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_IN_USE => ErrorReasonCode::PacketIdentifierInUse,
+            mqtt5_error_reason_code_MQTT5_PACKET_IDENTIFIER_NOT_FOUND => ErrorReasonCode::PacketIdentifierNotFound,
+            mqtt5_error_reason_code_MQTT5_RECEIVE_MAXIMUM_EXCEEDED => ErrorReasonCode::ReceiveMaximumExceeded,
+            mqtt5_error_reason_code_MQTT5_TOPIC_ALIAS_INVALID => ErrorReasonCode::TopicAliasInvalid,
+            mqtt5_error_reason_code_MQTT5_PACKET_TOO_LARGE => ErrorReasonCode::PacketTooLarge,
+            mqtt5_error_reason_code_MQTT5_MESSAGE_RATE_TOO_HIGH => ErrorReasonCode::MessageRateTooHigh,
+            mqtt5_error_reason_code_MQTT5_QUOTA_EXCEEDED => ErrorReasonCode::QuotaExceeded,
+            mqtt5_error_reason_code_MQTT5_ADMINISTRATIVE_ACTION => ErrorReasonCode::AdministrativeAction,
+            mqtt5_error_reason_code_MQTT5_PAYLOAD_FORMAT_INVALID => ErrorReasonCode::PayloadFormatInvalid,
+            mqtt5_error_reason_code_MQTT5_RETAIN_NOT_SUPPORT => ErrorReasonCode::RetainNotSupported,
+            mqtt5_error_reason_code_MQTT5_QOS_NOT_SUPPORT => ErrorReasonCode::QosNotSupported,
+            mqtt5_error_reason_code_MQTT5_USE_ANOTHER_SERVER => ErrorReasonCode::UseAnotherServer,
+            mqtt5_error_reason_code_MQTT5_SERVER_MOVED => ErrorReasonCode::ServerMoved,
+            mqtt5_error_reason_code_MQTT5_SHARED_SUBSCR_NOT_SUPPORTED => ErrorReasonCode::SharedSubscriptionNotSupported,
+            mqtt5_error_reason_code_MQTT5_CONNECTION_RATE_EXCEEDED => ErrorReasonCode::ConnectionRateExceeded,
+            mqtt5_error_reason_code_MQTT5_MAXIMUM_CONNECT_TIME => ErrorReasonCode::MaximumConnectTime,
+            mqtt5_error_reason_code_MQTT5_SUBSCRIBE_IDENTIFIER_NOT_SUPPORT => ErrorReasonCode::SubscribeIdentifierNotSupported,
+            mqtt5_error_reason_code_MQTT5_WILDCARD_SUBSCRIBE_NOT_SUPPORT => ErrorReasonCode::WildcardSubscriptionNotSupported,
+            _ => ErrorReasonCode::UnspecifiedError,
         }
     }
 }
@@ -280,6 +227,7 @@ impl EspEventProperty {
         if ptr.is_null() {
             None
         } else {
+            let payload_format_indicator = unsafe { (*ptr).payload_format_indicator };
             let response_topic = unsafe {
                 let topic = (*ptr).response_topic;
                 if topic.is_null() {
@@ -312,8 +260,13 @@ impl EspEventProperty {
 
             let subscribe_id = unsafe { (*ptr).subscribe_id };
 
-            let event_property =
-                EventProperty::new(response_topic, correlation_data, content_type, subscribe_id);
+            let event_property = EventProperty::new(
+                payload_format_indicator,
+                response_topic,
+                correlation_data,
+                content_type,
+                subscribe_id,
+            );
             Some(event_property)
         }
     }

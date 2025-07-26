@@ -8,6 +8,8 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
+#[cfg(esp_idf_mqtt_protocol_5)]
+use embedded_svc::mqtt::client5::ErrorReasonCode;
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
 use embedded_svc::mqtt::client5::EventProperty;
 
