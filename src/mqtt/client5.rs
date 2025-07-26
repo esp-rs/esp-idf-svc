@@ -7,11 +7,14 @@ pub use super::*;
 extern crate alloc;
 use alloc::ffi::CString;
 
-use embedded_svc::mqtt::{client::ErrorType, client5::{EventProperty, UserPropertyItem, UserPropertyList}};
+use embedded_svc::mqtt::{
+    client::ErrorType,
+    client5::{EventProperty, UserPropertyItem, UserPropertyList},
+};
 #[allow(unused_imports)]
 use esp_idf_hal::sys::*;
 
-pub struct EspEventProperty{}
+pub struct EspEventProperty {}
 
 pub struct EspUserPropertyList(pub(crate) mqtt5_user_property_handle_t);
 
@@ -273,8 +276,7 @@ impl ErrorReasonCode {
 impl EspEventProperty {
     pub(crate) fn event_property<'a, E>(
         ptr: *mut esp_mqtt5_event_property_t,
-    ) -> Option<EventProperty<'a, E>>
-    {
+    ) -> Option<EventProperty<'a, E>> {
         if ptr.is_null() {
             None
         } else {
@@ -283,48 +285,38 @@ impl EspEventProperty {
                 if topic.is_null() {
                     None
                 } else {
-                    Some(
-                        core::ffi::CStr::from_ptr(topic)
-                            .to_str()
-                            .unwrap()
-                    )
+                    Some(core::ffi::CStr::from_ptr(topic).to_str().unwrap())
                 }
             };
-            
+
             let correlation_data = unsafe {
                 let data = (*ptr).correlation_data;
                 if data.is_null() {
                     None
                 } else {
-                    Some(core::slice::from_raw_parts(data, (*ptr).correlation_data_len as usize))
+                    Some(core::slice::from_raw_parts(
+                        data,
+                        (*ptr).correlation_data_len as usize,
+                    ))
                 }
             };
-            
+
             let content_type = unsafe {
                 let content_type = (*ptr).content_type;
                 if content_type.is_null() {
                     None
                 } else {
-                    Some(
-                        core::ffi::CStr::from_ptr(content_type)
-                            .to_str()
-                            .unwrap()
-                    )
+                    Some(core::ffi::CStr::from_ptr(content_type).to_str().unwrap())
                 }
             };
-            
+
             let subscribe_id = unsafe { (*ptr).subscribe_id };
-            
-            let event_property = EventProperty::new(
-                response_topic,
-                correlation_data,
-                content_type,
-                subscribe_id,
-            );
+
+            let event_property =
+                EventProperty::new(response_topic, correlation_data, content_type, subscribe_id);
             Some(event_property)
         }
     }
-    
 }
 
 impl EspUserPropertyList {
