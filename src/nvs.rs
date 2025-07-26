@@ -1,4 +1,5 @@
 //! Non-Volatile Storage (NVS)
+use core::ops::DerefMut;
 use core::ptr;
 
 extern crate alloc;
@@ -787,6 +788,10 @@ impl RawHandle for EspNvs<NvsEncrypted> {
 /// - **Flash efficient**: Optimized storage format reduces wear on flash memory
 pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
 
+#[cfg(all(
+    not(esp_idf_version_major = "4"),
+    not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
+))]
 impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     pub const fn new(nvs: EspNvs<T>) -> Self {
         Self(nvs)
@@ -806,7 +811,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         })
     }
 
-    pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
+    pub fn remove(&self, name: &str) -> Result<bool, EspError> {
         self.0.remove(name)
     }
 
@@ -876,10 +881,6 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
             // If the buffer is less than 8 bytes, store it as a u64
             let mut u64value: u_int64_t = 0;
 
-            // Set the first byte as the length
-            u64value |= buf.len() as u_int64_t;
-
-            // Fill the rest of the u64 with the buffer values
             for v in buf.iter().rev() {
                 u64value <<= 8;
                 u64value |= *v as u_int64_t;
@@ -892,6 +893,99 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
             self.0.set_blob(name, buf)?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(any(
+    esp_idf_version_major = "4",
+    all(esp_idf_version_major = "5", esp_idf_version_minor = "1")
+))]
+impl<T: NvsPartitionId> EspKeyValueStorage<T> {
+    pub const fn new(nvs: EspNvs<T>) -> Self {
+        Self(nvs)
+    }
+
+    pub const fn esp_nvs(&self) -> &EspNvs<T> {
+        &self.0
+    }
+
+    pub fn partition(&self) -> &EspNvsPartition<T> {
+        &self.0 .0
+    }
+
+    pub fn contains(&self, name: &str) -> Result<bool, EspError> {
+        self.len(name).map(|v| v.is_some())
+    }
+
+    pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
+        self.0.remove(name)
+    }
+
+    fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
+        match self.0.get_u64(name)? {
+            Some(value) => {
+                // u64 value was found, decode it
+                let len: u8 = (value & 0xff) as u8;
+                Ok(Some(len as _))
+            }
+            None => {
+                return self.0.blob_len(name);
+            }
+        }
+    }
+
+    pub fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, EspError> {
+        match self.0.get_u64(name)? {
+            Some(mut value) => {
+                // u64 value was found, decode it
+                let len: u8 = (value & 0xff) as u8;
+
+                if buf.len() < len as _ {
+                    return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
+                }
+
+                // Shift the u64 value to remove the length byte
+                value >>= 8;
+
+                let array: [u8; 7] = [
+                    (value & 0xff) as u8,
+                    ((value >> 8) & 0xff) as u8,
+                    ((value >> 16) & 0xff) as u8,
+                    ((value >> 24) & 0xff) as u8,
+                    ((value >> 32) & 0xff) as u8,
+                    ((value >> 40) & 0xff) as u8,
+                    ((value >> 48) & 0xff) as u8,
+                ];
+
+                buf[..len as usize].copy_from_slice(&array[..len as usize]);
+
+                Ok(Some(&buf[..len as usize]))
+            }
+            None => self.0.get_blob(name, buf),
+        }
+    }
+
+    pub fn set_raw(&self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
+        // start by just clearing this key, ignoring the result since it may not exist
+        _ = self.0.remove(name);
+
+        if buf.len() < 8 {
+            let mut u64value: u_int64_t = 0;
+
+            for v in buf.iter().rev() {
+                u64value <<= 8;
+                u64value |= *v as u_int64_t;
+            }
+
+            u64value <<= 8;
+            u64value |= buf.len() as u_int64_t;
+
+            self.0.set_u64(name, u64value)?;
+            Ok(true)
+        } else {
+            self.0.set_blob(name, buf)?;
+            Ok(true)
+        }
     }
 }
 
@@ -918,5 +1012,31 @@ impl<T: NvsPartitionId> RawStorage for EspKeyValueStorage<T> {
 
     fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
         EspKeyValueStorage::set_raw(self, name, buf)
+    }
+}
+
+impl<T: NvsPartitionId> StorageBase for &EspKeyValueStorage<T> {
+    type Error = EspError;
+
+    fn contains(&self, name: &str) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::contains(*self, name)
+    }
+
+    fn remove(&mut self, name: &str) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::remove(*self, name)
+    }
+}
+
+impl<T: NvsPartitionId> RawStorage for &EspKeyValueStorage<T> {
+    fn len(&self, name: &str) -> Result<Option<usize>, Self::Error> {
+        EspKeyValueStorage::len(*self, name)
+    }
+
+    fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Self::Error> {
+        EspKeyValueStorage::get_raw(*self, name, buf)
+    }
+
+    fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::set_raw(*self, name, buf)
     }
 }
