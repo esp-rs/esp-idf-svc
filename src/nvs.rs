@@ -916,7 +916,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         self.len(name).map(|v| v.is_some())
     }
 
-    pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
+    pub fn remove(&self, name: &str) -> Result<bool, EspError> {
         self.0.remove(name)
     }
 
