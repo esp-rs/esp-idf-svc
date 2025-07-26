@@ -8,8 +8,8 @@
 //! More info regarding NVS:
 //!   https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/storage/nvs_flash.html
 
-use esp_idf_svc::{log::EspLogger, nvs};
 use esp_idf_svc::nvs::*;
+use esp_idf_svc::{log::EspLogger, nvs};
 
 use postcard::{from_bytes, to_vec};
 
@@ -30,14 +30,15 @@ fn main() -> anyhow::Result<()> {
     let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
 
     let test_namespace = "test_ns";
-    
-    let nvs = match EspKeyValueStorage::new(EspNvs::new(nvs_default_partition, test_namespace, true)) {
-        Ok(nvs) => {
-            info!("Got namespace {test_namespace:?} from default partition");
-            nvs
-        }
-        Err(e) => panic!("Could't get namespace {e:?}"),
-    };
+
+    let nvs =
+        match EspKeyValueStorage::new(EspNvs::new(nvs_default_partition, test_namespace, true)) {
+            Ok(nvs) => {
+                info!("Got namespace {test_namespace:?} from default partition");
+                nvs
+            }
+            Err(e) => panic!("Could't get namespace {e:?}"),
+        };
 
     let key_raw_u8 = "test_raw_u8";
     {
