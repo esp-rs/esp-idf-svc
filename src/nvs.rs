@@ -82,20 +82,21 @@ pub struct NvsDefault(());
 /// - **Flash efficient**: Optimized storage format reduces wear on flash memory
 pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
 
+#[repr(u32)]
+#[allow(non_upper_case_globals)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
 pub enum NvsDataType {
-    U8 = 1,
-    I8 = 17,
-    U16 = 2,
-    I16 = 18,
-    U32 = 4,
-    I32 = 20,
-    U64 = 8,
-    I64 = 24,
-    Str = 33,
-    Blob = 66,
-    Any = 255,
+    U8 = nvs_type_t_NVS_TYPE_U8,
+    I8 = nvs_type_t_NVS_TYPE_I8,
+    U16 = nvs_type_t_NVS_TYPE_U16,
+    I16 = nvs_type_t_NVS_TYPE_I16,
+    U32 = nvs_type_t_NVS_TYPE_U32,
+    I32 = nvs_type_t_NVS_TYPE_I32,
+    U64 = nvs_type_t_NVS_TYPE_U64,
+    I64 = nvs_type_t_NVS_TYPE_I64,
+    Str = nvs_type_t_NVS_TYPE_STR,
+    Blob = nvs_type_t_NVS_TYPE_BLOB,
+    Any = nvs_type_t_NVS_TYPE_ANY,
 }
 
 #[allow(non_upper_case_globals)]
@@ -415,35 +416,19 @@ impl<T: NvsPartitionId> EspNvs<T> {
         not(esp_idf_version_major = "4"),
         not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
     ))]
+    #[deprecated(
+        since = "0.45.0",
+        note = "Use `EspNvs::find_key` instead, which returns the type of the key"
+    )]
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
-        let result = self.find_key_type(name)?;
-        match result {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
+        Ok(self.find_key(name)?.is_some())
     }
 
     #[cfg(all(
         not(esp_idf_version_major = "4"),
         not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
     ))]
-    pub fn contains_key_of_type(
-        &self,
-        name: &str,
-        data_type: NvsDataType,
-    ) -> Result<bool, EspError> {
-        let result = self.find_key_type(name)?;
-        match result {
-            Some(entry_type) => Ok(entry_type == data_type),
-            None => Ok(false),
-        }
-    }
-
-    #[cfg(all(
-        not(esp_idf_version_major = "4"),
-        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
-    ))]
-    pub fn find_key_type(&self, name: &str) -> Result<Option<NvsDataType>, EspError> {
+    pub fn find_key(&self, name: &str) -> Result<Option<NvsDataType>, EspError> {
         let c_key = to_cstring_arg(name)?;
         let mut entry_type: nvs_type_t = nvs_type_t_NVS_TYPE_ANY;
 
@@ -841,12 +826,12 @@ impl<T: NvsPartitionId> RawStorage for EspKeyValueStorage<T> {
 }
 
 impl<T: NvsPartitionId> EspKeyValueStorage<T> {
-    pub fn new(
-        partition: EspNvsPartition<T>,
-        namespace: &str,
-        read_write: bool,
-    ) -> Result<Self, EspError> {
-        Ok(Self(EspNvs::new(partition, namespace, read_write)?))
+    pub const fn new(nvs: EspNvs<T>) -> Self {
+        Self(nvs)
+    }
+
+    pub const fn esp_nvs(&self) -> &EspNvs<T> {
+        &self.0
     }
 
     pub fn partition(&self) -> &EspNvsPartition<T> {
@@ -854,7 +839,9 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     }
 
     pub fn contains(&self, name: &str) -> Result<bool, EspError> {
-        self.len(name).map(|v| v.is_some())
+        self.0.find_key(name)?.map_or(Ok(false), |data_type| {
+            Ok(matches!(data_type, NvsDataType::Blob | NvsDataType::U64))
+        })
     }
 
     pub fn remove(&mut self, name: &str) -> Result<bool, EspError> {
@@ -862,139 +849,55 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     }
 
     fn len(&self, name: &str) -> Result<Option<usize>, EspError> {
-        let c_key = to_cstring_arg(name)?;
-
-        let mut value: u_int64_t = 0;
-
-        // check for u64 value
-        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut value as *mut _) } {
-            ESP_ERR_NVS_NOT_FOUND => {
-                // check for blob value, by getting blob length
-                let mut len = 0;
-                match unsafe {
-                    nvs_get_blob(
-                        self.0 .1,
-                        c_key.as_ptr(),
-                        ptr::null_mut(),
-                        &mut len as *mut _,
-                    )
-                } {
-                    ESP_ERR_NVS_NOT_FOUND => Ok(None),
-                    err => {
-                        // bail on error
-                        esp!(err)?;
-
-                        Ok(Some(len))
-                    }
-                }
-            }
-            err => {
-                // bail on error
-                esp!(err)?;
-
-                // u64 value was found, decode it
-                let len: u8 = (value & 0xff) as u8;
-
-                Ok(Some(len as _))
-            }
+        if let Some(data_type) = self.0.find_key(name)? {
+            return match data_type {
+                NvsDataType::Blob => self.0.blob_len(name),
+                NvsDataType::U64 => Ok(Some(8)), // U64 is always 8 bytes
+                _ => Ok(None),                   // Other types are not supported in this storage
+            };
         }
+        Ok(None)
     }
 
     pub fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, EspError> {
-        let c_key = to_cstring_arg(name)?;
-
-        let mut u64value: u_int64_t = 0;
-
-        // check for u64 value
-        match unsafe { nvs_get_u64(self.0 .1, c_key.as_ptr(), &mut u64value as *mut _) } {
-            ESP_ERR_NVS_NOT_FOUND => {
-                // check for blob value, by getting blob length
-                let mut len = 0;
-                match unsafe {
-                    nvs_get_blob(
-                        self.0 .1,
-                        c_key.as_ptr(),
-                        ptr::null_mut(),
-                        &mut len as *mut _,
-                    )
-                } {
-                    ESP_ERR_NVS_NOT_FOUND => Ok(None),
-                    err => {
-                        // bail on error
-                        esp!(err)?;
-
-                        len = buf.len();
-
-                        // fetch value if no error
-                        esp!(unsafe {
-                            nvs_get_blob(
-                                self.0 .1,
-                                c_key.as_ptr(),
-                                buf.as_mut_ptr() as *mut _,
-                                &mut len as *mut _,
-                            )
-                        })?;
-
-                        Ok(Some(&buf[..len]))
+        if let Some(data_type) = self.0.find_key(name)? {
+            return match data_type {
+                NvsDataType::Blob => self.0.get_blob(name, buf),
+                NvsDataType::U64 => {
+                    // U64 is always 8 bytes, so we can use a fixed-size buffer
+                    if buf.len() < 8 {
+                        return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
                     }
+                    let mut u64value: u64 = 0;
+                    esp!(unsafe {
+                        nvs_get_u64(
+                            self.0 .1,
+                            to_cstring_arg(name)?.as_ptr(),
+                            &mut u64value as *mut _,
+                        )
+                    })?;
+                    buf.copy_from_slice(&u64value.to_le_bytes());
+                    Ok(Some(&buf[..8]))
                 }
-            }
-            err => {
-                // bail on error
-                esp!(err)?;
-
-                // u64 value was found, decode it
-                let len: u8 = (u64value & 0xff) as u8;
-
-                if buf.len() < len as _ {
-                    // Buffer not large enough
-                    return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
-                }
-
-                u64value >>= 8;
-
-                let array: [u8; 7] = [
-                    (u64value & 0xff) as u8,
-                    ((u64value >> 8) & 0xff) as u8,
-                    ((u64value >> 16) & 0xff) as u8,
-                    ((u64value >> 24) & 0xff) as u8,
-                    ((u64value >> 32) & 0xff) as u8,
-                    ((u64value >> 40) & 0xff) as u8,
-                    ((u64value >> 48) & 0xff) as u8,
-                ];
-
-                buf[..len as usize].copy_from_slice(&array[..len as usize]);
-
-                Ok(Some(&buf[..len as usize]))
-            }
+                _ => Ok(None), // Other types are not supported in this storage
+            };
         }
+        Ok(None)
     }
 
     pub fn set_raw(&self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
-        let c_key = to_cstring_arg(name)?;
-        let mut u64value: u_int64_t = 0;
-
         // start by just clearing this key
-        unsafe { nvs_erase_key(self.0 .1, c_key.as_ptr()) };
+        self.0.remove(name)?;
 
         if buf.len() < 8 {
-            for v in buf.iter().rev() {
-                u64value <<= 8;
-                u64value |= *v as u_int64_t;
-            }
-
-            u64value <<= 8;
-            u64value |= buf.len() as u_int64_t;
-
-            esp!(unsafe { nvs_set_u64(self.0 .1, c_key.as_ptr(), u64value) })?;
+            let value = u64::from_le_bytes(
+                buf.try_into()
+                    .map_err(|_| EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>())?,
+            );
+            self.0.set_u64(name, value)?;
         } else {
-            esp!(unsafe {
-                nvs_set_blob(self.0 .1, c_key.as_ptr(), buf.as_ptr().cast(), buf.len())
-            })?;
+            self.0.set_blob(name, buf)?;
         }
-
-        esp!(unsafe { nvs_commit(self.0 .1) })?;
-
         Ok(true)
     }
 }
