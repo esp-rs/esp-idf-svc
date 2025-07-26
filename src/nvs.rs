@@ -32,56 +32,6 @@ pub trait NvsPartitionId {
 
 pub struct NvsDefault(());
 
-/// A specialized key-value storage wrapper around `EspNvs` that provides a simplified interface
-/// for storing and retrieving arbitrary data as byte arrays.
-///
-/// This struct was introduced to solve issue [#585](https://github.com/esp-rs/esp-idf-svc/issues/585)
-/// where the `contains()` method in `EspNvs` incorrectly returned `false` for string values
-/// that actually existed in NVS partitions. The root cause was that `EspNvs` implements
-/// two different storage strategies:
-///
-/// 1. **Native ESP-IDF NVS API**: Direct access to ESP-IDF's native types (u8, u16, u32, u64, i8, i16, i32, i64, str, blob)
-/// 2. **Serialized storage**: Everything stored as either u64 (≤7 bytes) or blob (>7 bytes) for compatibility with serde
-///
-/// `EspKeyValueStorage` focuses on the second approach, providing a clean interface for:
-/// - Storing any data that can be represented as `&[u8]`
-/// - Automatic optimization: values ≤7 bytes stored as u64, larger values as blobs
-/// - Consistent `contains()` method that works correctly with this storage strategy
-/// - Full compatibility with Rust serde implementations (postcard, json, etc.)
-///
-/// ## Usage
-///
-/// ```rust,no_run
-/// use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspKeyValueStorage};
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let partition = EspDefaultNvsPartition::take()?;
-/// let storage = EspKeyValueStorage::new(partition, "my_namespace", true)?;
-///
-/// // Store data as bytes
-/// let data = b"hello world";
-/// storage.set_raw("my_key", data)?;
-///
-/// // Check if key exists (this works correctly, unlike the original EspNvs bug)
-/// assert!(storage.contains("my_key")?);
-///
-/// // Retrieve data
-/// let mut buffer = [0u8; 64];
-/// if let Some(retrieved) = storage.get_raw("my_key", &mut buffer)? {
-///     assert_eq!(retrieved, data);
-/// }
-/// # Ok(())
-/// # }
-/// ```
-///
-/// ## Performance Characteristics
-///
-/// - **Small values (≤7 bytes)**: Stored as u64 for efficiency
-/// - **Large values (>7 bytes)**: Stored as ESP-IDF blobs
-/// - **Memory efficient**: No unnecessary allocations for small values
-/// - **Flash efficient**: Optimized storage format reduces wear on flash memory
-pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
-
 #[repr(u32)]
 #[allow(non_upper_case_globals)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,18 +360,6 @@ impl<T: NvsPartitionId> EspNvs<T> {
         }
 
         Ok(Self(partition, handle))
-    }
-
-    #[cfg(all(
-        not(esp_idf_version_major = "4"),
-        not(all(esp_idf_version_major = "5", esp_idf_version_minor = "1"))
-    ))]
-    #[deprecated(
-        since = "0.45.0",
-        note = "Use `EspNvs::find_key` instead, which returns the type of the key"
-    )]
-    pub fn contains(&self, name: &str) -> Result<bool, EspError> {
-        Ok(self.find_key(name)?.is_some())
     }
 
     #[cfg(all(
@@ -799,31 +737,55 @@ impl RawHandle for EspNvs<NvsEncrypted> {
     }
 }
 
-impl<T: NvsPartitionId> StorageBase for EspKeyValueStorage<T> {
-    type Error = EspError;
-
-    fn contains(&self, name: &str) -> Result<bool, Self::Error> {
-        EspKeyValueStorage::contains(self, name)
-    }
-
-    fn remove(&mut self, name: &str) -> Result<bool, Self::Error> {
-        EspKeyValueStorage::remove(self, name)
-    }
-}
-
-impl<T: NvsPartitionId> RawStorage for EspKeyValueStorage<T> {
-    fn len(&self, name: &str) -> Result<Option<usize>, Self::Error> {
-        EspKeyValueStorage::len(self, name)
-    }
-
-    fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Self::Error> {
-        EspKeyValueStorage::get_raw(self, name, buf)
-    }
-
-    fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
-        EspKeyValueStorage::set_raw(self, name, buf)
-    }
-}
+/// A specialized key-value storage wrapper around `EspNvs` that provides a simplified interface
+/// for storing and retrieving arbitrary data as byte arrays.
+///
+/// This struct was introduced to solve issue [#585](https://github.com/esp-rs/esp-idf-svc/issues/585)
+/// where the `contains()` method in `EspNvs` incorrectly returned `false` for string values
+/// that actually existed in NVS partitions. The root cause was that `EspNvs` implements
+/// two different storage strategies:
+///
+/// 1. **Native ESP-IDF NVS API**: Direct access to ESP-IDF's native types (u8, u16, u32, u64, i8, i16, i32, i64, str, blob)
+/// 2. **Serialized storage**: Everything stored as either u64 (≤7 bytes) or blob (>7 bytes) for compatibility with serde
+///
+/// `EspKeyValueStorage` focuses on the second approach, providing a clean interface for:
+/// - Storing any data that can be represented as `&[u8]`
+/// - Automatic optimization: values ≤7 bytes stored as u64, larger values as blobs
+/// - Consistent `contains()` method that works correctly with this storage strategy
+/// - Full compatibility with Rust serde implementations (postcard, json, etc.)
+///
+/// ## Usage
+///
+/// ```rust,no_run
+/// use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspKeyValueStorage};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let partition = EspDefaultNvsPartition::take()?;
+/// let storage = EspKeyValueStorage::new(partition, "my_namespace", true)?;
+///
+/// // Store data as bytes
+/// let data = b"hello world";
+/// storage.set_raw("my_key", data)?;
+///
+/// // Check if key exists (this works correctly, unlike the original EspNvs bug)
+/// assert!(storage.contains("my_key")?);
+///
+/// // Retrieve data
+/// let mut buffer = [0u8; 64];
+/// if let Some(retrieved) = storage.get_raw("my_key", &mut buffer)? {
+///     assert_eq!(retrieved, data);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Performance Characteristics
+///
+/// - **Small values (≤7 bytes)**: Stored as u64 for efficiency
+/// - **Large values (>7 bytes)**: Stored as ESP-IDF blobs
+/// - **Memory efficient**: No unnecessary allocations for small values
+/// - **Flash efficient**: Optimized storage format reduces wear on flash memory
+pub struct EspKeyValueStorage<T: NvsPartitionId>(EspNvs<T>);
 
 impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     pub const fn new(nvs: EspNvs<T>) -> Self {
@@ -852,8 +814,18 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         if let Some(data_type) = self.0.find_key(name)? {
             return match data_type {
                 NvsDataType::Blob => self.0.blob_len(name),
-                NvsDataType::U64 => Ok(Some(8)), // U64 is always 8 bytes
-                _ => Ok(None),                   // Other types are not supported in this storage
+                NvsDataType::U64 => {
+                    let value = self.0.get_u64(name)?;
+                    if value.is_none() {
+                        return Ok(None);
+                    }
+                    let value = value.unwrap();
+                    // u64 value was found, decode it by getting the first byte as length
+                    let len: u8 = (value & 0xff) as u8;
+
+                    Ok(Some(len as _))
+                }
+                _ => Ok(None), // Other types are not supported in this storage
             };
         }
         Ok(None)
@@ -864,20 +836,31 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
             return match data_type {
                 NvsDataType::Blob => self.0.get_blob(name, buf),
                 NvsDataType::U64 => {
-                    // U64 is always 8 bytes, so we can use a fixed-size buffer
-                    if buf.len() < 8 {
-                        return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
+                    if let Some(mut u64value) = self.0.get_u64(name)? {
+                        // The first byte is the length
+                        let len = (u64value & 0xff) as u8;
+
+                        if buf.len() < len as _ {
+                            return Err(EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>());
+                        }
+
+                        u64value >>= 8;
+                        let array: [u8; 7] = [
+                            (u64value & 0xff) as u8,
+                            ((u64value >> 8) & 0xff) as u8,
+                            ((u64value >> 16) & 0xff) as u8,
+                            ((u64value >> 24) & 0xff) as u8,
+                            ((u64value >> 32) & 0xff) as u8,
+                            ((u64value >> 40) & 0xff) as u8,
+                            ((u64value >> 48) & 0xff) as u8,
+                        ];
+
+                        buf[..len as usize].copy_from_slice(&array[..len as usize]);
+
+                        Ok(Some(&buf[..len as usize]))
+                    } else {
+                        Ok(None)
                     }
-                    let mut u64value: u64 = 0;
-                    esp!(unsafe {
-                        nvs_get_u64(
-                            self.0 .1,
-                            to_cstring_arg(name)?.as_ptr(),
-                            &mut u64value as *mut _,
-                        )
-                    })?;
-                    buf.copy_from_slice(&u64value.to_le_bytes());
-                    Ok(Some(&buf[..8]))
                 }
                 _ => Ok(None), // Other types are not supported in this storage
             };
@@ -886,18 +869,54 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
     }
 
     pub fn set_raw(&self, name: &str, buf: &[u8]) -> Result<bool, EspError> {
-        // start by just clearing this key
-        self.0.remove(name)?;
+        // start by just clearing this key, ignoring the result since it may not exist
+        _ = self.0.remove(name);
 
         if buf.len() < 8 {
-            let value = u64::from_le_bytes(
-                buf.try_into()
-                    .map_err(|_| EspError::from_infallible::<ESP_ERR_NVS_INVALID_LENGTH>())?,
-            );
-            self.0.set_u64(name, value)?;
+            // If the buffer is less than 8 bytes, store it as a u64
+            let mut u64value: u_int64_t = 0;
+
+            // Set the first byte as the length
+            u64value |= buf.len() as u_int64_t;
+
+            // Fill the rest of the u64 with the buffer values
+            for v in buf.iter().rev() {
+                u64value <<= 8;
+                u64value |= *v as u_int64_t;
+            }
+
+            u64value <<= 8;
+            u64value |= buf.len() as u_int64_t;
+            self.0.set_u64(name, u64value)?;
         } else {
             self.0.set_blob(name, buf)?;
         }
         Ok(true)
+    }
+}
+
+impl<T: NvsPartitionId> StorageBase for EspKeyValueStorage<T> {
+    type Error = EspError;
+
+    fn contains(&self, name: &str) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::contains(self, name)
+    }
+
+    fn remove(&mut self, name: &str) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::remove(self, name)
+    }
+}
+
+impl<T: NvsPartitionId> RawStorage for EspKeyValueStorage<T> {
+    fn len(&self, name: &str) -> Result<Option<usize>, Self::Error> {
+        EspKeyValueStorage::len(self, name)
+    }
+
+    fn get_raw<'a>(&self, name: &str, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Self::Error> {
+        EspKeyValueStorage::get_raw(self, name, buf)
+    }
+
+    fn set_raw(&mut self, name: &str, buf: &[u8]) -> Result<bool, Self::Error> {
+        EspKeyValueStorage::set_raw(self, name, buf)
     }
 }
