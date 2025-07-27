@@ -23,7 +23,7 @@ esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 harness = false
 
 [features]
-default = ["std", "binstart"]
+default = ["std", "binstart", "experimental"]
 
 std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std", "futures-io"]
 embassy-time-driver = ["dep:embassy-time-driver", "embassy-time-queue-utils"]
