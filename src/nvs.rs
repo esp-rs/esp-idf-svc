@@ -927,9 +927,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
                 let len: u8 = (value & 0xff) as u8;
                 Ok(Some(len as _))
             }
-            None => {
-                self.0.blob_len(name)
-            }
+            None => self.0.blob_len(name),
         }
     }
 
