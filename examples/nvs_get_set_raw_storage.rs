@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
         Err(e) => panic!("Could't get namespace {e:?}"),
     };
 
-    let mut storage = EspKeyValueStorage::new(nvs);
+    let storage = EspKeyValueStorage::new(nvs);
 
     let key_raw_u8 = "test_raw_u8";
     {
