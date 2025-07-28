@@ -985,34 +985,6 @@ impl EspAsyncMqttClient {
             .await
     }
 
-    pub async fn subscribe_with_config<'ab>(
-        &mut self,
-        topic: &str,
-        qos: QoS,
-        config: SubscribePropertyConfig<'ab>,
-    ) -> Result<MessageId, EspError> {
-        let property = esp_mqtt5_subscribe_property_config_t {
-            subscribe_id: config.subscribe_id,
-            no_local_flag: config.no_local,
-            retain_as_published_flag: config.retain_as_published,
-            retain_handle: config.retain_handling,
-            is_share_subscribe: config.share_name.is_some(),
-            share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
-        };
-
-        Self::check(unsafe {
-            esp_mqtt5_client_set_subscribe_property(self.0.raw_client, &property as *const _)
-        })?;
-
-        self.execute(AsyncCommand::Subscribe { qos }, Some(topic), None, None)
-            .await
-    }
-
     pub async fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, EspError> {
         self.execute(AsyncCommand::Unsubscribe, Some(topic), None, None)
             .await
@@ -1082,7 +1054,6 @@ impl EspAsyncMqttClient {
         channel: Arc<Channel<AsyncWork>>,
         mut client: EspMqttClient,
         caps: Option<(usize, usize, usize)>,
-        config: Box<dyn PropertyConfig<'_>>,
     ) {
         // Placeholder work item. This will be replaced by the first actual work item.
         let mut work = AsyncWork {
@@ -1107,10 +1078,7 @@ impl EspAsyncMqttClient {
                 AsyncCommand::Subscribe { qos } => {
                     let topic =
                         unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(&work.topic) };
-                    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-                    work.result =
-                        client.subscribe_with_config_cstr(topic, qos, config.as_any().downcast_ref());
-                        
+
                     work.result = client.subscribe_cstr(topic, qos);
                 }
                 AsyncCommand::Unsubscribe => {
@@ -1147,7 +1115,7 @@ impl asynch::Client for EspAsyncMqttClient {
     }
 }
 
-impl asynch::Publish for EspAsynccMqttClient {
+impl asynch::Publish for EspAsyncMqttClient {
     async fn publish(
         &mut self,
         topic: &str,
