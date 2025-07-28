@@ -8,13 +8,19 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
-#[cfg(esp_idf_mqtt_protocol_5)]
-use embedded_svc::mqtt::client5::ErrorReasonCode;
+
+use embedded_svc::mqtt::client5::PropertyConfig;
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-use embedded_svc::mqtt::client5::EventProperty;
+use embedded_svc::mqtt::client5::{
+    MessageMetadata, PublishPropertyConfig, SubscribePropertyConfig,
+};
 
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-use crate::mqtt::client5::EspEventProperty;
+use embedded_svc::mqtt::client5::UserPropertyList;
+
+#[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+use crate::mqtt::client5::EspUserPropertyList;
+
 use crate::private::unblocker::Unblocker;
 use crate::sys::*;
 
@@ -528,8 +534,27 @@ impl<'a> EspMqttClient<'a> {
         self.subscribe_cstr(to_cstring_arg(topic)?.as_c_str(), qos)
     }
 
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn subscribe_with_config<'ab>(
+        &mut self,
+        topic: &str,
+        qos: QoS,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, EspError> {
+        self.subscribe_with_config_cstr(to_cstring_arg(topic)?.as_c_str(), qos, config)
+    }
+
     pub fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, EspError> {
         self.unsubscribe_cstr(to_cstring_arg(topic)?.as_c_str())
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn unsubscribe_with_config<'ab>(
+        &mut self,
+        topic: &str,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, EspError> {
+        self.unsubscribe_with_config_cstr(to_cstring_arg(topic)?.as_c_str(), config)
     }
 
     pub fn publish(
@@ -586,8 +611,59 @@ impl<'a> EspMqttClient<'a> {
         res
     }
 
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn subscribe_with_config_cstr(
+        &mut self,
+        topic: &core::ffi::CStr,
+        qos: QoS,
+        config: SubscribePropertyConfig<'_>,
+    ) -> Result<MessageId, EspError> {
+        let property = esp_mqtt5_subscribe_property_config_t {
+            subscribe_id: config.subscribe_id,
+            no_local_flag: config.no_local,
+            retain_as_published_flag: config.retain_as_published,
+            retain_handle: config.retain_handling,
+            is_share_subscribe: config.share_name.is_some(),
+            share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
+            user_property: if let Some(ref user_properties) = config.user_properties {
+                EspUserPropertyList::from(user_properties).as_ptr()
+            } else {
+                mqtt5_user_property_handle_t::default()
+            },
+        };
+
+        Self::check(unsafe {
+            esp_mqtt5_client_set_subscribe_property(self.raw_client, &property as *const _)
+        })?;
+
+        self.subscribe_cstr(topic, qos)
+    }
+
     pub fn unsubscribe_cstr(&mut self, topic: &core::ffi::CStr) -> Result<MessageId, EspError> {
         Self::check(unsafe { esp_mqtt_client_unsubscribe(self.raw_client, topic.as_ptr()) })
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn unsubscribe_with_config_cstr<'ab>(
+        &mut self,
+        topic: &core::ffi::CStr,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, EspError> {
+        let property = esp_mqtt5_unsubscribe_property_config_t {
+            is_share_subscribe: config.share_name.is_some(),
+            share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
+            user_property: if let Some(ref user_properties) = config.user_properties {
+                EspUserPropertyList::from(user_properties).as_ptr()
+            } else {
+                mqtt5_user_property_handle_t::default()
+            },
+        };
+
+        Self::check(unsafe {
+            esp_mqtt5_client_set_unsubscribe_property(self.raw_client, &property as *const _)
+        })?;
+
+        self.unsubscribe_cstr(topic)
     }
 
     pub fn publish_cstr(
@@ -612,6 +688,41 @@ impl<'a> EspMqttClient<'a> {
                 retain as _,
             )
         })
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn publish_with_config_cstr(
+        &mut self,
+        topic: &core::ffi::CStr,
+        qos: QoS,
+        retain: bool,
+        payload: &[u8],
+        config: PublishPropertyConfig<'a>,
+    ) -> Result<MessageId, EspError> {
+        let property = esp_mqtt5_publish_property_config_t {
+            payload_format_indicator: config.payload_format_indicator,
+            topic_alias: config.topic_alias,
+            message_expiry_interval: config.message_expiry_interval,
+            response_topic: config
+                .response_topic
+                .map_or(core::ptr::null(), |s| s.as_ptr()),
+            correlation_data: config
+                .correlation_data
+                .map_or(core::ptr::null(), |s| s.as_ptr()),
+            correlation_data_len: config.correlation_data.map_or(0, |s| s.len() as _),
+            content_type: config
+                .content_type
+                .map_or(core::ptr::null(), |s| s.as_ptr()),
+            user_property: if let Some(ref user_properties) = config.user_properties {
+                EspUserPropertyList::from(user_properties).as_ptr()
+            } else {
+                mqtt5_user_property_handle_t::default()
+            },
+        };
+        Self::check(unsafe {
+            esp_mqtt5_client_set_publish_property(self.raw_client, &property as *const _)
+        })?;
+        self.publish_cstr(topic, qos, retain, payload)
     }
 
     pub fn enqueue_cstr(
@@ -684,13 +795,32 @@ impl ErrorType for EspMqttClient<'_> {
     type Error = EspError;
 }
 
-impl Client for EspMqttClient<'_> {
+impl<'a> Client for EspMqttClient<'a> {
     fn subscribe(&mut self, topic: &str, qos: QoS) -> Result<MessageId, Self::Error> {
         EspMqttClient::subscribe(self, topic, qos)
     }
 
     fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, Self::Error> {
         EspMqttClient::unsubscribe(self, topic)
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn subscribe_with_config<'ab>(
+        &mut self,
+        topic: &str,
+        qos: QoS,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, Self::Error> {
+        EspMqttClient::subscribe_with_config(self, topic, qos, config)
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn unsubscribe_with_config<'ab>(
+        &mut self,
+        topic: &str,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, Self::Error> {
+        EspMqttClient::unsubscribe_with_config(self, topic, config)
     }
 }
 
@@ -703,6 +833,18 @@ impl Publish for EspMqttClient<'_> {
         payload: &[u8],
     ) -> Result<MessageId, Self::Error> {
         EspMqttClient::publish(self, topic, qos, retain, payload)
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn publish_with_config<'a>(
+        &'a mut self,
+        topic: &'a str,
+        qos: QoS,
+        retain: bool,
+        payload: &'a [u8],
+        config: PublishPropertyConfig<'a>,
+    ) -> Result<MessageId, Self::Error> {
+        EspMqttClient::publish_with_config(self, topic, qos, retain, payload, config)
     }
 }
 
@@ -843,6 +985,34 @@ impl EspAsyncMqttClient {
             .await
     }
 
+    pub async fn subscribe_with_config<'ab>(
+        &mut self,
+        topic: &str,
+        qos: QoS,
+        config: SubscribePropertyConfig<'ab>,
+    ) -> Result<MessageId, EspError> {
+        let property = esp_mqtt5_subscribe_property_config_t {
+            subscribe_id: config.subscribe_id,
+            no_local_flag: config.no_local,
+            retain_as_published_flag: config.retain_as_published,
+            retain_handle: config.retain_handling,
+            is_share_subscribe: config.share_name.is_some(),
+            share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
+            user_property: if let Some(ref user_properties) = config.user_properties {
+                EspUserPropertyList::from(user_properties).as_ptr()
+            } else {
+                mqtt5_user_property_handle_t::default()
+            },
+        };
+
+        Self::check(unsafe {
+            esp_mqtt5_client_set_subscribe_property(self.0.raw_client, &property as *const _)
+        })?;
+
+        self.execute(AsyncCommand::Subscribe { qos }, Some(topic), None, None)
+            .await
+    }
+
     pub async fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, EspError> {
         self.execute(AsyncCommand::Unsubscribe, Some(topic), None, None)
             .await
@@ -912,6 +1082,7 @@ impl EspAsyncMqttClient {
         channel: Arc<Channel<AsyncWork>>,
         mut client: EspMqttClient,
         caps: Option<(usize, usize, usize)>,
+        config: Box<dyn PropertyConfig<'_>>,
     ) {
         // Placeholder work item. This will be replaced by the first actual work item.
         let mut work = AsyncWork {
@@ -936,6 +1107,10 @@ impl EspAsyncMqttClient {
                 AsyncCommand::Subscribe { qos } => {
                     let topic =
                         unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(&work.topic) };
+                    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+                    work.result =
+                        client.subscribe_with_config_cstr(topic, qos, config.as_any().downcast_ref());
+                        
                     work.result = client.subscribe_cstr(topic, qos);
                 }
                 AsyncCommand::Unsubscribe => {
@@ -972,7 +1147,7 @@ impl asynch::Client for EspAsyncMqttClient {
     }
 }
 
-impl asynch::Publish for EspAsyncMqttClient {
+impl asynch::Publish for EspAsynccMqttClient {
     async fn publish(
         &mut self,
         topic: &str,
@@ -1088,12 +1263,92 @@ impl<'a> EspMqttEvent<'a> {
                         Details::Complete
                     }
                 },
-                #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-                property: EspEventProperty::event_property(self.0.property),
             },
             esp_mqtt_event_id_t_MQTT_EVENT_DELETED => EventPayload::Deleted(self.0.msg_id as _),
             other => panic!("Unknown message type: {other}"),
         }
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    pub fn metadata(&self) -> Option<MessageMetadata<'_>> {
+        let ptr = self.0.property;
+
+        if ptr.is_null() {
+            return None;
+        }
+
+        let payload_format_indicator = unsafe { (*ptr).payload_format_indicator };
+        let response_topic = unsafe {
+            let topic = (*ptr).response_topic;
+            if topic.is_null() {
+                None
+            } else {
+                Some(core::ffi::CStr::from_ptr(topic).to_str().unwrap())
+            }
+        };
+
+        let correlation_data = unsafe {
+            let data = (*ptr).correlation_data;
+            if data.is_null() {
+                None
+            } else {
+                Some(core::slice::from_raw_parts(
+                    data,
+                    (*ptr).correlation_data_len as usize,
+                ))
+            }
+        };
+
+        let content_type = unsafe {
+            let content_type = (*ptr).content_type;
+            if content_type.is_null() {
+                None
+            } else {
+                Some(core::ffi::CStr::from_ptr(content_type).to_str().unwrap())
+            }
+        };
+
+        let subscribe_id = unsafe { (*ptr).subscribe_id };
+
+        let event_property = MessageMetadata::new(
+            payload_format_indicator,
+            response_topic,
+            correlation_data,
+            content_type,
+            subscribe_id,
+        );
+        Some(event_property)
+    }
+
+    fn user_properties(&self) -> Option<Box<dyn UserPropertyList<EspError>>> {
+        let count = self.user_properties_count();
+        if count == 0 {
+            return None;
+        }
+
+        let ptr = self.0.property;
+        if ptr.is_null() {
+            return None;
+        }
+        let table: *mut mqtt5_user_property_list_t = unsafe { (*ptr).user_property };
+        if table.is_null() {
+            return None;
+        }
+        let table = EspUserPropertyList(table);
+        Some(Box::new(table))
+    }
+
+    fn user_properties_count(&self) -> u8 {
+        let ptr = self.0.property;
+        if ptr.is_null() {
+            return 0;
+        }
+        let table: *mut mqtt5_user_property_list_t = unsafe { (*ptr).user_property };
+        if table.is_null() {
+            return 0;
+        }
+        let table = EspUserPropertyList(table);
+        table.count()
     }
 }
 
@@ -1110,5 +1365,15 @@ impl ErrorType for EspMqttEvent<'_> {
 impl Event for EspMqttEvent<'_> {
     fn payload(&self) -> EventPayload<'_, Self::Error> {
         EspMqttEvent::payload(self)
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn metadata(&self) -> Option<MessageMetadata<'_>> {
+        EspMqttEvent::metadata(self)
+    }
+
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn user_properties(&self) -> Option<Box<dyn UserPropertyList<Self::Error>>> {
+        EspMqttEvent::user_properties(self)
     }
 }
