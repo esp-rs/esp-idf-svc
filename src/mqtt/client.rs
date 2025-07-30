@@ -9,11 +9,8 @@ use alloc::sync::Arc;
 
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
 
-use embedded_svc::mqtt::client5::PropertyConfig;
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-use embedded_svc::mqtt::client5::{
-    MessageMetadata, PublishPropertyConfig, SubscribePropertyConfig,
-};
+use embedded_svc::mqtt::client5::{MessageMetadata, SubscribePropertyConfig};
 
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
 use embedded_svc::mqtt::client5::UserPropertyList;
@@ -36,6 +33,18 @@ pub use embedded_svc::mqtt::client::{
 
 #[allow(unused_imports)]
 pub use super::*;
+
+fn u8ptr_to_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
+    if ptr.is_null() || len == 0 {
+        return None;
+    }
+
+    // SAFETY: The pointer is assumed to be valid and the length is non-zero.
+    let slice = unsafe { core::slice::from_raw_parts(ptr, len) };
+    core::str::from_utf8(slice)
+        .ok()
+        .map(|s| unsafe { core::mem::transmute(s) }) // Convert to static lifetime
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MqttProtocolVersion {
@@ -353,22 +362,24 @@ impl<'a> TryFrom<&'a MqttClientConfiguration<'a>>
     }
 }
 
-struct UnsafeCallback<'a>(*mut Box<dyn FnMut(esp_mqtt_event_handle_t) + Send + 'a>);
+pub(crate) struct UnsafeCallback<'a>(*mut Box<dyn FnMut(esp_mqtt_event_handle_t) + Send + 'a>);
 
 impl<'a> UnsafeCallback<'a> {
-    fn from(boxed: &mut Box<Box<dyn FnMut(esp_mqtt_event_handle_t) + Send + 'a>>) -> Self {
+    pub(crate) fn from(
+        boxed: &mut Box<Box<dyn FnMut(esp_mqtt_event_handle_t) + Send + 'a>>,
+    ) -> Self {
         Self(boxed.as_mut())
     }
 
-    unsafe fn from_ptr(ptr: *mut c_void) -> Self {
+    pub(crate) unsafe fn from_ptr(ptr: *mut c_void) -> Self {
         Self(ptr as *mut _)
     }
 
-    fn as_ptr(&self) -> *mut c_void {
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.0 as *mut _
     }
 
-    unsafe fn call(&self, data: esp_mqtt_event_handle_t) {
+    pub(crate) unsafe fn call(&self, data: esp_mqtt_event_handle_t) {
         let reference = self.0.as_mut().unwrap();
 
         (reference)(data);
@@ -690,41 +701,6 @@ impl<'a> EspMqttClient<'a> {
         })
     }
 
-    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    pub fn publish_with_config_cstr(
-        &mut self,
-        topic: &core::ffi::CStr,
-        qos: QoS,
-        retain: bool,
-        payload: &[u8],
-        config: PublishPropertyConfig<'a>,
-    ) -> Result<MessageId, EspError> {
-        let property = esp_mqtt5_publish_property_config_t {
-            payload_format_indicator: config.payload_format_indicator,
-            topic_alias: config.topic_alias,
-            message_expiry_interval: config.message_expiry_interval,
-            response_topic: config
-                .response_topic
-                .map_or(core::ptr::null(), |s| s.as_ptr()),
-            correlation_data: config
-                .correlation_data
-                .map_or(core::ptr::null(), |s| s.as_ptr()),
-            correlation_data_len: config.correlation_data.map_or(0, |s| s.len() as _),
-            content_type: config
-                .content_type
-                .map_or(core::ptr::null(), |s| s.as_ptr()),
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
-        };
-        Self::check(unsafe {
-            esp_mqtt5_client_set_publish_property(self.raw_client, &property as *const _)
-        })?;
-        self.publish_cstr(topic, qos, retain, payload)
-    }
-
     pub fn enqueue_cstr(
         &mut self,
         topic: &core::ffi::CStr,
@@ -803,25 +779,6 @@ impl<'a> Client for EspMqttClient<'a> {
     fn unsubscribe(&mut self, topic: &str) -> Result<MessageId, Self::Error> {
         EspMqttClient::unsubscribe(self, topic)
     }
-
-    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    fn subscribe_with_config<'ab>(
-        &mut self,
-        topic: &str,
-        qos: QoS,
-        config: SubscribePropertyConfig<'ab>,
-    ) -> Result<MessageId, Self::Error> {
-        EspMqttClient::subscribe_with_config(self, topic, qos, config)
-    }
-
-    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    fn unsubscribe_with_config<'ab>(
-        &mut self,
-        topic: &str,
-        config: SubscribePropertyConfig<'ab>,
-    ) -> Result<MessageId, Self::Error> {
-        EspMqttClient::unsubscribe_with_config(self, topic, config)
-    }
 }
 
 impl Publish for EspMqttClient<'_> {
@@ -833,18 +790,6 @@ impl Publish for EspMqttClient<'_> {
         payload: &[u8],
     ) -> Result<MessageId, Self::Error> {
         EspMqttClient::publish(self, topic, qos, retain, payload)
-    }
-
-    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    fn publish_with_config<'a>(
-        &'a mut self,
-        topic: &'a str,
-        qos: QoS,
-        retain: bool,
-        payload: &'a [u8],
-        config: PublishPropertyConfig<'a>,
-    ) -> Result<MessageId, Self::Error> {
-        EspMqttClient::publish_with_config(self, topic, qos, retain, payload, config)
     }
 }
 
@@ -863,8 +808,8 @@ impl Enqueue for EspMqttClient<'_> {
 unsafe impl Send for EspMqttClient<'_> {}
 
 pub struct EspMqttConnection {
-    receiver: Receiver<EspMqttEvent<'static>>,
-    given: bool,
+    pub(crate) receiver: Receiver<EspMqttEvent<'static>>,
+    pub(crate) given: bool,
 }
 
 impl EspMqttConnection {
@@ -1167,7 +1112,7 @@ static ERROR: EspError = EspError::from_infallible::<ESP_FAIL>();
 pub struct EspMqttEvent<'a>(&'a esp_mqtt_event_t);
 
 impl<'a> EspMqttEvent<'a> {
-    const fn new(event: &'a esp_mqtt_event_t) -> Self {
+    pub(crate) const fn new(event: &'a esp_mqtt_event_t) -> Self {
         Self(event)
     }
 
@@ -1248,11 +1193,8 @@ impl<'a> EspMqttEvent<'a> {
         let payload_format_indicator = unsafe { (*ptr).payload_format_indicator };
         let response_topic = unsafe {
             let topic = (*ptr).response_topic;
-            if topic.is_null() {
-                None
-            } else {
-                Some(core::ffi::CStr::from_ptr(topic).to_str().unwrap())
-            }
+            let len = (*ptr).response_topic_len;
+            u8ptr_to_str(topic, len as _)
         };
 
         let correlation_data = unsafe {
@@ -1269,11 +1211,8 @@ impl<'a> EspMqttEvent<'a> {
 
         let content_type = unsafe {
             let content_type = (*ptr).content_type;
-            if content_type.is_null() {
-                None
-            } else {
-                Some(core::ffi::CStr::from_ptr(content_type).to_str().unwrap())
-            }
+            let len = (*ptr).content_type_len;
+            u8ptr_to_str(content_type, len as _)
         };
 
         let subscribe_id = unsafe { (*ptr).subscribe_id };

@@ -4,5 +4,5 @@
 
 pub mod client;
 
-#[cfg(all(feature = "std", esp_idf_mqtt_protocol_5))]
+#[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
 pub mod client5;
