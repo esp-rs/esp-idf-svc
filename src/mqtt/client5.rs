@@ -322,7 +322,7 @@ impl<'a> TryFrom<Option<UnsubscribePropertyConfig<'a>>> for EspUnsubscribeProper
         }
 
         let config = config.unwrap();
-        let mut cstrs = RawCstrs::new();
+        let cstrs = RawCstrs::new();
         let mut user_properties = EspUserPropertyList::new();
         if let Some(ref user_properties_items) = config.user_properties {
             user_properties.set_items(user_properties_items)?;
