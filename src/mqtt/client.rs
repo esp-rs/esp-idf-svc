@@ -2,6 +2,8 @@
 use core::ffi::c_void;
 use core::fmt::Debug;
 use core::{slice, time};
+#[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+use std::vec::Vec;
 
 extern crate alloc;
 use alloc::boxed::Box;
@@ -10,7 +12,7 @@ use alloc::sync::Arc;
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
 
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-use embedded_svc::mqtt::client5::{MessageMetadata, SubscribePropertyConfig};
+use embedded_svc::mqtt::client5::{MessageMetadata, SubscribePropertyConfig, UserPropertyItem};
 
 #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
 use embedded_svc::mqtt::client5::UserPropertyList;
@@ -40,10 +42,8 @@ fn u8ptr_to_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     }
 
     // SAFETY: The pointer is assumed to be valid and the length is non-zero.
-    let slice = unsafe { core::slice::from_raw_parts(ptr, len) };
-    core::str::from_utf8(slice)
-        .ok()
-        .map(|s| unsafe { core::mem::transmute(s) }) // Convert to static lifetime
+    let slice: &'a [u8] = unsafe { core::slice::from_raw_parts(ptr, len) };
+    core::str::from_utf8(slice).ok()
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1183,7 +1183,7 @@ impl<'a> EspMqttEvent<'a> {
     }
 
     #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    pub fn metadata(&self) -> Option<MessageMetadata<'_>> {
+    pub fn metadata<'ab>(&self) -> Option<MessageMetadata<'ab>> {
         let ptr = self.0.property;
 
         if ptr.is_null() {
@@ -1191,13 +1191,13 @@ impl<'a> EspMqttEvent<'a> {
         }
 
         let payload_format_indicator = unsafe { (*ptr).payload_format_indicator };
-        let response_topic = unsafe {
+        let response_topic: Option<&'ab str> = unsafe {
             let topic = (*ptr).response_topic;
             let len = (*ptr).response_topic_len;
             u8ptr_to_str(topic, len as _)
         };
 
-        let correlation_data = unsafe {
+        let correlation_data: Option<&'ab [u8]> = unsafe {
             let data = (*ptr).correlation_data;
             if data.is_null() {
                 None
@@ -1209,7 +1209,7 @@ impl<'a> EspMqttEvent<'a> {
             }
         };
 
-        let content_type = unsafe {
+        let content_type: Option<&'ab str> = unsafe {
             let content_type = (*ptr).content_type;
             let len = (*ptr).content_type_len;
             u8ptr_to_str(content_type, len as _)
@@ -1227,22 +1227,23 @@ impl<'a> EspMqttEvent<'a> {
         Some(event_property)
     }
 
-    fn user_properties(&self) -> Option<Box<dyn UserPropertyList<EspError>>> {
+    #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+    fn user_properties<'ab>(&self) -> Result<Vec<UserPropertyItem<'ab>>, EspError> {
         let count = self.user_properties_count();
         if count == 0 {
-            return None;
+            return Ok(Vec::new());
         }
 
         let ptr = self.0.property;
         if ptr.is_null() {
-            return None;
+            return Ok(Vec::new());
         }
         let table: *mut mqtt5_user_property_list_t = unsafe { (*ptr).user_property };
         if table.is_null() {
-            return None;
+            return Ok(Vec::new());
         }
-        let table = EspUserPropertyList(table);
-        Some(Box::new(table))
+
+        Ok(EspUserPropertyList::from_handle(table).get_items()?)
     }
 
     fn user_properties_count(&self) -> u8 {
@@ -1254,7 +1255,7 @@ impl<'a> EspMqttEvent<'a> {
         if table.is_null() {
             return 0;
         }
-        let table = EspUserPropertyList(table);
+        let table = EspUserPropertyList::from_handle(table);
         table.count()
     }
 }
@@ -1275,12 +1276,12 @@ impl Event for EspMqttEvent<'_> {
     }
 
     #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    fn metadata(&self) -> Option<MessageMetadata<'_>> {
+    fn metadata<'a>(&self) -> Option<MessageMetadata<'a>> {
         EspMqttEvent::metadata(self)
     }
 
     #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
-    fn user_properties(&self) -> Option<Box<dyn UserPropertyList<Self::Error>>> {
+    fn user_properties<'ab>(&self) -> Result<Vec<UserPropertyItem<'ab>>, Self::Error> {
         EspMqttEvent::user_properties(self)
     }
 }

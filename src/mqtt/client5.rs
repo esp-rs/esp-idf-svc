@@ -5,7 +5,7 @@ use crate::{
     handle::RawHandle,
     mqtt::client::{EspMqttConnection, EspMqttEvent, MqttClientConfiguration, UnsafeCallback},
     private::{
-        cstr::to_cstring_arg,
+        cstr::{to_cstring_arg, RawCstrs},
         zerocopy::{Channel, QuitOnDrop},
     },
     tls::TlsPsk,
@@ -33,16 +33,23 @@ use embedded_svc::mqtt::{
 #[allow(unused_imports)]
 use esp_idf_hal::sys::*;
 
-pub struct EspUserPropertyList(pub(crate) mqtt5_user_property_handle_t);
+pub struct EspUserPropertyList(pub(crate) mqtt5_user_property_handle_t, RawCstrs);
 
 impl EspUserPropertyList {
+    pub fn new() -> Self {
+        let handle = mqtt5_user_property_handle_t::default();
+        Self(handle, RawCstrs::new())
+    }
+    pub(crate) fn from_handle(handle: mqtt5_user_property_handle_t) -> Self {
+        let raw_cstrs = RawCstrs::new();
+        EspUserPropertyList(handle, raw_cstrs)
+    }
     pub fn from<'a>(items: &&[UserPropertyItem<'a>]) -> Self {
         let handle = mqtt5_user_property_handle_t::default();
-        let mut list = EspUserPropertyList(handle);
+        let mut list = EspUserPropertyList(handle, RawCstrs::new());
         list.set_items(items)
             .expect("Failed to set user properties");
-
-        Self(handle)
+        list
     }
 
     pub fn as_ptr(&self) -> mqtt5_user_property_handle_t {
@@ -59,20 +66,20 @@ impl EspUserPropertyList {
     }
 
     fn set_items(&mut self, properties: &[UserPropertyItem]) -> Result<(), EspError> {
-        let mut items: Vec<esp_mqtt5_user_property_item_t> = properties
-            .iter()
+        let items_result: Result<Vec<esp_mqtt5_user_property_item_t>, EspError> = properties
+            .into_iter()
             .map(|item| {
-                let key_cstr = CString::new(item.key).unwrap();
-                let value_cstr = CString::new(item.value).unwrap();
-
+                let key = self.1.as_ptr(item.key)?;
+                let value = self.1.as_ptr(item.value)?;
                 let item = esp_mqtt5_user_property_item_t {
-                    key: key_cstr.as_ptr(),
-                    value: value_cstr.as_ptr(),
+                    key: key,
+                    value: value,
                 };
-                item
+                Ok(item)
             })
             .collect();
 
+        let mut items = items_result?;
         let error = unsafe {
             let items_ptr = items.as_mut_ptr();
             let result =
@@ -83,10 +90,10 @@ impl EspUserPropertyList {
         Ok(())
     }
 
-    fn get_items(&self) -> Result<Option<Vec<UserPropertyItem>>, EspError> {
+    fn get_items<'a>(&self) -> Result<Vec<UserPropertyItem<'a>>, EspError> {
         let count = unsafe { esp_mqtt5_client_get_user_property_count(self.0) };
         if count == 0 {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let mut items: Vec<esp_mqtt5_user_property_item_t> = Vec::with_capacity(count as usize);
         items.resize_with(count as usize, || esp_mqtt5_user_property_item_t {
@@ -101,11 +108,11 @@ impl EspUserPropertyList {
             )
         };
         esp!(error)?;
-        let result: Vec<UserPropertyItem> = items
+        let result: Vec<UserPropertyItem<'a>> = items
             .into_iter()
             .map(|i| EspUserPropertyItem(i).into())
             .collect();
-        Ok(Some(result))
+        Ok(result)
     }
 
     fn clear(&self) {
@@ -156,7 +163,7 @@ impl UserPropertyList<EspError> for EspUserPropertyList {
         EspUserPropertyList::set_items(self, properties)
     }
 
-    fn get_items(&self) -> Result<Option<Vec<UserPropertyItem>>, EspError> {
+    fn get_items<'a>(&self) -> Result<Vec<UserPropertyItem<'a>>, EspError> {
         EspUserPropertyList::get_items(self)
     }
 
@@ -176,7 +183,7 @@ impl UserPropertyList<EspError> for &EspUserPropertyList {
         EspUserPropertyList::set_items(mut_self, properties)
     }
 
-    fn get_items(&self) -> Result<Option<Vec<UserPropertyItem>>, EspError> {
+    fn get_items<'a>(&self) -> Result<Vec<UserPropertyItem<'a>>, EspError> {
         EspUserPropertyList::get_items(self)
     }
 
@@ -189,86 +196,196 @@ impl UserPropertyList<EspError> for &EspUserPropertyList {
     }
 }
 
-struct EspPublishPropertyConfig(pub(crate) esp_mqtt5_publish_property_config_t);
+struct EspPublishPropertyConfig(
+    pub(crate) esp_mqtt5_publish_property_config_t,
+    Option<EspUserPropertyList>,
+    #[allow(dead_code)] Option<RawCstrs>, //Holds the C strings to prevent them from being dropped prematurely
+);
 
-impl<'a> From<PublishPropertyConfig<'a>> for EspPublishPropertyConfig {
-    fn from(config: PublishPropertyConfig<'a>) -> Self {
+impl TryFrom<Option<PublishPropertyConfig<'_>>> for EspPublishPropertyConfig {
+    type Error = EspError;
+    fn try_from(config: Option<PublishPropertyConfig<'_>>) -> Result<Self, EspError> {
+        let mut cstrs = RawCstrs::new();
+        if config.is_none() {
+            // If no config is provided, we use an empty config
+            return Ok(EspPublishPropertyConfig(
+                esp_mqtt5_publish_property_config_t::default(),
+                None,
+                None,
+            ));
+        }
+        let config = config.unwrap();
+        let mut user_properties = EspUserPropertyList::new();
+
+        if let Some(ref user_properties_items) = config.user_properties {
+            user_properties.set_items(user_properties_items)?;
+        }
+
         let property = esp_mqtt5_publish_property_config_t {
             payload_format_indicator: config.payload_format_indicator,
             topic_alias: config.topic_alias,
             message_expiry_interval: config.message_expiry_interval,
-            response_topic: config
-                .response_topic
-                .map_or(core::ptr::null(), |s| s.as_ptr()),
+            response_topic: cstrs.as_nptr(config.response_topic)?,
             correlation_data: config
                 .correlation_data
                 .map_or(core::ptr::null(), |s| s.as_ptr()),
             correlation_data_len: config.correlation_data.map_or(0, |s| s.len() as _),
-            content_type: config
-                .content_type
-                .map_or(core::ptr::null(), |s| s.as_ptr()),
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
+            content_type: cstrs.as_nptr(config.content_type)?,
+            user_property: user_properties.as_ptr(),
         };
-        EspPublishPropertyConfig(property)
+        //transfer ownership of cstrs to the struct
+        Ok(EspPublishPropertyConfig(
+            property,
+            Some(user_properties),
+            Some(cstrs),
+        ))
     }
 }
 
-struct EspSubscribePropertyConfig(pub(crate) esp_mqtt5_subscribe_property_config_t);
+impl Drop for EspPublishPropertyConfig {
+    fn drop(&mut self) {
+        // Clear the user properties if they were set
+        if let Some(ref user_properties) = self.1 {
+            user_properties.clear();
+        }
+    }
+}
 
-impl<'a> From<SubscribePropertyConfig<'a>> for EspSubscribePropertyConfig {
-    fn from(config: SubscribePropertyConfig<'a>) -> Self {
+struct EspSubscribePropertyConfig(
+    pub(crate) esp_mqtt5_subscribe_property_config_t,
+    Option<EspUserPropertyList>,
+    #[allow(dead_code)] Option<RawCstrs>,
+);
+
+impl<'a> TryFrom<Option<SubscribePropertyConfig<'a>>> for EspSubscribePropertyConfig {
+    type Error = EspError;
+    fn try_from(config: Option<SubscribePropertyConfig<'a>>) -> Result<Self, EspError> {
+        if config.is_none() {
+            // If no config is provided, we use an empty config
+            return Ok(EspSubscribePropertyConfig(
+                esp_mqtt5_subscribe_property_config_t::default(),
+                None,
+                None,
+            ));
+        }
+
+        let config = config.unwrap();
+        let mut cstrs = RawCstrs::new();
+        let mut user_properties = EspUserPropertyList::new();
+        if let Some(ref user_properties_items) = config.user_properties {
+            user_properties.set_items(user_properties_items)?;
+        }
+
         let property = esp_mqtt5_subscribe_property_config_t {
             no_local_flag: config.no_local,
             retain_as_published_flag: config.retain_as_published,
             retain_handle: config.retain_handling as _,
             is_share_subscribe: config.share_name.is_some(),
-            share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
+            share_name: cstrs.as_nptr(config.share_name)?,
             subscribe_id: config.subscribe_id,
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
+            user_property: user_properties.as_ptr(),
         };
-        EspSubscribePropertyConfig(property)
+
+        Ok(EspSubscribePropertyConfig(
+            property,
+            Some(user_properties),
+            Some(cstrs),
+        ))
     }
 }
 
-struct EspUnsubscribePropertyConfig(pub(crate) esp_mqtt5_unsubscribe_property_config_t);
+impl Drop for EspSubscribePropertyConfig {
+    fn drop(&mut self) {
+        // Clear the user properties if they were set
+        if let Some(ref user_properties) = self.1 {
+            user_properties.clear();
+        }
+    }
+}
 
-impl<'a> From<UnsubscribePropertyConfig<'a>> for EspUnsubscribePropertyConfig {
-    fn from(config: UnsubscribePropertyConfig<'a>) -> Self {
+struct EspUnsubscribePropertyConfig(
+    pub(crate) esp_mqtt5_unsubscribe_property_config_t,
+    Option<EspUserPropertyList>,
+    #[allow(dead_code)] Option<RawCstrs>,
+);
+
+impl<'a> TryFrom<Option<UnsubscribePropertyConfig<'a>>> for EspUnsubscribePropertyConfig {
+    type Error = EspError;
+    fn try_from(config: Option<UnsubscribePropertyConfig<'a>>) -> Result<Self, EspError> {
+        if config.is_none() {
+            // If no config is provided, we use an empty config
+            return Ok(EspUnsubscribePropertyConfig(
+                esp_mqtt5_unsubscribe_property_config_t::default(),
+                None,
+                None,
+            ));
+        }
+
+        let config = config.unwrap();
+        let mut cstrs = RawCstrs::new();
+        let mut user_properties = EspUserPropertyList::new();
+        if let Some(ref user_properties_items) = config.user_properties {
+            user_properties.set_items(user_properties_items)?;
+        }
+
         let property = esp_mqtt5_unsubscribe_property_config_t {
             is_share_subscribe: config.share_name.is_some(),
             share_name: config.share_name.map_or(core::ptr::null(), |s| s.as_ptr()),
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
+            user_property: user_properties.as_ptr(),
         };
-        EspUnsubscribePropertyConfig(property)
+        Ok(EspUnsubscribePropertyConfig(
+            property,
+            Some(user_properties),
+            Some(cstrs),
+        ))
     }
 }
 
-pub struct EspDisconnectPropertyConfig(pub(crate) esp_mqtt5_disconnect_property_config_t);
+impl Drop for EspUnsubscribePropertyConfig {
+    fn drop(&mut self) {
+        // Clear the user properties if they were set
+        if let Some(ref user_properties) = self.1 {
+            user_properties.clear();
+        }
+    }
+}
 
-impl<'a> From<DisconnectPropertyConfig<'a>> for EspDisconnectPropertyConfig {
-    fn from(config: DisconnectPropertyConfig<'a>) -> Self {
+pub struct EspDisconnectPropertyConfig(
+    pub(crate) esp_mqtt5_disconnect_property_config_t,
+    Option<EspUserPropertyList>,
+);
+
+impl<'a> TryFrom<Option<DisconnectPropertyConfig<'a>>> for EspDisconnectPropertyConfig {
+    type Error = EspError;
+    fn try_from(config: Option<DisconnectPropertyConfig<'a>>) -> Result<Self, EspError> {
+        if config.is_none() {
+            // If no config is provided, we use an empty config
+            return Ok(EspDisconnectPropertyConfig(
+                esp_mqtt5_disconnect_property_config_t::default(),
+                None,
+            ));
+        }
+
+        let config = config.unwrap();
+        let mut user_properties = EspUserPropertyList::new();
+        if let Some(ref user_properties_items) = config.user_properties {
+            user_properties.set_items(user_properties_items)?;
+        }
         let property = esp_mqtt5_disconnect_property_config_t {
             session_expiry_interval: config.session_expiry_interval,
             disconnect_reason: config.reason,
-            user_property: if let Some(ref user_properties) = config.user_properties {
-                EspUserPropertyList::from(user_properties).as_ptr()
-            } else {
-                mqtt5_user_property_handle_t::default()
-            },
+            user_property: user_properties.as_ptr(),
         };
-        EspDisconnectPropertyConfig(property)
+        Ok(EspDisconnectPropertyConfig(property, Some(user_properties)))
+    }
+}
+
+impl Drop for EspDisconnectPropertyConfig {
+    fn drop(&mut self) {
+        // Clear the user properties if they were set
+        if let Some(ref user_properties) = self.1 {
+            user_properties.clear();
+        }
     }
 }
 
@@ -454,8 +571,8 @@ impl<'a> EspMqtt5Client<'a> {
         &mut self,
         config: Option<DisconnectPropertyConfig<'ab>>,
     ) -> Result<(), EspError> {
+        let property = EspDisconnectPropertyConfig::try_from(config)?;
         if config.is_some() {
-            let property = EspDisconnectPropertyConfig::from(config.unwrap());
             Self::check(unsafe {
                 esp_mqtt5_client_set_disconnect_property(self.raw_client, &property.0 as *const _)
             })?;
@@ -476,8 +593,8 @@ impl<'a> EspMqtt5Client<'a> {
         qos: QoS,
         config: Option<SubscribePropertyConfig<'ab>>,
     ) -> Result<MessageId, EspError> {
+        let property = EspSubscribePropertyConfig::try_from(config)?;
         if config.is_some() {
-            let property = EspSubscribePropertyConfig::from(config.unwrap());
             // If no config is provided, we use an empty config
             Self::check(unsafe {
                 esp_mqtt5_client_set_subscribe_property(self.raw_client, &property.0 as *const _)
@@ -518,8 +635,8 @@ impl<'a> EspMqtt5Client<'a> {
         topic: &core::ffi::CStr,
         config: Option<UnsubscribePropertyConfig<'ab>>,
     ) -> Result<MessageId, EspError> {
+        let property = EspUnsubscribePropertyConfig::try_from(config)?;
         if config.is_some() {
-            let property = EspUnsubscribePropertyConfig::from(config.unwrap());
             // If no config is provided, we use an empty config
             Self::check(unsafe {
                 esp_mqtt5_client_set_unsubscribe_property(self.raw_client, &property.0 as *const _)
@@ -536,9 +653,18 @@ impl<'a> EspMqtt5Client<'a> {
         payload: &[u8],
         config: Option<PublishPropertyConfig<'ab>>,
     ) -> Result<MessageId, EspError> {
+        ::log::info!(
+            "Publishing to topic: {}, qos: {:?}, retain: {}, payload length: {}, config: {:?}",
+            topic.to_str().unwrap_or("Invalid UTF-8"),
+            qos,
+            retain,
+            payload.len(),
+            config
+        );
+
+        let property = EspPublishPropertyConfig::try_from(config)?;
+
         if config.is_some() {
-            let property = EspPublishPropertyConfig::from(config.unwrap());
-            // If no config is provided, we use an empty config
             Self::check(unsafe {
                 esp_mqtt5_client_set_publish_property(self.raw_client, &property.0 as *const _)
             })?;
@@ -549,7 +675,7 @@ impl<'a> EspMqtt5Client<'a> {
             _ => payload.as_ptr(),
         };
 
-        Self::check(unsafe {
+        let result = Self::check(unsafe {
             esp_mqtt_client_publish(
                 self.raw_client,
                 topic.as_ptr(),
@@ -558,7 +684,9 @@ impl<'a> EspMqtt5Client<'a> {
                 qos as _,
                 retain as _,
             )
-        })
+        });
+        drop(property); // Ensure the property is dropped after use
+        return result;
     }
 
     pub fn enqueue_cstr(
