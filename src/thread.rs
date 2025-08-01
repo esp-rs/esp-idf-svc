@@ -8,6 +8,10 @@ use core::ffi::{self, c_void, CStr};
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
 use std::string::ToString;
 use std::thread::JoinHandle;
 
@@ -25,11 +29,11 @@ use crate::io::vfs::MountedEventfs;
 use crate::netif::*;
 use crate::nvs::EspDefaultNvsPartition;
 use crate::sys::*;
+use crate::thread::srp::OtSrp;
 
 extern crate alloc;
 
-use alloc::boxed::Box;
-use alloc::sync::Arc;
+pub mod srp;
 
 /// A trait shared between the `Host` and `RCP` modes providing the option for these
 /// to do additional initialization.
@@ -100,16 +104,18 @@ macro_rules! ot_esp {
     ($err:expr) => {{
         esp!({
             #[allow(non_upper_case_globals, non_snake_case)]
-            let err = match $err as _ {
-                otError_OT_ERROR_NONE => ESP_OK,
-                otError_OT_ERROR_FAILED => ESP_FAIL,
-                _ => ESP_FAIL, // For now
+            let err = match $err as u32 {
+                $crate::sys::otError_OT_ERROR_NONE => $crate::sys::ESP_OK,
+                $crate::sys::otError_OT_ERROR_FAILED => $crate::sys::ESP_FAIL,
+                _ => $crate::sys::ESP_FAIL, // For now
             };
 
             err
         })
     }};
 }
+
+pub(crate) use ot_esp;
 
 /// Active scan result
 pub struct ActiveScanResult<'a>(&'a otActiveScanResult);
@@ -250,8 +256,9 @@ pub enum Ipv6Incoming<'a> {
 }
 
 struct ThreadDriverInner {
-    cfg: esp_openthread_platform_config_t,
     initialized: bool,
+    cfg: esp_openthread_platform_config_t,
+    srp: alloc::boxed::Box<OtSrp>,
     #[allow(clippy::type_complexity)]
     callback: Option<Box<Box<dyn FnMut(Ipv6Incoming) + Send + 'static>>>,
     running: Option<JoinHandle<Result<(), EspError>>>,
@@ -260,8 +267,17 @@ struct ThreadDriverInner {
 impl ThreadDriverInner {
     fn new(cfg: esp_openthread_platform_config_t) -> Self {
         Self {
-            cfg,
             initialized: false,
+            srp: {
+                let mut srp = alloc::boxed::Box::new_uninit();
+
+                unsafe {
+                    OtSrp::init(srp.as_mut_ptr());
+
+                    srp.assume_init()
+                }
+            },
+            cfg,
             callback: None,
             running: None,
         }
@@ -1182,9 +1198,19 @@ where
 
         esp!(unsafe { esp_openthread_init(&inner.cfg) })?;
 
+        let instance = unsafe { esp_openthread_get_instance() };
+
         #[cfg(not(esp_idf_openthread_radio))]
         unsafe {
             otLoggingSetLevel(CONFIG_LOG_DEFAULT_LEVEL as _);
+        }
+
+        unsafe {
+            crate::sys::otSrpClientSetCallback(
+                instance,
+                Some(OtSrp::plat_c_srp_state_change_callback),
+                inner.srp.as_mut() as *mut _ as *mut _,
+            )
         }
 
         T::init();
