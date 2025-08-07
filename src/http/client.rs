@@ -485,7 +485,7 @@ impl EspHttpConnection {
 
     fn assert_initial(&self) {
         if self.state != State::New && self.state != State::Response {
-            panic!("connection is not in initial phase");
+            info!("connection is not in initial phase");
         }
     }
 
