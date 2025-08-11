@@ -937,22 +937,10 @@ impl OtSrp {
         trace!("Plat SRP changed callback");
 
         self.cleanup(host_info, removed_services);
-
-        // TODO
-        // let state = self.state();
-        // if let Ok(srp) = state.srp() {
-        //     srp.changes.signal(());
-        //     state.ot.changes.signal(());
-        // }
     }
 
     fn plat_srp_auto_started(&mut self) {
-        // TODO
-        // let state = self.state();
-        // if let Ok(srp) = state.srp() {
-        //     srp.changes.signal(());
-        //     state.ot.changes.signal(());
-        // }
+        // TODO - in future, consider if we need to signal the changes here
     }
 
     pub(crate) unsafe extern "C" fn plat_c_srp_state_change_callback(
