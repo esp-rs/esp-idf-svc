@@ -27,8 +27,6 @@ rustflags = ["--cfg", "espidf_time64"]
 ESP_IDF_SDKCONFIG_DEFAULTS = ".github/configs/sdkconfig.defaults"
 ESP_IDF_VERSION = "v5.3.2"
 #ESP_IDF_VERSION = "release/v5.3" Necessary for `Thread::stop`
-#MCU = "esp32c3"
-#MCU = "esp32c6"
 
 [unstable]
 build-std = ["std", "panic_abort"]
