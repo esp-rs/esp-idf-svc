@@ -46,24 +46,25 @@ pub enum NvsDataType {
     I64 = nvs_type_t_NVS_TYPE_I64,
     Str = nvs_type_t_NVS_TYPE_STR,
     Blob = nvs_type_t_NVS_TYPE_BLOB,
-    Any = nvs_type_t_NVS_TYPE_ANY,
 }
 
 #[allow(non_upper_case_globals)]
-impl From<nvs_type_t> for NvsDataType {
-    fn from(nvs_type: nvs_type_t) -> Self {
+impl NvsDataType {
+    /// Converts a `nvs_type_t` to an `NvsDataType`, returning `None` if the type is not recognized.
+    #[must_use]
+    pub fn from_nvs_type(nvs_type: nvs_type_t) -> Option<Self> {
         match nvs_type {
-            nvs_type_t_NVS_TYPE_U8 => NvsDataType::U8,
-            nvs_type_t_NVS_TYPE_I8 => NvsDataType::I8,
-            nvs_type_t_NVS_TYPE_U16 => NvsDataType::U16,
-            nvs_type_t_NVS_TYPE_I16 => NvsDataType::I16,
-            nvs_type_t_NVS_TYPE_U32 => NvsDataType::U32,
-            nvs_type_t_NVS_TYPE_I32 => NvsDataType::I32,
-            nvs_type_t_NVS_TYPE_U64 => NvsDataType::U64,
-            nvs_type_t_NVS_TYPE_I64 => NvsDataType::I64,
-            nvs_type_t_NVS_TYPE_STR => NvsDataType::Str,
-            nvs_type_t_NVS_TYPE_BLOB => NvsDataType::Blob,
-            _ => NvsDataType::Any,
+            nvs_type_t_NVS_TYPE_U8 => Some(Self::U8),
+            nvs_type_t_NVS_TYPE_I8 => Some(Self::I8),
+            nvs_type_t_NVS_TYPE_U16 => Some(Self::U16),
+            nvs_type_t_NVS_TYPE_I16 => Some(Self::I16),
+            nvs_type_t_NVS_TYPE_U32 => Some(Self::U32),
+            nvs_type_t_NVS_TYPE_I32 => Some(Self::I32),
+            nvs_type_t_NVS_TYPE_U64 => Some(Self::U64),
+            nvs_type_t_NVS_TYPE_I64 => Some(Self::I64),
+            nvs_type_t_NVS_TYPE_STR => Some(Self::Str),
+            nvs_type_t_NVS_TYPE_BLOB => Some(Self::Blob),
+            _ => None,
         }
     }
 }
@@ -373,7 +374,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let result = unsafe { nvs_find_key(self.1, c_key.as_ptr(), &mut entry_type as *mut _) };
 
         match result {
-            ESP_OK => Ok(Some(NvsDataType::from(entry_type))),
+            ESP_OK => Ok(NvsDataType::from_nvs_type(entry_type)),
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 esp!(err)?;
@@ -726,11 +727,19 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     /// Returns an iterator over all key-value pairs in the NVS namespace with the specified data type.
+    ///
+    /// A data type of `None` will return all entries regardless of their type.
     #[cfg(esp_idf_version_at_least_5_2_5)]
-    pub fn iter(&self, data_type: NvsDataType) -> Result<IterEspNvs<'_, T>, EspError> {
+    pub fn iter(&self, data_type: Option<NvsDataType>) -> Result<IterEspNvs<'_, T>, EspError> {
         let mut raw_iter: nvs_iterator_t = core::ptr::null_mut();
         esp!(unsafe {
-            nvs_entry_find_in_handle(self.1, data_type as u32, &mut raw_iter as *mut _)
+            nvs_entry_find_in_handle(
+                self.1,
+                data_type
+                    .map(|ty| ty as u32)
+                    .unwrap_or(nvs_type_t_NVS_TYPE_ANY),
+                &mut raw_iter as *mut _,
+            )
         })?;
 
         Ok(IterEspNvs {
@@ -786,7 +795,7 @@ pub struct IterEspNvs<'a, T: NvsPartitionId> {
 
 #[cfg(esp_idf_version_at_least_5_2_5)]
 impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
-    type Item = (heapless::String<16>, NvsDataType);
+    type Item = (heapless::String<16>, Option<NvsDataType>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_exhausted || self.raw_iter.is_null() {
@@ -812,7 +821,7 @@ impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
 
                 Some((
                     from_cstr(&info.key[..]).try_into().unwrap(),
-                    NvsDataType::from(info.type_),
+                    NvsDataType::from_nvs_type(info.type_),
                 ))
             }
             // The nvs_entry_info only fails if any of the arguments are null.
