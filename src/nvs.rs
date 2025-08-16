@@ -708,6 +708,22 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
         Ok(())
     }
+
+    /// Erases all key-value pairs in the NVS namespace.
+    /// 
+    /// # Errors
+    ///
+    /// This function will return an error if the NVS erase operation fails, this can happen because of
+    /// - a corrupted NVS partition
+    /// - the NVS is opened in read-only mode
+    /// - other internal errors from the underlying storage driver
+    pub fn erase_all(&self) -> Result<(), EspError> {
+        esp!(unsafe { nvs_erase_all(self.1) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
 }
 
 impl<T: NvsPartitionId> Drop for EspNvs<T> {
