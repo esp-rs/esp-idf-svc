@@ -46,24 +46,25 @@ pub enum NvsDataType {
     I64 = nvs_type_t_NVS_TYPE_I64,
     Str = nvs_type_t_NVS_TYPE_STR,
     Blob = nvs_type_t_NVS_TYPE_BLOB,
-    Any = nvs_type_t_NVS_TYPE_ANY,
 }
 
 #[allow(non_upper_case_globals)]
-impl From<nvs_type_t> for NvsDataType {
-    fn from(nvs_type: nvs_type_t) -> Self {
+impl NvsDataType {
+    /// Converts a `nvs_type_t` to an `NvsDataType`, returning `None` if the type is not recognized.
+    #[must_use]
+    pub fn from_nvs_type(nvs_type: nvs_type_t) -> Option<Self> {
         match nvs_type {
-            nvs_type_t_NVS_TYPE_U8 => NvsDataType::U8,
-            nvs_type_t_NVS_TYPE_I8 => NvsDataType::I8,
-            nvs_type_t_NVS_TYPE_U16 => NvsDataType::U16,
-            nvs_type_t_NVS_TYPE_I16 => NvsDataType::I16,
-            nvs_type_t_NVS_TYPE_U32 => NvsDataType::U32,
-            nvs_type_t_NVS_TYPE_I32 => NvsDataType::I32,
-            nvs_type_t_NVS_TYPE_U64 => NvsDataType::U64,
-            nvs_type_t_NVS_TYPE_I64 => NvsDataType::I64,
-            nvs_type_t_NVS_TYPE_STR => NvsDataType::Str,
-            nvs_type_t_NVS_TYPE_BLOB => NvsDataType::Blob,
-            _ => NvsDataType::Any,
+            nvs_type_t_NVS_TYPE_U8 => Some(Self::U8),
+            nvs_type_t_NVS_TYPE_I8 => Some(Self::I8),
+            nvs_type_t_NVS_TYPE_U16 => Some(Self::U16),
+            nvs_type_t_NVS_TYPE_I16 => Some(Self::I16),
+            nvs_type_t_NVS_TYPE_U32 => Some(Self::U32),
+            nvs_type_t_NVS_TYPE_I32 => Some(Self::I32),
+            nvs_type_t_NVS_TYPE_U64 => Some(Self::U64),
+            nvs_type_t_NVS_TYPE_I64 => Some(Self::I64),
+            nvs_type_t_NVS_TYPE_STR => Some(Self::Str),
+            nvs_type_t_NVS_TYPE_BLOB => Some(Self::Blob),
+            _ => None,
         }
     }
 }
@@ -373,7 +374,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
         let result = unsafe { nvs_find_key(self.1, c_key.as_ptr(), &mut entry_type as *mut _) };
 
         match result {
-            ESP_OK => Ok(Some(NvsDataType::from(entry_type))),
+            ESP_OK => Ok(NvsDataType::from_nvs_type(entry_type)),
             ESP_ERR_NVS_NOT_FOUND => Ok(None),
             err => {
                 esp!(err)?;
@@ -708,6 +709,45 @@ impl<T: NvsPartitionId> EspNvs<T> {
 
         Ok(())
     }
+
+    /// Erases all key-value pairs in the NVS namespace.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the NVS erase operation fails, this can happen because of
+    /// - a corrupted NVS partition
+    /// - the NVS is opened in read-only mode
+    /// - other internal errors from the underlying storage driver
+    pub fn erase_all(&self) -> Result<(), EspError> {
+        esp!(unsafe { nvs_erase_all(self.1) })?;
+
+        esp!(unsafe { nvs_commit(self.1) })?;
+
+        Ok(())
+    }
+
+    /// Returns an iterator over all key-value pairs in the NVS namespace with the specified data type.
+    ///
+    /// A data type of `None` will return all entries regardless of their type.
+    #[cfg(esp_idf_version_at_least_5_2_0)]
+    pub fn iter(&self, data_type: Option<NvsDataType>) -> Result<IterEspNvs<'_, T>, EspError> {
+        let mut raw_iter: nvs_iterator_t = core::ptr::null_mut();
+        esp!(unsafe {
+            nvs_entry_find_in_handle(
+                self.1,
+                data_type
+                    .map(|ty| ty as u32)
+                    .unwrap_or(nvs_type_t_NVS_TYPE_ANY),
+                &mut raw_iter as *mut _,
+            )
+        })?;
+
+        Ok(IterEspNvs {
+            _nvs: self,
+            raw_iter,
+            is_exhausted: false,
+        })
+    }
 }
 
 impl<T: NvsPartitionId> Drop for EspNvs<T> {
@@ -734,6 +774,72 @@ impl RawHandle for EspNvs<NvsEncrypted> {
 
     fn handle(&self) -> Self::Handle {
         self.1
+    }
+}
+impl RawHandle for EspNvs<NvsDefault> {
+    type Handle = nvs_handle_t;
+
+    fn handle(&self) -> Self::Handle {
+        self.1
+    }
+}
+
+#[cfg(esp_idf_version_at_least_5_2_0)]
+pub struct IterEspNvs<'a, T: NvsPartitionId> {
+    // The EspNvs must not be dropped while the iterator is still in use,
+    // this reference ensures that.
+    _nvs: &'a EspNvs<T>,
+    raw_iter: nvs_iterator_t,
+    is_exhausted: bool,
+}
+
+#[cfg(esp_idf_version_at_least_5_2_0)]
+impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
+    type Item = (heapless::String<16>, Option<NvsDataType>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_exhausted || self.raw_iter.is_null() {
+            return None;
+        }
+
+        let mut info: nvs_entry_info_t = Default::default();
+        match unsafe { nvs_entry_info(self.raw_iter, &mut info as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => {
+                self.is_exhausted = true;
+                None
+            }
+            ESP_OK => {
+                // For the next iteration, the iterator must be advanced to the next entry,
+                // otherwise it will return the same entry again.
+                //
+                // TODO: decide whether the iterator should return Result or not, currently it will only fail
+                // - if the iterator is null, which is checked before this call
+                // - if the iterator is exhausted (-> it will set `self.raw_iter` to null, therefore it will never call this again)
+                //
+                // But the documentation mentions that in the future there might be errors that can occur
+                let _res = esp!(unsafe { nvs_entry_next(&mut self.raw_iter as *mut _) });
+
+                Some((
+                    from_cstr(&info.key[..]).try_into().unwrap(),
+                    NvsDataType::from_nvs_type(info.type_),
+                ))
+            }
+            // The nvs_entry_info only fails if any of the arguments are null.
+            // The nvs_entry_info is never null, and self.raw_iter is checked for null before the invocation.
+            //
+            // Therefore this should never happen.
+            err => unimplemented!(
+                "Unexpected error while iterating over NVS entries: {:?}",
+                esp!(err)
+            ),
+        }
+    }
+}
+
+#[cfg(esp_idf_version_at_least_5_2_0)]
+impl<'a, T: NvsPartitionId> Drop for IterEspNvs<'a, T> {
+    fn drop(&mut self) {
+        unsafe { nvs_release_iterator(self.raw_iter) };
     }
 }
 
