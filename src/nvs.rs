@@ -710,7 +710,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
     }
 
     /// Erases all key-value pairs in the NVS namespace.
-    /// 
+    ///
     /// # Errors
     ///
     /// This function will return an error if the NVS erase operation fails, this can happen because of
@@ -723,6 +723,20 @@ impl<T: NvsPartitionId> EspNvs<T> {
         esp!(unsafe { nvs_commit(self.1) })?;
 
         Ok(())
+    }
+
+    /// Returns an iterator over all key-value pairs in the NVS namespace with the specified data type.
+    pub fn iter(&self, data_type: NvsDataType) -> Result<IterEspNvs<'_, T>, EspError> {
+        let mut raw_iter: nvs_iterator_t = core::ptr::null_mut();
+        esp!(unsafe {
+            nvs_entry_find_in_handle(self.1, data_type as u32, &mut raw_iter as *mut _)
+        })?;
+
+        Ok(IterEspNvs {
+            _nvs: self,
+            raw_iter,
+            is_exhausted: false,
+        })
     }
 }
 
@@ -757,6 +771,62 @@ impl RawHandle for EspNvs<NvsDefault> {
 
     fn handle(&self) -> Self::Handle {
         self.1
+    }
+}
+
+pub struct IterEspNvs<'a, T: NvsPartitionId> {
+    // The EspNvs must not be dropped while the iterator is still in use,
+    // this reference ensures that.
+    _nvs: &'a EspNvs<T>,
+    raw_iter: nvs_iterator_t,
+    is_exhausted: bool,
+}
+
+impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
+    type Item = (heapless::String<16>, NvsDataType);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_exhausted || self.raw_iter.is_null() {
+            return None;
+        }
+
+        let mut info: nvs_entry_info_t = Default::default();
+        match unsafe { nvs_entry_info(self.raw_iter, &mut info as *mut _) } {
+            ESP_ERR_NVS_NOT_FOUND => {
+                self.is_exhausted = true;
+                None
+            }
+            ESP_OK => {
+                // For the next iteration, the iterator must be advanced to the next entry,
+                // otherwise it will return the same entry again.
+                //
+                // TODO: decide whether the iterator should return Result or not, currently it will only fail
+                // - if the iterator is null, which is checked before this call
+                // - if the iterator is exhausted (-> it will set `self.raw_iter` to null, therefore it will never call this again)
+                //
+                // But the documentation mentions that in the future there might be errors that can occur
+                let _res = esp!(unsafe { nvs_entry_next(&mut self.raw_iter as *mut _) });
+
+                Some((
+                    from_cstr(&info.key[..]).try_into().unwrap(),
+                    NvsDataType::from(info.type_),
+                ))
+            }
+            // The nvs_entry_info only fails if any of the arguments are null.
+            // The nvs_entry_info is never null, and self.raw_iter is checked for null before the invocation.
+            //
+            // Therefore this should never happen.
+            err => unimplemented!(
+                "Unexpected error while iterating over NVS entries: {:?}",
+                esp!(err)
+            ),
+        }
+    }
+}
+
+impl<'a, T: NvsPartitionId> Drop for IterEspNvs<'a, T> {
+    fn drop(&mut self) {
+        unsafe { nvs_release_iterator(self.raw_iter) };
     }
 }
 
