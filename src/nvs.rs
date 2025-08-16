@@ -729,7 +729,7 @@ impl<T: NvsPartitionId> EspNvs<T> {
     /// Returns an iterator over all key-value pairs in the NVS namespace with the specified data type.
     ///
     /// A data type of `None` will return all entries regardless of their type.
-    #[cfg(esp_idf_version_at_least_5_2_5)]
+    #[cfg(esp_idf_version_at_least_5_2_0)]
     pub fn iter(&self, data_type: Option<NvsDataType>) -> Result<IterEspNvs<'_, T>, EspError> {
         let mut raw_iter: nvs_iterator_t = core::ptr::null_mut();
         esp!(unsafe {
@@ -784,7 +784,7 @@ impl RawHandle for EspNvs<NvsDefault> {
     }
 }
 
-#[cfg(esp_idf_version_at_least_5_2_5)]
+#[cfg(esp_idf_version_at_least_5_2_0)]
 pub struct IterEspNvs<'a, T: NvsPartitionId> {
     // The EspNvs must not be dropped while the iterator is still in use,
     // this reference ensures that.
@@ -793,7 +793,7 @@ pub struct IterEspNvs<'a, T: NvsPartitionId> {
     is_exhausted: bool,
 }
 
-#[cfg(esp_idf_version_at_least_5_2_5)]
+#[cfg(esp_idf_version_at_least_5_2_0)]
 impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
     type Item = (heapless::String<16>, Option<NvsDataType>);
 
@@ -836,7 +836,7 @@ impl<'a, T: NvsPartitionId> Iterator for IterEspNvs<'a, T> {
     }
 }
 
-#[cfg(esp_idf_version_at_least_5_2_5)]
+#[cfg(esp_idf_version_at_least_5_2_0)]
 impl<'a, T: NvsPartitionId> Drop for IterEspNvs<'a, T> {
     fn drop(&mut self) {
         unsafe { nvs_release_iterator(self.raw_iter) };
