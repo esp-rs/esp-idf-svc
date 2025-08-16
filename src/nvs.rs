@@ -736,6 +736,13 @@ impl RawHandle for EspNvs<NvsEncrypted> {
         self.1
     }
 }
+impl RawHandle for EspNvs<NvsDefault> {
+    type Handle = nvs_handle_t;
+
+    fn handle(&self) -> Self::Handle {
+        self.1
+    }
+}
 
 /// A specialized key-value storage wrapper around `EspNvs` that provides a simplified interface
 /// for storing and retrieving arbitrary data as byte (`u8`) slices.
