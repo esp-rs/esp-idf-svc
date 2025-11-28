@@ -204,7 +204,7 @@ mod example {
                             adv_data_len as u16 + scan_rsp_len as u16,
                             AdvertisingDataType::NameCmpl,
                         );
-                        let name = name.map(str::from_utf8).transpose().ok().flatten();
+                        let name = name.map(|n| str::from_utf8(n)).transpose().ok().flatten();
 
                         info!("Scan result, device {bda} - rssi {rssi}, name: {name:?}");
 
@@ -598,7 +598,7 @@ mod example {
                     gattc_if,
                     conn_id,
                     write_char_handle,
-                    &char_value,
+                    char_value,
                     GattWriteType::RequireResponse,
                     GattAuthReq::None,
                 )?;
