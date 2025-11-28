@@ -2,11 +2,14 @@ use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::{ffi::CStr, ops::BitOr};
+use std::slice;
 
 use crate::bt::BtSingleton;
 use crate::sys::*;
 
 use ::log::trace;
+use log::error;
+use num_enum::TryFromPrimitive;
 
 use crate::{
     bt::{BdAddr, BleEnabled, BtDriver, BtStatus, BtUuid},
@@ -30,12 +33,15 @@ pub enum AuthenticationRequest {
     #[default]
     NoBonding = 0b0000_0000,
     Bonding = 0b0000_0001,
-    Mitm = 0b0000_0010,
-    MitmBonding = 0b0000_0011,
-    SecureOnly = 0b0000_0100,
-    SecureBonding = 0b0000_0101,
-    SecureMitm = 0b0000_0110,
-    SecureMitmBonding = 0b0000_0111,
+    Mitm = 0b0000_0100,
+    MitmBonding = (AuthenticationRequest::Mitm as u8 | AuthenticationRequest::Bonding as u8),
+    SecureOnly = 0b0000_1000,
+    SecureBonding =
+        (AuthenticationRequest::SecureOnly as u8 | AuthenticationRequest::Bonding as u8),
+    SecureMitm = (AuthenticationRequest::SecureOnly as u8 | AuthenticationRequest::Mitm as u8),
+    SecureMitmBonding = (AuthenticationRequest::SecureOnly as u8
+        | AuthenticationRequest::Mitm as u8
+        | AuthenticationRequest::Bonding as u8),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -229,6 +235,149 @@ impl<'a> From<&'a AdvConfiguration<'a>> for esp_ble_adv_data_t {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum AdvertisingDataType {
+    Flag = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_FLAG,
+    Srv16Part = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_16SRV_PART,
+    Srv16Cmpl = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_16SRV_CMPL,
+    Srv32Part = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_32SRV_PART,
+    Srv32Cmpl = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_32SRV_CMPL,
+    Srv128Part = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_128SRV_PART,
+    Srv128Cmpl = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_128SRV_CMPL,
+    NameShort = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_NAME_SHORT,
+    NameCmpl = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_NAME_CMPL,
+    TxPwr = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_TX_PWR,
+    DevClass = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_DEV_CLASS,
+    SmTk = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SM_TK,
+    SmOobFlag = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SM_OOB_FLAG,
+    IntRange = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_INT_RANGE,
+    SolSrvUuid = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SOL_SRV_UUID,
+    Sol128SrvUuid = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_128SOL_SRV_UUID,
+    ServiceData = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SERVICE_DATA,
+    PublicTarget = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_PUBLIC_TARGET,
+    RandomTarget = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_RANDOM_TARGET,
+    Appearance = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_APPEARANCE,
+    AdvInt = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_ADV_INT,
+    LeDevAddr = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_LE_DEV_ADDR,
+    LeRole = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_LE_ROLE,
+    SpairC256 = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SPAIR_C256,
+    SpairR256 = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_SPAIR_R256,
+    Sol32SrvUuid = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_32SOL_SRV_UUID,
+    Service32Data = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_32SERVICE_DATA,
+    Service128Data = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_128SERVICE_DATA,
+    LeSecureConfirm = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_LE_SECURE_CONFIRM,
+    LeSecureRandom = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_LE_SECURE_RANDOM,
+    Uri = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_URI,
+    IndoorPosition = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_INDOOR_POSITION,
+    TransDiscData = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_TRANS_DISC_DATA,
+    LeSupportFeature = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_LE_SUPPORT_FEATURE,
+    ChanMapUpdate = esp_ble_adv_data_type_ESP_BLE_AD_TYPE_CHAN_MAP_UPDATE,
+    ManufacturerSpecific = esp_ble_adv_data_type_ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ScanType {
+    Passive = esp_ble_scan_type_t_BLE_SCAN_TYPE_PASSIVE,
+    Active = esp_ble_scan_type_t_BLE_SCAN_TYPE_ACTIVE,
+}
+
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum BleAddrType {
+    #[default]
+    Public = esp_ble_addr_type_t_BLE_ADDR_TYPE_PUBLIC,
+    Random = esp_ble_addr_type_t_BLE_ADDR_TYPE_RANDOM,
+    RpaPublic = esp_ble_addr_type_t_BLE_ADDR_TYPE_RPA_PUBLIC,
+    RpaRandom = esp_ble_addr_type_t_BLE_ADDR_TYPE_RPA_RANDOM,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ScanFilter {
+    /// Accept all :
+    /// 1. advertisement packets except directed advertising packets not addressed to this device (default).
+    All = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_ALL,
+    /// Accept only :
+    /// 1. advertisement packets from devices where the advertiser’s address is in the White list.
+    /// 2. Directed advertising packets which are not addressed for this device shall be ignored.
+    OnlyWhitelist = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_ONLY_WLST,
+    /// Accept all :
+    /// 1. undirected advertisement packets, and
+    /// 2. directed advertising packets where the initiator address is a resolvable private address, and
+    /// 3. directed advertising packets addressed to this device.
+    UndirectedAndDirected = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_UND_RPA_DIR,
+    /// Accept all :
+    /// 1. advertisement packets from devices where the advertiser’s address is in the White list, and
+    /// 2. directed advertising packets where the initiator address is a resolvable private address, and
+    /// 3. directed advertising packets addressed to this device.
+    WhitelistAndDirected = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_WLIST_RPA_DIR,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ScanDuplicate {
+    Disable = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_DISABLE,
+    Enable = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_ENABLE,
+    #[cfg(esp_idf_ble_50_feature_support)]
+    Reset = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_ENABLE_RESET,
+    Max = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_MAX,
+}
+
+pub struct ScanParams {
+    pub scan_type: ScanType,
+    pub own_addr_type: BleAddrType,
+    pub scan_filter_policy: ScanFilter,
+    pub scan_interval: u16,
+    pub scan_window: u16,
+    pub scan_duplicate: ScanDuplicate,
+}
+
+impl From<&ScanParams> for esp_ble_scan_params_t {
+    fn from(params: &ScanParams) -> Self {
+        Self {
+            scan_type: params.scan_type as _,
+            own_addr_type: params.own_addr_type as _,
+            scan_filter_policy: params.scan_filter_policy as _,
+            scan_interval: params.scan_interval,
+            scan_window: params.scan_window,
+            scan_duplicate: params.scan_duplicate as _,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum GapSearchEvent {
+    InquiryResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_RES_EVT,
+    InquiryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_CMPL_EVT,
+    DiscoveryResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_RES_EVT,
+    DiscoveryBleResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_BLE_RES_EVT,
+    DiscoveryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_CMPL_EVT,
+    DiDiscoveryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_DI_DISC_CMPL_EVT,
+    SearchCanceled = esp_gap_search_evt_t_ESP_GAP_SEARCH_SEARCH_CANCEL_CMPL_EVT,
+    InquiryDiscardedNum = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_DISCARD_NUM_EVT,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u32)]
+pub enum BtDevType {
+    Bredr = esp_bt_dev_type_t_ESP_BT_DEVICE_TYPE_BREDR,
+    Ble = esp_bt_dev_type_t_ESP_BT_DEVICE_TYPE_BLE,
+    Dumo = esp_bt_dev_type_t_ESP_BT_DEVICE_TYPE_DUMO,
+}
+
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+pub enum BleEventType {
+    ConnectableUndirectedAdv = esp_ble_evt_type_t_ESP_BLE_EVT_CONN_ADV,
+    ConnectableDirectedAdv = esp_ble_evt_type_t_ESP_BLE_EVT_CONN_DIR_ADV,
+    ScannableUndirectedAdv = esp_ble_evt_type_t_ESP_BLE_EVT_DISC_ADV,
+    NonconnectableUndirectedAdv = esp_ble_evt_type_t_ESP_BLE_EVT_NON_CONN_ADV,
+    ScanResponse = esp_ble_evt_type_t_ESP_BLE_EVT_SCAN_RSP,
+}
+
 pub struct EventRawData<'a>(pub &'a esp_ble_gap_cb_param_t);
 
 impl Debug for EventRawData<'_> {
@@ -242,8 +391,20 @@ pub enum BleGapEvent<'a> {
     AdvertisingConfigured(BtStatus),
     ScanResponseConfigured(BtStatus),
     ScanParameterConfigured(BtStatus),
-    // TODO
-    ScanResult(esp_ble_gap_cb_param_t_ble_scan_result_evt_param),
+    ScanResult {
+        search_evt: GapSearchEvent,
+        bda: BdAddr,
+        dev_type: BtDevType,
+        ble_addr_type: BleAddrType,
+        ble_evt_type: BleEventType,
+        rssi: i32,
+        ble_adv: [u8; 62usize],
+        flag: i32,
+        num_resps: i32,
+        adv_data_len: u8,
+        scan_rsp_len: u8,
+        num_dis: u32,
+    },
     RawAdvertisingConfigured(BtStatus),
     RawScanResponseConfigured(BtStatus),
     AdvertisingStarted(BtStatus),
@@ -375,9 +536,20 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT => {
                     Self::ScanParameterConfigured(param.scan_param_cmpl.status.try_into().unwrap())
                 }
-                esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => {
-                    Self::ScanResult(param.scan_rst)
-                }
+                esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => Self::ScanResult {
+                    search_evt: param.scan_rst.search_evt.try_into().unwrap(),
+                    bda: param.scan_rst.bda.into(),
+                    dev_type: param.scan_rst.dev_type.try_into().unwrap(),
+                    ble_addr_type: param.scan_rst.ble_addr_type.try_into().unwrap(),
+                    ble_evt_type: param.scan_rst.ble_evt_type.try_into().unwrap(),
+                    rssi: param.scan_rst.rssi,
+                    ble_adv: param.scan_rst.ble_adv,
+                    flag: param.scan_rst.flag,
+                    num_resps: param.scan_rst.num_resps,
+                    adv_data_len: param.scan_rst.adv_data_len,
+                    scan_rsp_len: param.scan_rst.scan_rsp_len,
+                    num_dis: param.scan_rst.num_dis,
+                },
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT => {
                     Self::RawAdvertisingConfigured(
                         param.adv_data_raw_cmpl.status.try_into().unwrap(),
@@ -595,7 +767,16 @@ where
                     core::mem::size_of::<T>() as _,
                 )
             })
+            .map_err(|e| {
+                error!("Failed to set security param {param}");
+                e
+            })
         }
+
+        set(
+            esp_ble_sm_param_t_ESP_BLE_SM_AUTHEN_REQ_MODE,
+            &conf.auth_req_mode,
+        )?;
 
         set(
             esp_ble_sm_param_t_ESP_BLE_SM_IOCAP_MODE,
@@ -607,15 +788,15 @@ where
         }
 
         if let Some(responder_key) = &conf.responder_key {
-            set(esp_ble_sm_param_t_ESP_BLE_SM_SET_RSP_KEY, &responder_key)?;
-        }
-
-        if let Some(max_key_size) = &conf.max_key_size {
-            set(esp_ble_sm_param_t_ESP_BLE_SM_MAX_KEY_SIZE, &max_key_size)?;
+            set(esp_ble_sm_param_t_ESP_BLE_SM_SET_RSP_KEY, responder_key)?;
         }
 
         if let Some(min_key_size) = &conf.min_key_size {
-            set(esp_ble_sm_param_t_ESP_BLE_SM_MIN_KEY_SIZE, &min_key_size)?;
+            set(esp_ble_sm_param_t_ESP_BLE_SM_MIN_KEY_SIZE, min_key_size)?;
+        }
+
+        if let Some(max_key_size) = &conf.max_key_size {
+            set(esp_ble_sm_param_t_ESP_BLE_SM_MAX_KEY_SIZE, max_key_size)?;
         }
 
         if let Some(passkey) = &conf.static_passkey {
@@ -656,6 +837,14 @@ where
         esp!(unsafe { esp_ble_set_encryption(&addr.0 as *const _ as *mut _, encryption as u32) })
     }
 
+    pub fn set_scan_params(&self, params: &ScanParams) -> Result<(), EspError> {
+        let scan_params = params.into();
+
+        esp!(unsafe {
+            esp_ble_gap_set_scan_params(&scan_params as *const esp_ble_scan_params_t as *mut _)
+        })
+    }
+
     pub fn start_scanning(&self, duration: u32) -> Result<(), EspError> {
         esp!(unsafe { esp_ble_gap_start_scanning(duration) })
     }
@@ -684,6 +873,30 @@ where
         esp!(unsafe { esp_ble_gap_stop_advertising() })
     }
 
+    pub fn resolve_adv_data_by_type(
+        &self,
+        adv_data: &[u8],
+        adv_data_len: u16,
+        data_type: AdvertisingDataType,
+    ) -> Option<&[u8]> {
+        let mut length: u8 = 0;
+
+        let resolve_adv_data = unsafe {
+            esp_ble_resolve_adv_data_by_type(
+                adv_data as *const _ as *mut _,
+                adv_data_len,
+                data_type as _,
+                &mut length,
+            )
+        };
+
+        if length == 0 {
+            None
+        } else {
+            Some(unsafe { slice::from_raw_parts(resolve_adv_data, length as _) })
+        }
+    }
+
     pub fn set_conn_params_conf(
         &self,
         addr: BdAddr,
@@ -701,6 +914,10 @@ where
                 bda: addr.0,
             } as *const _ as *mut _)
         })
+    }
+
+    pub fn disconnect(&self, addr: BdAddr) -> Result<(), EspError> {
+        esp!(unsafe { esp_ble_gap_disconnect(&addr.0 as *const _ as *mut _) })
     }
 
     unsafe extern "C" fn event_handler(
