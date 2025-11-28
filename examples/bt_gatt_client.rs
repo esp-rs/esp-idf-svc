@@ -204,7 +204,11 @@ mod example {
                             adv_data_len as u16 + scan_rsp_len as u16,
                             AdvertisingDataType::NameCmpl,
                         );
-                        let name = name.map(|n| str::from_utf8(n)).transpose().ok().flatten();
+                        let name = name
+                            .map(|n| std::str::from_utf8(n))
+                            .transpose()
+                            .ok()
+                            .flatten();
 
                         info!("Scan result, device {bda} - rssi {rssi}, name: {name:?}");
 
