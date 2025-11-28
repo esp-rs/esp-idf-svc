@@ -2,7 +2,6 @@ use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 use core::{ffi::CStr, ops::BitOr};
-use std::slice;
 
 use crate::bt::BtSingleton;
 use crate::sys::*;
@@ -893,7 +892,7 @@ where
         if length == 0 {
             None
         } else {
-            Some(unsafe { slice::from_raw_parts(resolve_adv_data, length as _) })
+            Some(unsafe { core::slice::from_raw_parts(resolve_adv_data, length as _) })
         }
     }
 
