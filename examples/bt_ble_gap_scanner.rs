@@ -135,9 +135,9 @@ mod example {
         fn on_gap_event(&self, event: BleGapEvent) -> Result<(), EspError> {
             trace!("Got event: {event:?}");
 
-            if let BleGapEvent::ScanResult(result) = event {
+            if let BleGapEvent::ScanResult { bda, .. } = event {
                 let mut state = self.state.lock().unwrap();
-                let address = BluetoothAddress(BdAddr::from_bytes(result.bda));
+                let address = BluetoothAddress(bda);
                 match state.discovered.insert(address) {
                     Ok(true) => info!("Discovered new device {address}"),
                     Err(_) => warn!("Error while storing address: {address}"),
