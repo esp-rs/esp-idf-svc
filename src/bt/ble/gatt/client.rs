@@ -147,8 +147,9 @@ pub struct GattCreateConnParams {
     /// Connection parameters for the LE Coded PHY
     pub phy_coded_conn_params: Option<BleConnParams>,
 }
+
 impl GattCreateConnParams {
-    pub fn new(addr: BdAddr, addr_type: BleAddrType) -> Self {
+    pub const fn new(addr: BdAddr, addr_type: BleAddrType) -> Self {
         Self {
             addr,
             addr_type,
@@ -162,86 +163,172 @@ impl GattCreateConnParams {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GattcService {
-    /// Indicates if the service is primary
-    pub is_primary: bool,
-    /// Service start handle
-    pub start_handle: Handle,
-    /// Service end handle
-    pub end_handle: Handle,
-    /// Service UUID
-    pub uuid: BtUuid,
-}
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct ServiceElement(esp_gattc_service_elem_t);
 
-impl From<&esp_gattc_service_elem_t> for GattcService {
-    fn from(svc: &esp_gattc_service_elem_t) -> Self {
-        Self {
-            is_primary: svc.is_primary,
-            start_handle: svc.start_handle,
-            end_handle: svc.end_handle,
-            uuid: svc.uuid.into(),
-        }
+impl ServiceElement {
+    pub const fn new() -> Self {
+        Self(esp_gattc_service_elem_t {
+            uuid: BtUuid::uuid16(0).raw(),
+            is_primary: false,
+            start_handle: 0,
+            end_handle: 0,
+        })
+    }
+
+    pub fn uuid(&self) -> BtUuid {
+        self.0.uuid.into()
+    }
+
+    pub fn is_primary(&self) -> bool {
+        self.0.is_primary
+    }
+
+    pub fn start_handle(&self) -> Handle {
+        self.0.start_handle
+    }
+    pub fn end_handle(&self) -> Handle {
+        self.0.end_handle
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct IncludeService {
-    /// Current attribute handle of the included service
-    pub handle: Handle,
-    /// Start handle of the included service
-    pub incl_srvc_s_handle: Handle,
-    /// End handle of the included service
-    pub incl_srvc_e_handle: Handle,
-    /// Included service UUID
-    pub uuid: BtUuid,
-}
-
-impl From<&esp_gattc_incl_svc_elem_t> for IncludeService {
-    fn from(svc: &esp_gattc_incl_svc_elem_t) -> Self {
-        Self {
-            handle: svc.handle,
-            incl_srvc_s_handle: svc.incl_srvc_s_handle,
-            incl_srvc_e_handle: svc.incl_srvc_e_handle,
-            uuid: svc.uuid.into(),
-        }
+impl Default for ServiceElement {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct CharacteristicElement {
-    /// Characteristic handle
-    pub char_handle: Handle,
-    /// Characteristic properties
-    pub properties: EnumSet<Property>,
-    /// Characteristic UUID
-    pub uuid: BtUuid,
-}
-
-impl From<&esp_gattc_char_elem_t> for CharacteristicElement {
-    fn from(elem: &esp_gattc_char_elem_t) -> Self {
-        Self {
-            char_handle: elem.char_handle,
-            properties: EnumSet::from_repr(elem.properties),
-            uuid: elem.uuid.into(),
-        }
+impl Debug for ServiceElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceElement")
+            .field("uuid", &self.uuid())
+            .field("is_primary", &self.0.is_primary)
+            .field("start_handle", &self.0.start_handle)
+            .field("end_handle", &self.0.end_handle)
+            .finish()
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct DescriptorElement {
-    /// Descriptor handle
-    pub handle: Handle,
-    /// Descriptor UUID
-    pub uuid: BtUuid,
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct IncludeServiceElement(esp_gattc_incl_svc_elem_t);
+
+impl IncludeServiceElement {
+    pub const fn new() -> Self {
+        Self(esp_gattc_incl_svc_elem_t {
+            uuid: BtUuid::uuid16(0).raw(),
+            handle: 0,
+            incl_srvc_s_handle: 0,
+            incl_srvc_e_handle: 0,
+        })
+    }
+
+    pub fn uuid(&self) -> BtUuid {
+        self.0.uuid.into()
+    }
+
+    pub fn handle(&self) -> Handle {
+        self.0.handle
+    }
+    pub fn start_handle(&self) -> Handle {
+        self.0.incl_srvc_s_handle
+    }
+    pub fn end_handle(&self) -> Handle {
+        self.0.incl_srvc_e_handle
+    }
 }
 
-impl From<&esp_gattc_descr_elem_t> for DescriptorElement {
-    fn from(elem: &esp_gattc_descr_elem_t) -> Self {
-        Self {
-            handle: elem.handle,
-            uuid: elem.uuid.into(),
-        }
+impl Default for IncludeServiceElement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Debug for IncludeServiceElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IncludeService")
+            .field("uuid", &self.uuid())
+            .field("handle", &self.handle())
+            .field("start_handle", &self.start_handle())
+            .field("end_handle", &self.end_handle())
+            .finish()
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct CharacteristicElement(esp_gattc_char_elem_t);
+
+impl CharacteristicElement {
+    pub const fn new() -> Self {
+        Self(esp_gattc_char_elem_t {
+            uuid: BtUuid::uuid16(0).raw(),
+            char_handle: 0,
+            properties: 0,
+        })
+    }
+
+    pub fn uuid(&self) -> BtUuid {
+        self.0.uuid.into()
+    }
+
+    pub fn handle(&self) -> Handle {
+        self.0.char_handle
+    }
+
+    pub fn properties(&self) -> EnumSet<Property> {
+        EnumSet::from_repr(self.0.properties)
+    }
+}
+
+impl Default for CharacteristicElement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Debug for CharacteristicElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CharacteristicElement")
+            .field("uuid", &self.uuid())
+            .field("handle", &self.handle())
+            .field("properties", &self.properties())
+            .finish()
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct DescriptorElement(esp_gattc_descr_elem_t);
+
+impl DescriptorElement {
+    pub const fn new() -> Self {
+        Self(esp_gattc_descr_elem_t {
+            uuid: BtUuid::uuid16(0).raw(),
+            handle: 0,
+        })
+    }
+
+    pub fn uuid(&self) -> BtUuid {
+        self.0.uuid.into()
+    }
+
+    pub fn handle(&self) -> Handle {
+        self.0.handle
+    }
+}
+
+impl Default for DescriptorElement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Debug for DescriptorElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DescriptorElement")
+            .field("uuid", &self.uuid())
+            .field("handle", &self.handle())
+            .finish()
     }
 }
 
@@ -278,18 +365,31 @@ pub enum DbElementAttrType {
     } = esp_gatt_db_attr_type_t_ESP_GATT_DB_ALL,
 }
 
-#[derive(Debug, Clone)]
-pub struct DbElement {
-    /// Attribute UUID.
-    pub uuid: BtUuid,
-    /// Attribute type.
-    pub attr_type: DbElementAttrType,
-}
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct DbElement(esp_gattc_db_elem_t);
 
-impl From<&esp_gattc_db_elem_t> for DbElement {
-    fn from(elem: &esp_gattc_db_elem_t) -> Self {
+impl DbElement {
+    pub const fn new() -> Self {
+        Self(esp_gattc_db_elem_t {
+            uuid: BtUuid::uuid16(0).raw(),
+            type_: 0,
+            attribute_handle: 0,
+            start_handle: 0,
+            end_handle: 0,
+            properties: 0,
+        })
+    }
+
+    pub fn uuid(&self) -> BtUuid {
+        self.0.uuid.into()
+    }
+
+    pub fn attribute_type(&self) -> DbElementAttrType {
+        let elem = self.0;
+
         #[allow(non_upper_case_globals)]
-        let attr_type = match elem.type_ {
+        match elem.type_ {
             esp_gatt_db_attr_type_t_ESP_GATT_DB_PRIMARY_SERVICE => {
                 DbElementAttrType::PrimaryService {
                     start_handle: elem.start_handle,
@@ -329,12 +429,22 @@ impl From<&esp_gattc_db_elem_t> for DbElement {
                 attribute_handle: elem.attribute_handle,
                 properties: EnumSet::from_repr(elem.properties),
             },
-        };
-
-        Self {
-            attr_type,
-            uuid: elem.uuid.into(),
         }
+    }
+}
+
+impl Default for DbElement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Debug for DbElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DbElement")
+            .field("uuid", &self.uuid())
+            .field("attribute_type", &self.attribute_type())
+            .finish()
     }
 }
 
@@ -1026,74 +1136,68 @@ where
     /// Get the service with the given service UUID in the local GATTC cache.
     /// * `svc_uuid` The service UUID. If `None` is passed, the API will retrieve all services.
     /// * `offset` The position offset to retrieve
+    /// * `results` That will be updated with the services found in the local GATTC cache
     ///
-    /// Returns the service which has been found in the local GATTC cache
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. [`cache_refresh()`] can be used to discover services again
-    pub fn get_service<const N: usize>(
+    pub fn get_service(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         svc_uuid: Option<BtUuid>,
         offset: u16,
-    ) -> Result<heapless::Vec<GattcService, N>, EspError> {
-        let count = if svc_uuid.is_some() { 1 } else { N as _ };
-
-        let mut services_raw: heapless::Vec<esp_gattc_service_elem_t, N> = heapless::Vec::new();
-        unsafe { services_raw.set_len(count) };
-
-        let mut count: u16 = count as u16;
+        results: &mut [ServiceElement],
+    ) -> Result<usize, EspError> {
+        let mut count: u16 = if svc_uuid.is_some() {
+            1
+        } else {
+            results.len() as _
+        };
 
         esp!(unsafe {
             esp_ble_gattc_get_service(
                 gattc_if,
                 conn_id,
                 svc_uuid.map_or(core::ptr::null_mut(), |s| &s.raw() as *const _ as *mut _),
-                services_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
                 offset,
             )
         })?;
 
-        count = if offset > count {
+        Ok(if offset > count {
             0
         } else {
-            (count - offset).min(N as u16)
-        };
-
-        let result = services_raw[..count as usize]
-            .iter()
-            .map(|service_raw| service_raw.into())
-            .inspect(|service| ::log::debug!("Found service {service:?}"))
-            .collect();
-
-        Ok(result)
+            (count - offset).min(results.len() as u16) as _
+        })
     }
 
     /// Get all characteristics with the given handle range in the local GATTC cache.
     /// * `start_handle` The attribute start handle
     /// * `end_handle` The attribute end handle
     /// * `offset` The position offset to retrieve
+    /// * `results` That will be updated with the characteristics found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
-    pub fn get_all_characteristics<const N: usize>(
+    pub fn get_all_characteristics(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
         offset: u16,
-    ) -> Result<heapless::Vec<CharacteristicElement, N>, GattStatus> {
-        let mut chars_raw: heapless::Vec<esp_gattc_char_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            chars_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [CharacteristicElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_all_char(
@@ -1101,96 +1205,80 @@ where
                 conn_id,
                 start_handle,
                 end_handle,
-                chars_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
                 offset,
             )
         })?;
 
-        count = if offset > count {
+        Ok(if offset > count {
             0
         } else {
-            (count - offset).min(N as u16)
-        };
-
-        let result = chars_raw[..count as usize]
-            .iter()
-            .map(|chars_raw| chars_raw.into())
-            .inspect(|char| ::log::debug!("Found characteristic {char:?}"))
-            .collect();
-
-        Ok(result)
+            (count - offset).min(results.len() as u16) as _
+        })
     }
 
     /// Get all descriptors with the given characteristic in the local GATTC cache.
     /// * `char_handle` The given characteristic handle
     /// * `offset` The position offset to retrieve
+    /// * `results` That will be updated with the descriptors found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `char_handle` must be greater than 0
-    pub fn get_all_descriptors<const N: usize>(
+    pub fn get_all_descriptors(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         char_handle: Handle,
         offset: u16,
-    ) -> Result<heapless::Vec<DescriptorElement, N>, GattStatus> {
-        let mut descrs_raw: heapless::Vec<esp_gattc_descr_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            descrs_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [DescriptorElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_all_descr(
                 gattc_if,
                 conn_id,
                 char_handle,
-                descrs_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
                 offset,
             )
         })?;
 
-        count = if offset > count {
+        Ok(if offset > count {
             0
         } else {
-            (count - offset).min(N as u16)
-        };
-
-        let result = descrs_raw[..count as usize]
-            .iter()
-            .map(|descrs_raw| descrs_raw.into())
-            .inspect(|descr| ::log::debug!("Found descriptor {descr:?}"))
-            .collect();
-
-        Ok(result)
+            (count - offset).min(results.len() as u16) as _
+        })
     }
 
     /// Get the characteristic with the given characteristic UUID in the local GATTC cache.
     /// * `start_handle` The attribute start handle
     /// * `end_handle` The attribute end handle
     /// * `char_uuid` The characteristic UUID
+    /// * `results` That will be updated with the characteristics found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
-    pub fn get_characteristic_by_uuid<const N: usize>(
+    pub fn get_characteristic_by_uuid(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
         char_uuid: BtUuid,
-    ) -> Result<heapless::Vec<CharacteristicElement, N>, GattStatus> {
-        let mut chars_raw: heapless::Vec<esp_gattc_char_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            chars_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [CharacteristicElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_char_by_uuid(
@@ -1199,20 +1287,12 @@ where
                 start_handle,
                 end_handle,
                 char_uuid.raw(),
-                chars_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
             )
         })?;
 
-        count = count.min(N as u16);
-
-        let result = chars_raw[..count as usize]
-            .iter()
-            .map(|chars_raw| chars_raw.into())
-            .inspect(|char| ::log::debug!("Found characteristic {char:?}"))
-            .collect();
-
-        Ok(result)
+        Ok(count.min(results.len() as u16) as _)
     }
 
     /// Get the descriptor with the given characteristic UUID in the local GATTC cache.
@@ -1220,11 +1300,15 @@ where
     /// * `end_handle` The attribute end handle
     /// * `char_uuid` The characteristic UUID
     /// * `descr_uuid` The descriptor UUID
+    /// * `results` That will be updated with the descriptors found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
-    pub fn get_descriptor_by_uuid<const N: usize>(
+    pub fn get_descriptor_by_uuid(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
@@ -1232,13 +1316,9 @@ where
         end_handle: Handle,
         char_uuid: BtUuid,
         descr_uuid: BtUuid,
-    ) -> Result<heapless::Vec<DescriptorElement, N>, GattStatus> {
-        let mut descrs_raw: heapless::Vec<esp_gattc_descr_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            descrs_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [DescriptorElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_descr_by_uuid(
@@ -1248,42 +1328,34 @@ where
                 end_handle,
                 char_uuid.raw(),
                 descr_uuid.raw(),
-                descrs_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
             )
         })?;
 
-        count = count.min(N as u16);
-
-        let result = descrs_raw[..count as usize]
-            .iter()
-            .map(|descrs_raw| descrs_raw.into())
-            .inspect(|descr| ::log::debug!("Found descriptor {descr:?}"))
-            .collect();
-
-        Ok(result)
+        Ok(count.min(results.len() as u16) as _)
     }
 
     /// Get the descriptor with the given characteristic handle in the local GATTC cache.
     /// * `char_handle` The characteristic handle
     /// * `descr_uuid` The descriptor UUID
+    /// * `results` That will be updated with the descriptors found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `char_handle` must be greater than 0
-    pub fn get_descriptor_by_char_handle<const N: usize>(
+    pub fn get_descriptor_by_char_handle(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         char_handle: Handle,
         descr_uuid: BtUuid,
-    ) -> Result<heapless::Vec<DescriptorElement, N>, GattStatus> {
-        let mut descrs_raw: heapless::Vec<esp_gattc_descr_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            descrs_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [DescriptorElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_descr_by_char_handle(
@@ -1291,42 +1363,34 @@ where
                 conn_id,
                 char_handle,
                 descr_uuid.raw(),
-                descrs_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
             )
         })?;
 
-        count = count.min(N as u16);
-
-        let result = descrs_raw[..count as usize]
-            .iter()
-            .map(|descrs_raw| descrs_raw.into())
-            .inspect(|descr| ::log::debug!("Found descriptor {descr:?}"))
-            .collect();
-
-        Ok(result)
+        Ok(count.min(results.len() as u16) as _)
     }
 
     /// Get the included services with the given service handle in the local GATTC cache.
     /// * `incl_uuid` The included service UUID
+    /// * `results` That will be updated with the include services found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
-    pub fn get_include_service<const N: usize>(
+    pub fn get_include_service(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
         incl_uuid: BtUuid,
-    ) -> Result<heapless::Vec<IncludeService, N>, GattStatus> {
-        let mut services_raw: heapless::Vec<esp_gattc_incl_svc_elem_t, N> = heapless::Vec::new();
-        unsafe {
-            services_raw.set_len(N);
-        }
-
-        let mut count: u16 = N as u16;
+        results: &mut [IncludeServiceElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_include_service(
@@ -1335,20 +1399,12 @@ where
                 start_handle,
                 end_handle,
                 &incl_uuid.raw() as *const _ as *mut _,
-                services_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
             )
         })?;
 
-        count = count.min(N as u16);
-
-        let result = services_raw[..count as usize]
-            .iter()
-            .map(|services_raw| services_raw.into())
-            .inspect(|svc| ::log::debug!("Found include service {svc:?}"))
-            .collect();
-
-        Ok(result)
+        Ok(count.min(results.len() as u16) as _)
     }
 
     /// Get the attribute count with the given service or characteristic in the local GATTC cache.
@@ -1405,20 +1461,23 @@ where
     }
 
     /// Get the GATT database elements.
+    /// * `results` That will be updated with the db elements found in the local GATTC cache
+    ///
+    /// # Returns
+    /// The number of elements in `results`, which could be 0; this is not the actual number of elements
     ///
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
-    pub fn get_db<const N: usize>(
+    pub fn get_db(
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
-    ) -> Result<heapless::Vec<DbElement, N>, GattStatus> {
-        let mut dbs_raw: heapless::Vec<esp_gattc_db_elem_t, N> = heapless::Vec::new();
-
-        let mut count: u16 = N as u16;
+        results: &mut [DbElement],
+    ) -> Result<usize, GattStatus> {
+        let mut count: u16 = results.len() as _;
 
         check_gatt_status(unsafe {
             esp_ble_gattc_get_db(
@@ -1426,20 +1485,12 @@ where
                 conn_id,
                 start_handle,
                 end_handle,
-                dbs_raw.as_mut_ptr(),
+                results as *const _ as *mut _,
                 &mut count,
             )
         })?;
 
-        count = count.min(N as u16);
-
-        let result = dbs_raw[..count as usize]
-            .iter()
-            .map(|dbs_raw| dbs_raw.into())
-            .inspect(|db| ::log::debug!("Found db element {db:?}"))
-            .collect();
-
-        Ok(result)
+        Ok(count.min(results.len() as u16) as _)
     }
 
     /// Read the characteristics value of the given characteristic handle.

@@ -42,12 +42,11 @@ mod example {
     use std::time::Duration;
 
     use esp_idf_svc::bt::ble::gap::{
-        AdvertisingDataType, BleAddrType, BleGapEvent, EspBleGap, GapSearchEvent, ScanDuplicate,
-        ScanFilter, ScanParams, ScanType,
+        AdvertisingDataType, BleGapEvent, EspBleGap, GapSearchEvent, ScanParams,
     };
     use esp_idf_svc::bt::ble::gatt::client::{
-        ConnectionId, DbAttrType, EspGattc, GattAuthReq, GattCreateConnParams, GattWriteType,
-        GattcEvent, ServiceSource,
+        CharacteristicElement, ConnectionId, DbAttrType, DbElement, DescriptorElement, EspGattc,
+        GattAuthReq, GattCreateConnParams, GattWriteType, GattcEvent, ServiceSource,
     };
     use esp_idf_svc::bt::ble::gatt::{self, GattInterface, GattStatus, Handle, Property};
     use esp_idf_svc::bt::{BdAddr, Ble, BtDriver, BtStatus, BtUuid};
@@ -194,17 +193,16 @@ mod example {
                     ble_addr_type,
                     rssi,
                     ble_adv,
-                    adv_data_len,
-                    scan_rsp_len,
                     ..
                 } => {
                     if GapSearchEvent::InquiryResult == search_evt {
-                        let name = self.gap.resolve_adv_data_by_type(
-                            &ble_adv,
-                            adv_data_len as u16 + scan_rsp_len as u16,
-                            AdvertisingDataType::NameCmpl,
-                        );
-                        let name = name
+                        let name = ble_adv
+                            .and_then(|ble_adv| {
+                                self.gap.resolve_adv_data_by_type(
+                                    ble_adv,
+                                    AdvertisingDataType::NameCmpl,
+                                )
+                            })
                             .map(|n| std::str::from_utf8(n))
                             .transpose()
                             .ok()
@@ -342,7 +340,32 @@ mod example {
                     let mut state = self.state.lock().unwrap();
 
                     if let Some((start_handle, end_handle)) = state.service_start_end_handle {
-                        let count = self
+                        // Enumerate all the elements for info purposes
+                        let mut db_results = [DbElement::new(); 10];
+                        match self.gattc.get_db(
+                            gattc_if,
+                            conn_id,
+                            start_handle,
+                            end_handle,
+                            &mut db_results,
+                        ) {
+                            Ok(db_count) => {
+                                info!("Found {db_count} DB elements");
+
+                                if db_count > 0 {
+                                    for db_elem in db_results[..db_count].iter() {
+                                        info!("DB element {db_elem:?}");
+                                    }
+                                } else {
+                                    info!("No DB elements found?");
+                                }
+                            }
+                            Err(status) => {
+                                error!("Get all DB elements error {status:?}");
+                            }
+                        }
+
+                        let char_count = self
                             .gattc
                             .get_attr_count(
                                 gattc_if,
@@ -357,31 +380,39 @@ mod example {
                                 EspError::from_infallible::<ESP_FAIL>()
                             })?;
 
-                        info!("Found {count} characterisitics");
+                        info!("Found {char_count} characteristics");
 
-                        if count > 0 {
+                        if char_count > 0 {
                             // Get the indicator characteristic handle and register for notification
-                            match self.gattc.get_characteristic_by_uuid::<1>(
+                            let mut chars = [CharacteristicElement::new(); 1];
+
+                            match self.gattc.get_characteristic_by_uuid(
                                 gattc_if,
                                 conn_id,
                                 start_handle,
                                 end_handle,
                                 IND_CHARACTERISTIC_UUID,
+                                &mut chars,
                             ) {
-                                Ok(chars) => {
-                                    if let Some(ind_char_elem) = chars.first() {
-                                        if ind_char_elem.properties.contains(Property::Indicate) {
-                                            if let Some(remote_addr) = state.remote_addr {
-                                                state.ind_char_handle =
-                                                    Some(ind_char_elem.char_handle);
-                                                self.gattc.register_for_notify(
-                                                    gattc_if,
-                                                    remote_addr,
-                                                    ind_char_elem.char_handle,
-                                                )?;
+                                Ok(char_count) => {
+                                    if char_count > 0 {
+                                        if let Some(ind_char_elem) = chars.first() {
+                                            if ind_char_elem
+                                                .properties()
+                                                .contains(Property::Indicate)
+                                            {
+                                                if let Some(remote_addr) = state.remote_addr {
+                                                    state.ind_char_handle =
+                                                        Some(ind_char_elem.handle());
+                                                    self.gattc.register_for_notify(
+                                                        gattc_if,
+                                                        remote_addr,
+                                                        ind_char_elem.handle(),
+                                                    )?;
+                                                }
+                                            } else {
+                                                error!("Ind characteristic does not have property Indicate");
                                             }
-                                        } else {
-                                            error!("Ind characteristic does not have property Indicate");
                                         }
                                     } else {
                                         error!("No ind characteristic found");
@@ -393,32 +424,38 @@ mod example {
                             };
 
                             // Get the write characteristic handle and start sending data to the server
-                            match self.gattc.get_characteristic_by_uuid::<1>(
+                            match self.gattc.get_characteristic_by_uuid(
                                 gattc_if,
                                 conn_id,
                                 start_handle,
                                 end_handle,
                                 WRITE_CHARACTERISITIC_UUID,
+                                &mut chars,
                             ) {
-                                Ok(chars) => {
-                                    if let Some(write_char_elem) = chars.first() {
-                                        if write_char_elem.properties.contains(Property::Write) {
-                                            state.write_char_handle =
-                                                Some(write_char_elem.char_handle);
+                                Ok(char_count) => {
+                                    if char_count > 0 {
+                                        if let Some(write_char_elem) = chars.first() {
+                                            if write_char_elem
+                                                .properties()
+                                                .contains(Property::Write)
+                                            {
+                                                state.write_char_handle =
+                                                    Some(write_char_elem.handle());
 
-                                            // Let main loop send write
-                                            self.condvar.notify_all();
-                                        } else {
-                                            error!(
+                                                // Let main loop send write
+                                                self.condvar.notify_all();
+                                            } else {
+                                                error!(
                                                 "Write characteristic does not have property Write"
                                             );
+                                            }
                                         }
                                     } else {
                                         error!("No write characteristic found");
                                     }
                                 }
                                 Err(status) => {
-                                    error!("get write characteristic error {status:?}");
+                                    error!("Get write characteristic error {status:?}");
                                 }
                             };
                         } else {
@@ -443,23 +480,28 @@ mod example {
                             })?;
 
                         if count > 0 {
-                            match self.gattc.get_descriptor_by_char_handle::<1>(
+                            let mut descrs = [DescriptorElement::new(); 1];
+
+                            match self.gattc.get_descriptor_by_char_handle(
                                 gattc_if,
                                 conn_id,
                                 handle,
                                 IND_DESCRIPTOR_UUID,
+                                &mut descrs,
                             ) {
-                                Ok(descrs) => {
-                                    if let Some(descr) = descrs.first() {
-                                        if descr.uuid == IND_DESCRIPTOR_UUID {
-                                            state.ind_descr_handle = Some(descr.handle);
+                                Ok(descrs_count) => {
+                                    if descrs_count > 0 {
+                                        if let Some(descr) = descrs.first() {
+                                            if descr.uuid() == IND_DESCRIPTOR_UUID {
+                                                state.ind_descr_handle = Some(descr.handle());
+                                            }
                                         }
                                     } else {
                                         error!("No ind descriptor found");
                                     }
                                 }
                                 Err(status) => {
-                                    error!("get ind char descriptors error {status:?}");
+                                    error!("Get ind char descriptors error {status:?}");
                                 }
                             }
                         } else {
@@ -514,12 +556,8 @@ mod example {
         pub fn connect(&self) -> Result<(), EspError> {
             if !self.state.lock().unwrap().connect {
                 let scan_params = ScanParams {
-                    scan_type: ScanType::Active,
-                    own_addr_type: BleAddrType::Public,
-                    scan_filter_policy: ScanFilter::All,
                     scan_interval: 0x50,
-                    scan_window: 0x30,
-                    scan_duplicate: ScanDuplicate::Disable,
+                    ..Default::default()
                 };
 
                 self.gap.set_scan_params(&scan_params)?;

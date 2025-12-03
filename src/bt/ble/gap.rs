@@ -6,8 +6,7 @@ use core::{ffi::CStr, ops::BitOr};
 use crate::bt::BtSingleton;
 use crate::sys::*;
 
-use ::log::trace;
-use log::error;
+use ::log::{error, trace};
 use num_enum::TryFromPrimitive;
 
 use crate::{
@@ -275,10 +274,11 @@ pub enum AdvertisingDataType {
     ManufacturerSpecific = esp_ble_adv_data_type_ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ScanType {
     Passive = esp_ble_scan_type_t_BLE_SCAN_TYPE_PASSIVE,
+    #[default]
     Active = esp_ble_scan_type_t_BLE_SCAN_TYPE_ACTIVE,
 }
 
@@ -292,11 +292,12 @@ pub enum BleAddrType {
     RpaRandom = esp_ble_addr_type_t_BLE_ADDR_TYPE_RPA_RANDOM,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ScanFilter {
     /// Accept all :
     /// 1. advertisement packets except directed advertising packets not addressed to this device (default).
+    #[default]
     All = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_ALL,
     /// Accept only :
     /// 1. advertisement packets from devices where the advertiser’s address is in the White list.
@@ -314,9 +315,10 @@ pub enum ScanFilter {
     WhitelistAndDirected = esp_ble_scan_filter_t_BLE_SCAN_FILTER_ALLOW_WLIST_RPA_DIR,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ScanDuplicate {
+    #[default]
     Disable = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_DISABLE,
     Enable = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_ENABLE,
     #[cfg(esp_idf_ble_50_feature_support)]
@@ -324,6 +326,7 @@ pub enum ScanDuplicate {
     Max = esp_ble_scan_duplicate_t_BLE_SCAN_DUPLICATE_MAX,
 }
 
+#[derive(Clone, Debug)]
 pub struct ScanParams {
     pub scan_type: ScanType,
     pub own_addr_type: BleAddrType,
@@ -331,6 +334,19 @@ pub struct ScanParams {
     pub scan_interval: u16,
     pub scan_window: u16,
     pub scan_duplicate: ScanDuplicate,
+}
+
+impl Default for ScanParams {
+    fn default() -> Self {
+        Self {
+            scan_type: ScanType::Active,
+            own_addr_type: BleAddrType::Public,
+            scan_filter_policy: ScanFilter::All,
+            scan_interval: 0x50,
+            scan_window: 0x30,
+            scan_duplicate: ScanDuplicate::Disable,
+        }
+    }
 }
 
 impl From<&ScanParams> for esp_ble_scan_params_t {
@@ -397,7 +413,7 @@ pub enum BleGapEvent<'a> {
         ble_addr_type: BleAddrType,
         ble_evt_type: BleEventType,
         rssi: i32,
-        ble_adv: [u8; 62usize],
+        ble_adv: Option<&'a [u8]>,
         flag: i32,
         num_resps: i32,
         adv_data_len: u8,
@@ -542,7 +558,15 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                     ble_addr_type: param.scan_rst.ble_addr_type.try_into().unwrap(),
                     ble_evt_type: param.scan_rst.ble_evt_type.try_into().unwrap(),
                     rssi: param.scan_rst.rssi,
-                    ble_adv: param.scan_rst.ble_adv,
+                    ble_adv: if param.scan_rst.adv_data_len + param.scan_rst.scan_rsp_len > 0 {
+                        Some(
+                            &param.scan_rst.ble_adv[..(param.scan_rst.adv_data_len
+                                + param.scan_rst.scan_rsp_len)
+                                as usize],
+                        )
+                    } else {
+                        None
+                    },
                     flag: param.scan_rst.flag,
                     num_resps: param.scan_rst.num_resps,
                     adv_data_len: param.scan_rst.adv_data_len,
@@ -875,7 +899,6 @@ where
     pub fn resolve_adv_data_by_type(
         &self,
         adv_data: &[u8],
-        adv_data_len: u16,
         data_type: AdvertisingDataType,
     ) -> Option<&[u8]> {
         let mut length: u8 = 0;
@@ -883,7 +906,7 @@ where
         let resolve_adv_data = unsafe {
             esp_ble_resolve_adv_data_by_type(
                 adv_data as *const _ as *mut _,
-                adv_data_len,
+                adv_data.len() as _,
                 data_type as _,
                 &mut length,
             )
