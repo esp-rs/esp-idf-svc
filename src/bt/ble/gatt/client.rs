@@ -1308,6 +1308,7 @@ where
     /// # Note
     /// 1. This API does not trigger any event
     /// 2. `start_handle` must be greater than 0, and smaller than `end_handle`
+    #[allow(clippy::too_many_arguments)]
     pub fn get_descriptor_by_uuid(
         &self,
         gattc_if: GattInterface,
