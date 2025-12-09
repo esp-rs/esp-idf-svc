@@ -37,7 +37,7 @@ mod example {
     use core::hash::{Hash, Hasher};
     use std::sync::{Arc, Mutex};
 
-    use esp_idf_svc::bt::ble::gap::{BleGapEvent, EspBleGap};
+    use esp_idf_svc::bt::ble::gap::{BleGapEvent, EspBleGap, GapSearchEvent, GapSearchResult};
     use esp_idf_svc::bt::{BdAddr, Ble, BtDriver};
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
@@ -135,7 +135,11 @@ mod example {
         fn on_gap_event(&self, event: BleGapEvent) -> Result<(), EspError> {
             trace!("Got event: {event:?}");
 
-            if let BleGapEvent::ScanResult { bda, .. } = event {
+            if let BleGapEvent::ScanResult(GapSearchEvent::InquiryResult(GapSearchResult {
+                bda,
+                ..
+            })) = event
+            {
                 let mut state = self.state.lock().unwrap();
                 let address = BluetoothAddress(bda);
                 match state.discovered.insert(address) {
