@@ -362,17 +362,31 @@ impl From<&ScanParams> for esp_ble_scan_params_t {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
+#[derive(Copy, Clone, Debug)]
 #[repr(u32)]
-pub enum GapSearchEvent {
-    InquiryResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_RES_EVT,
-    InquiryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_CMPL_EVT,
-    DiscoveryResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_RES_EVT,
-    DiscoveryBleResult = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_BLE_RES_EVT,
-    DiscoveryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_CMPL_EVT,
-    DiDiscoveryComplete = esp_gap_search_evt_t_ESP_GAP_SEARCH_DI_DISC_CMPL_EVT,
+pub enum GapSearchEvent<'a> {
+    InquiryResult(GapSearchResult<'a>) = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_RES_EVT,
+    InquiryComplete(i32) = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_CMPL_EVT,
+    DiscoveryResult(GapSearchResult<'a>) = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_RES_EVT,
+    DiscoveryBleResult(GapSearchResult<'a>) = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_BLE_RES_EVT,
+    DiscoveryComplete(i32) = esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_CMPL_EVT,
+    DiDiscoveryComplete(i32) = esp_gap_search_evt_t_ESP_GAP_SEARCH_DI_DISC_CMPL_EVT,
     SearchCanceled = esp_gap_search_evt_t_ESP_GAP_SEARCH_SEARCH_CANCEL_CMPL_EVT,
-    InquiryDiscardedNum = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_DISCARD_NUM_EVT,
+    InquiryDiscardedNum(i32) = esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_DISCARD_NUM_EVT,
+    UnknownEvent,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct GapSearchResult<'a> {
+    pub bda: BdAddr,
+    pub dev_type: BtDevType,
+    pub ble_addr_type: BleAddrType,
+    pub ble_evt_type: BleEventType,
+    pub rssi: i32,
+    pub ble_adv: Option<&'a [u8]>,
+    pub flag: i32,
+    pub adv_data_len: u8,
+    pub scan_rsp_len: u8,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, TryFromPrimitive)]
@@ -406,20 +420,7 @@ pub enum BleGapEvent<'a> {
     AdvertisingConfigured(BtStatus),
     ScanResponseConfigured(BtStatus),
     ScanParameterConfigured(BtStatus),
-    ScanResult {
-        search_evt: GapSearchEvent,
-        bda: BdAddr,
-        dev_type: BtDevType,
-        ble_addr_type: BleAddrType,
-        ble_evt_type: BleEventType,
-        rssi: i32,
-        ble_adv: Option<&'a [u8]>,
-        flag: i32,
-        num_resps: i32,
-        adv_data_len: u8,
-        scan_rsp_len: u8,
-        num_dis: u32,
-    },
+    ScanResult(GapSearchEvent<'a>),
     RawAdvertisingConfigured(BtStatus),
     RawScanResponseConfigured(BtStatus),
     AdvertisingStarted(BtStatus),
@@ -551,28 +552,66 @@ impl<'a> From<(esp_gap_ble_cb_event_t, &'a esp_ble_gap_cb_param_t)> for BleGapEv
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT => {
                     Self::ScanParameterConfigured(param.scan_param_cmpl.status.try_into().unwrap())
                 }
-                esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => Self::ScanResult {
-                    search_evt: param.scan_rst.search_evt.try_into().unwrap(),
-                    bda: param.scan_rst.bda.into(),
-                    dev_type: param.scan_rst.dev_type.try_into().unwrap(),
-                    ble_addr_type: param.scan_rst.ble_addr_type.try_into().unwrap(),
-                    ble_evt_type: param.scan_rst.ble_evt_type.try_into().unwrap(),
-                    rssi: param.scan_rst.rssi,
-                    ble_adv: if param.scan_rst.adv_data_len + param.scan_rst.scan_rsp_len > 0 {
-                        Some(
-                            &param.scan_rst.ble_adv[..(param.scan_rst.adv_data_len
-                                + param.scan_rst.scan_rsp_len)
-                                as usize],
-                        )
+                esp_gap_ble_cb_event_t_ESP_GAP_BLE_SCAN_RESULT_EVT => {
+                    let search_evt = param.scan_rst.search_evt;
+
+                    let gap_search_evt = if search_evt
+                        == esp_gap_search_evt_t_ESP_GAP_SEARCH_SEARCH_CANCEL_CMPL_EVT
+                    {
+                        GapSearchEvent::SearchCanceled
+                    } else if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_RES_EVT
+                        || search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_RES_EVT
+                        || search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_BLE_RES_EVT
+                    {
+                        let search_result = GapSearchResult {
+                            bda: param.scan_rst.bda.into(),
+                            dev_type: param.scan_rst.dev_type.try_into().unwrap(),
+                            ble_addr_type: param.scan_rst.ble_addr_type.try_into().unwrap(),
+                            ble_evt_type: param.scan_rst.ble_evt_type.try_into().unwrap(),
+                            rssi: param.scan_rst.rssi,
+                            ble_adv: if param.scan_rst.adv_data_len + param.scan_rst.scan_rsp_len
+                                > 0
+                            {
+                                Some(
+                                    &param.scan_rst.ble_adv[..(param.scan_rst.adv_data_len
+                                        + param.scan_rst.scan_rsp_len)
+                                        as usize],
+                                )
+                            } else {
+                                None
+                            },
+                            flag: param.scan_rst.flag,
+                            adv_data_len: param.scan_rst.adv_data_len,
+                            scan_rsp_len: param.scan_rst.scan_rsp_len,
+                        };
+
+                        if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_RES_EVT {
+                            GapSearchEvent::InquiryResult(search_result)
+                        } else if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_RES_EVT {
+                            GapSearchEvent::DiscoveryResult(search_result)
+                        } else {
+                            GapSearchEvent::DiscoveryBleResult(search_result)
+                        }
                     } else {
-                        None
-                    },
-                    flag: param.scan_rst.flag,
-                    num_resps: param.scan_rst.num_resps,
-                    adv_data_len: param.scan_rst.adv_data_len,
-                    scan_rsp_len: param.scan_rst.scan_rsp_len,
-                    num_dis: param.scan_rst.num_dis,
-                },
+                        let num_resps = param.scan_rst.num_resps;
+                        if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_CMPL_EVT {
+                            GapSearchEvent::InquiryComplete(num_resps)
+                        } else if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_DISC_CMPL_EVT {
+                            GapSearchEvent::DiscoveryComplete(num_resps)
+                        } else if search_evt == esp_gap_search_evt_t_ESP_GAP_SEARCH_DI_DISC_CMPL_EVT
+                        {
+                            GapSearchEvent::DiDiscoveryComplete(num_resps)
+                        } else if search_evt
+                            == esp_gap_search_evt_t_ESP_GAP_SEARCH_INQ_DISCARD_NUM_EVT
+                        {
+                            GapSearchEvent::InquiryDiscardedNum(num_resps)
+                        } else {
+                            GapSearchEvent::UnknownEvent
+                        }
+                    };
+
+                    Self::ScanResult(gap_search_evt)
+                }
                 esp_gap_ble_cb_event_t_ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT => {
                     Self::RawAdvertisingConfigured(
                         param.adv_data_raw_cmpl.status.try_into().unwrap(),

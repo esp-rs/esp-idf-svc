@@ -42,7 +42,7 @@ mod example {
     use std::time::Duration;
 
     use esp_idf_svc::bt::ble::gap::{
-        AdvertisingDataType, BleGapEvent, EspBleGap, GapSearchEvent, ScanParams,
+        AdvertisingDataType, BleGapEvent, EspBleGap, GapSearchEvent, GapSearchResult, ScanParams,
     };
     use esp_idf_svc::bt::ble::gatt::client::{
         CharacteristicElement, ConnectionId, DbAttrType, DbElement, DescriptorElement, EspGattc,
@@ -187,15 +187,17 @@ mod example {
                     self.check_bt_status(status)?;
                     info!("Scanning started");
                 }
-                BleGapEvent::ScanResult {
-                    search_evt,
-                    bda,
-                    ble_addr_type,
-                    rssi,
-                    ble_adv,
-                    ..
-                } => {
-                    if GapSearchEvent::InquiryResult == search_evt {
+                BleGapEvent::ScanResult(search_evt) => {
+                    if matches!(search_evt, GapSearchEvent::InquiryComplete(_)) {
+                        info!("Scan completed, no server {SERVER_NAME} found");
+                    } else if let GapSearchEvent::InquiryResult(GapSearchResult {
+                        bda,
+                        ble_addr_type,
+                        rssi,
+                        ble_adv,
+                        ..
+                    }) = search_evt
+                    {
                         let name = ble_adv
                             .and_then(|ble_adv| {
                                 self.gap.resolve_adv_data_by_type(
