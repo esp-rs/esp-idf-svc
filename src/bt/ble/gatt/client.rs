@@ -1122,13 +1122,13 @@ where
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
-        filter_uuid: Option<BtUuid>,
+        filter_uuid: Option<&BtUuid>,
     ) -> Result<(), EspError> {
         esp!(unsafe {
             esp_ble_gattc_search_service(
                 gattc_if,
                 conn_id,
-                filter_uuid.map_or(core::ptr::null_mut(), |f| &f.raw() as *const _ as *mut _),
+                filter_uuid.map_or(core::ptr::null_mut(), |f| &f.0 as *const _ as *mut _),
             )
         })
     }
@@ -1148,7 +1148,7 @@ where
         &self,
         gattc_if: GattInterface,
         conn_id: ConnectionId,
-        svc_uuid: Option<BtUuid>,
+        svc_uuid: Option<&BtUuid>,
         offset: u16,
         results: &mut [ServiceElement],
     ) -> Result<usize, EspError> {
@@ -1162,7 +1162,7 @@ where
             esp_ble_gattc_get_service(
                 gattc_if,
                 conn_id,
-                svc_uuid.map_or(core::ptr::null_mut(), |s| &s.raw() as *const _ as *mut _),
+                svc_uuid.map_or(core::ptr::null_mut(), |s| &s.0 as *const _ as *mut _),
                 results as *const _ as *mut _,
                 &mut count,
                 offset,

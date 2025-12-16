@@ -298,7 +298,7 @@ mod example {
                     info!("Service discover complete, conn_id {conn_id}");
 
                     self.gattc
-                        .search_service(gattc_if, conn_id, Some(SERVICE_UUID))?;
+                        .search_service(gattc_if, conn_id, Some(&SERVICE_UUID))?;
                 }
                 GattcEvent::Mtu { status, mtu, .. } => {
                     info!("MTU exchange, status {status:?}, MTU {mtu}");
