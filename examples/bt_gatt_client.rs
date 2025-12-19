@@ -393,7 +393,7 @@ mod example {
                                 conn_id,
                                 start_handle,
                                 end_handle,
-                                IND_CHARACTERISTIC_UUID,
+                                &IND_CHARACTERISTIC_UUID,
                                 &mut chars,
                             ) {
                                 Ok(char_count) => {
@@ -431,7 +431,7 @@ mod example {
                                 conn_id,
                                 start_handle,
                                 end_handle,
-                                WRITE_CHARACTERISITIC_UUID,
+                                &WRITE_CHARACTERISITIC_UUID,
                                 &mut chars,
                             ) {
                                 Ok(char_count) => {
@@ -488,7 +488,7 @@ mod example {
                                 gattc_if,
                                 conn_id,
                                 handle,
-                                IND_DESCRIPTOR_UUID,
+                                &IND_DESCRIPTOR_UUID,
                                 &mut descrs,
                             ) {
                                 Ok(descrs_count) => {

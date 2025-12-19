@@ -1275,7 +1275,7 @@ where
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
-        char_uuid: BtUuid,
+        char_uuid: &BtUuid,
         results: &mut [CharacteristicElement],
     ) -> Result<usize, GattStatus> {
         let mut count: u16 = results.len() as _;
@@ -1315,8 +1315,8 @@ where
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
-        char_uuid: BtUuid,
-        descr_uuid: BtUuid,
+        char_uuid: &BtUuid,
+        descr_uuid: &BtUuid,
         results: &mut [DescriptorElement],
     ) -> Result<usize, GattStatus> {
         let mut count: u16 = results.len() as _;
@@ -1353,7 +1353,7 @@ where
         gattc_if: GattInterface,
         conn_id: ConnectionId,
         char_handle: Handle,
-        descr_uuid: BtUuid,
+        descr_uuid: &BtUuid,
         results: &mut [DescriptorElement],
     ) -> Result<usize, GattStatus> {
         let mut count: u16 = results.len() as _;
@@ -1388,7 +1388,7 @@ where
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
-        incl_uuid: BtUuid,
+        incl_uuid: &BtUuid,
         results: &mut [IncludeServiceElement],
     ) -> Result<usize, GattStatus> {
         let mut count: u16 = results.len() as _;
@@ -1528,7 +1528,7 @@ where
         conn_id: ConnectionId,
         start_handle: Handle,
         end_handle: Handle,
-        uuid: BtUuid,
+        uuid: &BtUuid,
         auth_req: GattAuthReq,
     ) -> Result<(), EspError> {
         esp!(unsafe {
