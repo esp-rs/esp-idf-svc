@@ -8,7 +8,11 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
+#[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+use embedded_svc::mqtt::client5::EventProperty;
 
+#[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+use crate::mqtt::client5::EspEventProperty;
 use crate::private::unblocker::Unblocker;
 use crate::sys::*;
 
@@ -1082,6 +1086,8 @@ impl<'a> EspMqttEvent<'a> {
                         Details::Complete
                     }
                 },
+                #[cfg(all(esp_idf_mqtt_protocol_5, feature = "std"))]
+                property: EspEventProperty::event_property(self.0.property),
             },
             esp_mqtt_event_id_t_MQTT_EVENT_DELETED => EventPayload::Deleted(self.0.msg_id as _),
             other => panic!("Unknown message type: {other}"),
