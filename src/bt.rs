@@ -81,7 +81,7 @@ impl BtUuid {
         &self.0
     }
 
-    pub const fn into_raw(&self) -> esp_bt_uuid_t {
+    pub const fn into_raw(self) -> esp_bt_uuid_t {
         self.0
     }
 

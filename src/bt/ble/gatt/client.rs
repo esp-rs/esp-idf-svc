@@ -1286,7 +1286,7 @@ where
                 conn_id,
                 start_handle,
                 end_handle,
-                char_uuid.into_raw(),
+                *char_uuid.raw(),
                 results as *const _ as *mut _,
                 &mut count,
             )
@@ -1327,8 +1327,8 @@ where
                 conn_id,
                 start_handle,
                 end_handle,
-                char_uuid.into_raw(),
-                descr_uuid.into_raw(),
+                *char_uuid.raw(),
+                *descr_uuid.raw(),
                 results as *const _ as *mut _,
                 &mut count,
             )
@@ -1363,7 +1363,7 @@ where
                 gattc_if,
                 conn_id,
                 char_handle,
-                descr_uuid.into_raw(),
+                *descr_uuid.raw(),
                 results as *const _ as *mut _,
                 &mut count,
             )
