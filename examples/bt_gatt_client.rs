@@ -408,7 +408,7 @@ mod example {
                                                         Some(ind_char_elem.handle());
                                                     self.gattc.register_for_notify(
                                                         gattc_if,
-                                                        remote_addr,
+                                                        &remote_addr,
                                                         ind_char_elem.handle(),
                                                     )?;
                                                 }
