@@ -395,6 +395,16 @@ pub mod embassy_time_driver {
     use crate::private::mutex::Mutex;
     use crate::timer::*;
 
+    use std::sync::{Condvar, Mutex as StdMutex, OnceLock};
+    use std::thread;
+
+    /// Signaling state for the helper task
+    struct HelperSignal {
+        pending: bool,
+    }
+
+    static HELPER_SIGNAL: OnceLock<(StdMutex<HelperSignal>, Condvar)> = OnceLock::new();
+
     struct EspDriverInner {
         queue: embassy_time_queue_utils::Queue,
         timer: Option<EspTimer<'static>>,
@@ -446,6 +456,45 @@ pub mod embassy_time_driver {
         }
     }
 
+    fn ensure_helper_task() {
+        HELPER_SIGNAL.get_or_init(|| {
+            let signal = (
+                StdMutex::new(HelperSignal { pending: false }),
+                Condvar::new(),
+            );
+
+            thread::Builder::new()
+                .name("embassy-timer".into())
+                .stack_size(2048)
+                .spawn(|| {
+                    let (mutex, cvar) = HELPER_SIGNAL.get().unwrap();
+                    loop {
+                        // Wait for signal
+                        let mut guard = mutex.lock().unwrap();
+                        while !guard.pending {
+                            guard = cvar.wait(guard).unwrap();
+                        }
+                        guard.pending = false;
+                        drop(guard);
+
+                        // Process all expired timers until queue is stable
+                        DRIVER.inner.lock().borrow_mut().schedule_next_expiration();
+                    }
+                })
+                .expect("failed to spawn embassy-timer helper task");
+
+            signal
+        });
+    }
+
+    fn signal_helper() {
+        if let Some((mutex, cvar)) = HELPER_SIGNAL.get() {
+            let mut guard = mutex.lock().unwrap();
+            guard.pending = true;
+            cvar.notify_one();
+        }
+    }
+
     struct EspDriver {
         inner: Mutex<RefCell<EspDriverInner>>,
     }
@@ -470,23 +519,20 @@ pub mod embassy_time_driver {
         }
 
         fn schedule_wake(&self, at: u64, waker: &Waker) {
+            ensure_helper_task(); // Ensure helper task is running
+
             let service = EspTimerService::<Task>::new().unwrap();
 
             let guard = self.inner.lock();
             let mut inner = guard.borrow_mut();
 
             if inner.timer.is_none() {
-                // Driver is always statically allocated, so this is safe
-                let static_self: &'static Self = unsafe { core::mem::transmute(self) };
-
                 inner.timer = Some(
                     service
-                        .timer(move || {
-                            static_self
-                                .inner
-                                .lock()
-                                .borrow_mut()
-                                .schedule_next_expiration()
+                        .timer(|| {
+                            // Signal helper task instead of processing directly
+                            // This avoids calling waker.wake() from high-priority context
+                            signal_helper();
                         })
                         .unwrap(),
                 );
