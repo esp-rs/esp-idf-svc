@@ -18,14 +18,20 @@ rust-version = "1.82"
 [patch.crates-io]
 esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
-
 [lib]
 harness = false
 
 [features]
 default = ["std", "binstart"]
 
-std = ["alloc", "log/std", "esp-idf-hal/std", "embedded-svc/std", "futures-io"]
+std = [
+    "alloc",
+    "log/std",
+    "esp-idf-hal/std",
+    "embedded-svc/std",
+    "embedded-svc/mqtt_protocol_v5",
+    "futures-io",
+]
 embassy-time-driver = ["dep:embassy-time-driver", "embassy-time-queue-utils"]
 alloc = ["esp-idf-hal/alloc", "embedded-svc/alloc", "uncased/alloc"]
 nightly = ["embedded-svc/nightly", "esp-idf-hal/nightly"]
@@ -56,9 +62,11 @@ uncased = { version = "0.9.7", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
 embedded-svc = { version = "0.28", default-features = false }
 esp-idf-hal = { version = "0.45", default-features = false }
-embassy-time-driver = { version = "0.2.1", optional = true, features = ["tick-hz-1_000_000"] }
-embassy-time-queue-utils = { version = "0.3", optional = true }
-embassy-futures = "0.1.2"
+embassy-time-driver = { version = "0.2", optional = true, features = [
+    "tick-hz-1_000_000",
+] }
+embassy-time-queue-utils = { version = "0.1", optional = true }
+embassy-futures = "0.1"
 embedded-storage = { version = "0.3", optional = true }
 futures-io = { version = "0.3", optional = true }
 
