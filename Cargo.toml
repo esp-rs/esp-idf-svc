@@ -18,6 +18,7 @@ rust-version = "1.82"
 [patch.crates-io]
 esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }
 
 [lib]
 harness = false
