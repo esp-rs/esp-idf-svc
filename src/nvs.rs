@@ -1022,6 +1022,7 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
         }
     }
 
+    #[cfg(esp_idf_version_at_least_5_2_0)]
     pub fn keys(&self, data_type: Option<NvsDataType>) -> Result<EspNvsKeys<'_>, EspError> {
         self.0.keys(data_type)
     }
