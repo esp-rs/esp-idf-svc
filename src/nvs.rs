@@ -1021,6 +1021,14 @@ impl<T: NvsPartitionId> EspKeyValueStorage<T> {
             Ok(true)
         }
     }
+
+    pub fn keys(&self, data_type: Option<NvsDataType>) -> Result<EspNvsKeys<'_>, EspError> {
+        self.0.keys(data_type)
+    }
+
+    pub fn erase_all(&self) -> Result<(), EspError> {
+        self.0.erase_all()
+    }
 }
 
 impl<T: NvsPartitionId> StorageBase for EspKeyValueStorage<T> {
