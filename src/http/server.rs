@@ -96,6 +96,10 @@ pub struct Configuration {
     pub max_resp_headers: usize,
     pub lru_purge_enable: bool,
     pub uri_match_wildcard: bool,
+    pub keep_alive_enable: bool,
+    pub keep_alive_idle: i32,
+    pub keep_alive_interval: i32,
+    pub keep_alive_count: i32,
     #[cfg(esp_idf_esp_https_server_enable)]
     pub server_certificate: Option<X509<'static>>,
     #[cfg(esp_idf_esp_https_server_enable)]
@@ -121,6 +125,10 @@ impl Default for Configuration {
             max_resp_headers: 8,
             lru_purge_enable: true,
             uri_match_wildcard: false,
+            keep_alive_enable: false,
+            keep_alive_idle: 5,
+            keep_alive_interval: 5,
+            keep_alive_count: 3,
             #[cfg(esp_idf_esp_https_server_enable)]
             server_certificate: None,
             #[cfg(esp_idf_esp_https_server_enable)]
@@ -165,9 +173,10 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             open_fn: None,
             close_fn: None,
             uri_match_fn: conf.uri_match_wildcard.then_some(httpd_uri_match_wildcard),
-            // Latest 4.4 and master branches have options to control SO linger,
-            // but these are not released yet so we cannot (yet) support these
-            // conditionally
+            keep_alive_enable: conf.keep_alive_enable,
+            keep_alive_idle: conf.keep_alive_idle,
+            keep_alive_interval: conf.keep_alive_interval,
+            keep_alive_count: conf.keep_alive_count,
             ..Default::default()
         })
     }
