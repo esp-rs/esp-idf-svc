@@ -27,8 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (#529) `Peripheral` and `PeripheralRef` removed and replaced with a simple pattern similar to the `esp-hal` one.
   - Check https://github.com/esp-rs/esp-idf-hal/pull/529 for details on that change
 - HTTP: added `task_caps` option into server `Configuration`
-- HTTP: added TCP keep-alive options (`keep_alive_enable`, `keep_alive_idle`, `keep_alive_interval`, `keep_alive_count`) to server `Configuration`
 - Update `heapless` dependency
+- HTTP: added TCP keep-alive options (`keep_alive_enable`, `keep_alive_idle`, `keep_alive_interval`, `keep_alive_count`) to server `Configuration`
+- Add SO_LINGER configuration to HTTP server (`enable_so_linger`, `linger_timeout`)
+
 
 ### Fixed
 - `WifiDriver::get_ap_info` not takes `&self` instead of `&mut self`. Convenience method `EspWifi::get_ap_info` that delegates
@@ -48,7 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WS: Fix `EspWebSocketClientConfig` `reconnect_timeout_ms` and `network_timeout_ms` fields not being passed to the underlying C struct (#635)
 
 ### Added
-- Add SO_LINGER configuration to HTTP server (`enable_so_linger`, `linger_timeout`)
 - Compatibility with ESP-IDF V5.4.x and V5.5.x
 - Logging configuration enhanced with a simpler setup where Rust logs can be configured to have a verbosity which is
   disconnected from the verbosity of the ESP-IDF native C logging (#593)
