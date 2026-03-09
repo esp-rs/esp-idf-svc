@@ -100,6 +100,8 @@ pub struct Configuration {
     pub keep_alive_idle: i32,
     pub keep_alive_interval: i32,
     pub keep_alive_count: i32,
+    pub enable_so_linger: bool,
+    pub linger_timeout: i32,
     #[cfg(esp_idf_esp_https_server_enable)]
     pub server_certificate: Option<X509<'static>>,
     #[cfg(esp_idf_esp_https_server_enable)]
@@ -129,6 +131,8 @@ impl Default for Configuration {
             keep_alive_idle: 5,
             keep_alive_interval: 5,
             keep_alive_count: 3,
+            enable_so_linger: false,
+            linger_timeout: 0,
             #[cfg(esp_idf_esp_https_server_enable)]
             server_certificate: None,
             #[cfg(esp_idf_esp_https_server_enable)]
@@ -177,6 +181,8 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             keep_alive_idle: conf.keep_alive_idle,
             keep_alive_interval: conf.keep_alive_interval,
             keep_alive_count: conf.keep_alive_count,
+            enable_so_linger: conf.enable_so_linger,
+            linger_timeout: conf.linger_timeout,
             ..Default::default()
         })
     }

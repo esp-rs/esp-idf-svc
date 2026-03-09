@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WS: Fix `EspWebSocketClientConfig` `reconnect_timeout_ms` and `network_timeout_ms` fields not being passed to the underlying C struct (#635)
 
 ### Added
+- Add SO_LINGER configuration to HTTP server (`enable_so_linger`, `linger_timeout`)
 - Compatibility with ESP-IDF V5.4.x and V5.5.x
 - Logging configuration enhanced with a simpler setup where Rust logs can be configured to have a verbosity which is
   disconnected from the verbosity of the ESP-IDF native C logging (#593)
