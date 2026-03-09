@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (#529) `Peripheral` and `PeripheralRef` removed and replaced with a simple pattern similar to the `esp-hal` one.
   - Check https://github.com/esp-rs/esp-idf-hal/pull/529 for details on that change
 - HTTP: added `task_caps` option into server `Configuration`
+- HTTP: added TCP keep-alive options (`keep_alive_enable`, `keep_alive_idle`, `keep_alive_interval`, `keep_alive_count`) to server `Configuration`
 - Update `heapless` dependency
 
 ### Fixed
