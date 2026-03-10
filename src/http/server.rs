@@ -88,19 +88,13 @@ pub struct KeepAlive {
     pub probe_count: u32,
 }
 
-impl KeepAlive {
-    pub const fn new() -> Self {
+impl Default for KeepAlive {
+    fn default() -> Self {
         Self {
             idle_secs: 5,
             interval_secs: 5,
             probe_count: 3,
         }
-    }
-}
-
-impl Default for KeepAlive {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
