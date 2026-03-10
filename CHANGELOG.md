@@ -28,8 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Check https://github.com/esp-rs/esp-idf-hal/pull/529 for details on that change
 - HTTP: added `task_caps` option into server `Configuration`
 - Update `heapless` dependency
-- HTTP: added TCP keep-alive options (`keep_alive_enable`, `keep_alive_idle`, `keep_alive_interval`, `keep_alive_count`) to server `Configuration`
-- Add SO_LINGER configuration to HTTP server (`enable_so_linger`, `linger_timeout`)
+- HTTP: Add `keep_alive: Option<KeepAlive>` and `so_linger: Option<Duration>` to server `Configuration`
 
 
 ### Fixed
