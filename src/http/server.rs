@@ -177,23 +177,14 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             close_fn: None,
             uri_match_fn: conf.uri_match_wildcard.then_some(httpd_uri_match_wildcard),
             keep_alive_enable: conf.keep_alive.is_some(),
-            keep_alive_idle: conf
-                .keep_alive
-                .map(|ka| ka.idle_secs as i32)
-                .unwrap_or(0),
+            keep_alive_idle: conf.keep_alive.map(|ka| ka.idle_secs as i32).unwrap_or(0),
             keep_alive_interval: conf
                 .keep_alive
                 .map(|ka| ka.interval_secs as i32)
                 .unwrap_or(0),
-            keep_alive_count: conf
-                .keep_alive
-                .map(|ka| ka.probe_count as i32)
-                .unwrap_or(0),
+            keep_alive_count: conf.keep_alive.map(|ka| ka.probe_count as i32).unwrap_or(0),
             enable_so_linger: conf.so_linger.is_some(),
-            linger_timeout: conf
-                .so_linger
-                .map(|d| d.as_secs() as i32)
-                .unwrap_or(0),
+            linger_timeout: conf.so_linger.map(|d| d.as_secs() as i32).unwrap_or(0),
             ..Default::default()
         })
     }
