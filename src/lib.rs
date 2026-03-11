@@ -26,13 +26,19 @@ extern crate std;
 #[macro_use]
 extern crate alloc;
 
-#[cfg(not(esp32s2))]
-#[cfg(all(esp_idf_bt_enabled, esp_idf_bt_bluedroid_enabled, feature = "alloc",))]
+#[cfg(all(
+    not(any(esp32s2, esp32p4)),
+    esp_idf_bt_enabled,
+    esp_idf_bt_bluedroid_enabled,
+    feature = "alloc",
+))]
 pub mod bt;
 #[cfg(all(
-    not(esp32h2),
     feature = "alloc",
-    esp_idf_comp_esp_wifi_enabled,
+    any(
+        all(not(any(esp32h2, esp32h4, esp32p4)), esp_idf_comp_esp_wifi_enabled),
+        esp_idf_comp_espressif__esp_wifi_remote_enabled
+    ),
     esp_idf_comp_esp_event_enabled,
 ))]
 pub mod espnow;
@@ -105,9 +111,11 @@ pub mod thread;
 pub mod timer;
 pub mod tls;
 #[cfg(all(
-    not(esp32h2),
     feature = "alloc",
-    any(esp_idf_comp_esp_wifi_enabled, esp_idf_comp_esp_wifi_remote_enabled),
+    any(
+        all(not(any(esp32h2, esp32h4, esp32p4)), esp_idf_comp_esp_wifi_enabled),
+        esp_idf_comp_espressif__esp_wifi_remote_enabled
+    ),
     esp_idf_comp_esp_event_enabled,
 ))]
 pub mod wifi;
