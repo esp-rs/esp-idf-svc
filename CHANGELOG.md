@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Check https://github.com/esp-rs/esp-idf-hal/pull/529 for details on that change
 - HTTP: added `task_caps` option into server `Configuration`
 - Update `heapless` dependency
+- NVS: exposed `keys` and `erase_all` functions on `EspKeyValueStorage`
 
 ### Fixed
 - `WifiDriver::get_ap_info` not takes `&self` instead of `&mut self`. Convenience method `EspWifi::get_ap_info` that delegates
