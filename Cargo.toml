@@ -58,6 +58,10 @@ embassy-futures = "0.1.2"
 embedded-storage = { version = "0.3", optional = true }
 futures-io = { version = "0.3", optional = true }
 
+[patch.crates-io]
+esp-idf-sys = { git = "https://github.com/mh0pe/esp-idf-sys", branch = "esp-idf-v6-support" }
+esp-idf-hal = { git = "https://github.com/mh0pe/esp-idf-hal", branch = "esp-idf-v6-support" }
+
 [build-dependencies]
 embuild = "0.33"
 
