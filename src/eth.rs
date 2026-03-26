@@ -20,8 +20,11 @@ use embedded_svc::eth::*;
 use crate::hal::gpio;
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_comp_espressif__dm9051_enabled,
     esp_idf_eth_spi_ethernet_w5500,
-    esp_idf_eth_spi_ethernet_ksz8851snl
+    esp_idf_comp_espressif__w5500_enabled,
+    esp_idf_eth_spi_ethernet_ksz8851snl,
+    esp_idf_comp_espressif__ksz8851snl_enabled
 ))]
 use crate::hal::{spi, units::Hertz};
 
@@ -136,16 +139,25 @@ impl RmiiClockConfig<'_> {
 
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_comp_espressif__dm9051_enabled,
     esp_idf_eth_spi_ethernet_w5500,
-    esp_idf_eth_spi_ethernet_ksz8851snl
+    esp_idf_comp_espressif__w5500_enabled,
+    esp_idf_eth_spi_ethernet_ksz8851snl,
+    esp_idf_comp_espressif__ksz8851snl_enabled
 ))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SpiEthChipset {
-    #[cfg(esp_idf_eth_spi_ethernet_dm9051)]
+    #[cfg(any(
+        esp_idf_eth_spi_ethernet_dm9051,
+        esp_idf_comp_espressif__dm9051_enabled
+    ))]
     DM9051,
-    #[cfg(esp_idf_eth_spi_ethernet_w5500)]
+    #[cfg(any(esp_idf_eth_spi_ethernet_w5500, esp_idf_comp_espressif__w5500_enabled))]
     W5500,
-    #[cfg(esp_idf_eth_spi_ethernet_ksz8851snl)]
+    #[cfg(any(
+        esp_idf_eth_spi_ethernet_ksz8851snl,
+        esp_idf_comp_espressif__ksz8851snl_enabled
+    ))]
     KSZ8851SNL,
 }
 
@@ -166,8 +178,11 @@ pub enum SpiEthChipset {
 /// - v5.3-dev: <https://github.com/espressif/esp-idf/blob/ea010f84ef878dda07146244e166930738c1c103/components/esp_eth/include/esp_eth_mac.h#L694-L700>
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_comp_espressif__dm9051_enabled,
     esp_idf_eth_spi_ethernet_w5500,
-    esp_idf_eth_spi_ethernet_ksz8851snl
+    esp_idf_comp_espressif__w5500_enabled,
+    esp_idf_eth_spi_ethernet_ksz8851snl,
+    esp_idf_comp_espressif__ksz8851snl_enabled
 ))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SpiEventSource<'d> {
@@ -192,8 +207,11 @@ pub struct SpiEventSource<'d> {
 
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_comp_espressif__dm9051_enabled,
     esp_idf_eth_spi_ethernet_w5500,
-    esp_idf_eth_spi_ethernet_ksz8851snl
+    esp_idf_comp_espressif__w5500_enabled,
+    esp_idf_eth_spi_ethernet_ksz8851snl,
+    esp_idf_comp_espressif__ksz8851snl_enabled
 ))]
 impl<'d> SpiEventSource<'d> {
     /// Instead of getting informed by an interrupt pin about updates/changes from the emac, the
@@ -564,8 +582,11 @@ impl<'d> EthDriver<'d, OpenEth> {
 
 #[cfg(any(
     esp_idf_eth_spi_ethernet_dm9051,
+    esp_idf_comp_espressif__dm9051_enabled,
     esp_idf_eth_spi_ethernet_w5500,
-    esp_idf_eth_spi_ethernet_ksz8851snl
+    esp_idf_comp_espressif__w5500_enabled,
+    esp_idf_eth_spi_ethernet_ksz8851snl,
+    esp_idf_comp_espressif__ksz8851snl_enabled
 ))]
 impl<'d, T> EthDriver<'d, SpiEth<T>>
 where
@@ -702,7 +723,10 @@ where
         let phy_cfg = Self::eth_phy_default_config(rst, phy_addr);
 
         let (mac, phy, spi_handle) = match chipset {
-            #[cfg(esp_idf_eth_spi_ethernet_dm9051)]
+            #[cfg(any(
+                esp_idf_eth_spi_ethernet_dm9051,
+                esp_idf_comp_espressif__dm9051_enabled
+            ))]
             SpiEthChipset::DM9051 => {
                 let spi_devcfg = Self::get_spi_conf(cs, 1, 7, baudrate);
 
@@ -755,7 +779,7 @@ where
 
                 (mac, phy, spi_handle)
             }
-            #[cfg(esp_idf_eth_spi_ethernet_w5500)]
+            #[cfg(any(esp_idf_eth_spi_ethernet_w5500, esp_idf_comp_espressif__w5500_enabled))]
             SpiEthChipset::W5500 => {
                 let spi_devcfg = Self::get_spi_conf(cs, 16, 8, baudrate);
 
@@ -808,7 +832,10 @@ where
 
                 (mac, phy, spi_handle)
             }
-            #[cfg(esp_idf_eth_spi_ethernet_ksz8851snl)]
+            #[cfg(any(
+                esp_idf_eth_spi_ethernet_ksz8851snl,
+                esp_idf_comp_espressif__ksz8851snl_enabled
+            ))]
             SpiEthChipset::KSZ8851SNL => {
                 let spi_devcfg = Self::get_spi_conf(cs, 0, 0, baudrate);
 
