@@ -624,9 +624,7 @@ impl Drop for EspWebSocketClient<'_> {
             log::warn!("WebSocket close failed during drop: {e:?}");
         }
 
-        if let Err(e) = esp!(unsafe { esp_websocket_client_destroy(self.handle) }) {
-            log::warn!("WebSocket destroy failed during drop: {e:?}");
-        }
+        esp!(unsafe { esp_websocket_client_destroy(self.handle) }).unwrap();
 
         // timeout and callback dropped automatically
     }
