@@ -14,6 +14,12 @@ CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 # Enable WS support
 CONFIG_HTTPD_WS_SUPPORT=y
 
+# Enable MQTT 5.0 so that cfg(esp_idf_mqtt_protocol_5)-gated code
+# (Mqtt5ConnectionPropertyConfig, MqttProtocolVersion::V5, the
+# mqtt5_connection_property field and the new_raw setter block) is
+# compiled and clippy-checked in CI.
+CONFIG_MQTT_PROTOCOL_5=y
+
 # SPI Ethernet demo
 CONFIG_ETH_SPI_ETHERNET_DM9051=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
