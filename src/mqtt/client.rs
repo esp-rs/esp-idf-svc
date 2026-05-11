@@ -57,10 +57,13 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 /// be modified afterwards.
 ///
 /// Only used when [`MqttClientConfiguration::protocol_version`] is set to
-/// [`MqttProtocolVersion::V5`]. With any other protocol version the C
-/// library returns `ESP_FAIL` (the field is silently dropped — see
-/// [`MqttClientConfiguration::mqtt5_connection_property`] for the
-/// validation contract).
+/// [`MqttProtocolVersion::V5`]. Setting this field without also setting
+/// `protocol_version: Some(MqttProtocolVersion::V5)` causes
+/// [`EspMqttClient::new`] to return `Err(ESP_ERR_INVALID_ARG)`.
+///
+/// **Reconnect behaviour:** the properties are stored in the client handle
+/// and re-applied automatically on every reconnect. They cannot be changed
+/// after client creation without destroying and recreating the client.
 ///
 /// All fields are optional. `None` means "use the protocol default":
 ///
@@ -77,15 +80,28 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 /// All values are applied via one `esp_mqtt5_client_set_connect_property`
 /// call inside the library; users do not invoke the FFI directly.
 #[cfg(esp_idf_mqtt_protocol_5)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct Mqtt5ConnectionPropertyConfig {
     /// Seconds the broker should retain the session after disconnect.
     /// Required for QoS 1/2 redelivery after the client reconnects.
+    ///
+    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
+    /// boundary — the ESP-IDF encoder skips zero-valued numeric properties.
+    /// Both mean "session not retained beyond disconnect" (the protocol default).
     pub session_expiry_interval: Option<u32>,
     /// Seconds to delay LWT publication after an ungraceful disconnect.
+    ///
+    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
+    /// boundary (encoder skips zero values). Both mean "publish LWT
+    /// immediately on disconnect" (the protocol default).
     pub will_delay_interval: Option<u32>,
     /// Maximum number of QoS 1/2 PUBLISHes the client is willing to receive
     /// concurrently before sending PUBACK/PUBREC. Flow-control mechanism.
+    ///
+    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
+    /// boundary (encoder skips zero values). Use `Some(65535)` to explicitly
+    /// advertise the maximum rather than relying on `None`.
     pub receive_maximum: Option<u16>,
     /// Maximum MQTT packet size in bytes the client is willing to accept.
     ///
@@ -94,7 +110,11 @@ pub struct Mqtt5ConnectionPropertyConfig {
     /// is asked to constrain packets to what the client can actually receive.
     pub maximum_packet_size: Option<u32>,
     /// Highest topic-alias value the broker may use in outbound PUBLISHes.
-    /// `0` disables topic aliasing from broker to client.
+    ///
+    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
+    /// boundary (encoder skips zero values). Both disable topic aliasing from
+    /// broker to client (the protocol default). To explicitly disable, `None`
+    /// is sufficient.
     pub topic_alias_maximum: Option<u16>,
     /// Whether the broker should include response information in CONNACK
     /// (used for request/response patterns over MQTT).
@@ -628,10 +648,12 @@ impl<'a> EspMqttClient<'a> {
         // `esp_mqtt_client_destroy` cleans up the not-yet-started handle.
         #[cfg(esp_idf_mqtt_protocol_5)]
         if let Some(props) = conf.mqtt5_connection_property.as_ref() {
-            // SAFETY: All fields of esp_mqtt5_connection_property_config_t are
-            // integers, booleans, or nullable pointers — zero is a valid
-            // representation for every field. Same pattern used elsewhere in
-            // the C library for initialising MQTT 5.0 property configs.
+            // Pre-flight: the C setter returns ESP_FAIL if protocol_ver != V5,
+            // which surfaces as an opaque error. Catch the misconfiguration here
+            // with a clearer ESP_ERR_INVALID_ARG before crossing the FFI boundary.
+            if conf.protocol_version != Some(MqttProtocolVersion::V5) {
+                return Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>());
+            }
             let mut c_props = esp_mqtt5_connection_property_config_t::default();
             if let Some(v) = props.session_expiry_interval {
                 c_props.session_expiry_interval = v;
