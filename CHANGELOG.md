@@ -38,7 +38,8 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 - MQTT: New [`Mqtt5ConnectionPropertyConfig`] struct exposing MQTT 5.0 CONNECT-time
   properties (`session_expiry_interval`, `will_delay_interval`,
   `receive_maximum`, `maximum_packet_size`, `topic_alias_maximum`,
-  `request_response_info`, `request_problem_info`). Set via
+  `request_response_info`, `request_problem_info`, `message_expiry_interval`,
+  `payload_format_indicator`). Set via
   [`MqttClientConfiguration::mqtt5_connection_property`]. Requires
   `CONFIG_MQTT_PROTOCOL_5=y` in sdkconfig and
   `protocol_version: Some(MqttProtocolVersion::V5)`.
