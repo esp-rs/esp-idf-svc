@@ -29,6 +29,14 @@ pub use super::*;
 pub enum MqttProtocolVersion {
     V3_1,
     V3_1_1,
+    /// MQTT 5.0. Required to negotiate MQTT 5.0 on the wire and to apply
+    /// any [`Mqtt5ConnectionPropertyConfig`] set on
+    /// [`MqttClientConfiguration::mqtt5_connection_property`]; the C
+    /// `esp_mqtt5_client_set_connect_property` function returns `ESP_FAIL`
+    /// immediately if the client was not initialised with this version.
+    /// Enabled only when ESP-IDF is built with `CONFIG_MQTT_PROTOCOL_5=y`.
+    #[cfg(esp_idf_mqtt_protocol_5)]
+    V5,
 }
 
 impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
@@ -36,8 +44,57 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
         match pv {
             MqttProtocolVersion::V3_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1,
             MqttProtocolVersion::V3_1_1 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_3_1_1,
+            #[cfg(esp_idf_mqtt_protocol_5)]
+            MqttProtocolVersion::V5 => esp_mqtt_protocol_ver_t_MQTT_PROTOCOL_V_5,
         }
     }
+}
+
+/// MQTT 5.0 CONNECT-time properties applied to the client between
+/// [`esp_mqtt_client_init`] and [`esp_mqtt_client_start`]. These are
+/// negotiated with the broker during the initial CONNECT packet and cannot
+/// be modified afterwards.
+///
+/// Only used when [`MqttClientConfiguration::protocol_version`] is set to
+/// [`MqttProtocolVersion::V5`]. With any other protocol version the C
+/// library returns `ESP_FAIL` (the field is silently dropped — see
+/// [`MqttClientConfiguration::mqtt5_connection_property`] for the
+/// validation contract).
+///
+/// All fields are optional. `None` means "use the protocol default":
+///
+/// - `session_expiry_interval`: 0 (session not retained beyond disconnect)
+/// - `will_delay_interval`: 0 (LWT fires immediately on ungraceful disconnect)
+/// - `receive_maximum`: 65535 (no client-side flow-control limit)
+/// - `maximum_packet_size`: unlimited
+/// - `topic_alias_maximum`: 0 (no topic-alias support)
+/// - `request_response_info`: false
+/// - `request_problem_info`: true (broker MAY return reason strings on errors)
+///
+/// All values are applied via one `esp_mqtt5_client_set_connect_property`
+/// call inside the library; users do not invoke the FFI directly.
+#[cfg(esp_idf_mqtt_protocol_5)]
+#[derive(Debug, Clone, Default)]
+pub struct Mqtt5ConnectionPropertyConfig {
+    /// Seconds the broker should retain the session after disconnect.
+    /// Required for QoS 1/2 redelivery after the client reconnects.
+    pub session_expiry_interval: Option<u32>,
+    /// Seconds to delay LWT publication after an ungraceful disconnect.
+    pub will_delay_interval: Option<u32>,
+    /// Maximum number of QoS 1/2 PUBLISHes the client is willing to receive
+    /// concurrently before sending PUBACK/PUBREC. Flow-control mechanism.
+    pub receive_maximum: Option<u16>,
+    /// Maximum MQTT packet size in bytes the client is willing to accept.
+    pub maximum_packet_size: Option<u32>,
+    /// Highest topic-alias value the broker may use in outbound PUBLISHes.
+    /// `0` disables topic aliasing from broker to client.
+    pub topic_alias_maximum: Option<u16>,
+    /// Whether the broker should include response information in CONNACK
+    /// (used for request/response patterns over MQTT).
+    pub request_response_info: Option<bool>,
+    /// Whether the broker should include human-readable reason strings on
+    /// failures. Defaults to true per protocol spec.
+    pub request_problem_info: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -51,6 +108,16 @@ pub struct LwtConfiguration<'a> {
 #[derive(Debug)]
 pub struct MqttClientConfiguration<'a> {
     pub protocol_version: Option<MqttProtocolVersion>,
+
+    /// MQTT 5.0 CONNECT properties applied between client init and start, in
+    /// the safe window before `mqtt_task` is spawned. Requires
+    /// `protocol_version: Some(MqttProtocolVersion::V5)`; with any other
+    /// version the C library returns `ESP_FAIL` and client creation fails
+    /// loudly.
+    ///
+    /// See [`Mqtt5ConnectionPropertyConfig`] for the available fields.
+    #[cfg(esp_idf_mqtt_protocol_5)]
+    pub mqtt5_connection_property: Option<Mqtt5ConnectionPropertyConfig>,
 
     pub client_id: Option<&'a str>,
 
@@ -93,6 +160,9 @@ impl Default for MqttClientConfiguration<'_> {
     fn default() -> Self {
         Self {
             protocol_version: None,
+
+            #[cfg(esp_idf_mqtt_protocol_5)]
+            mqtt5_connection_property: None,
 
             client_id: None,
 
@@ -508,6 +578,52 @@ impl<'a> EspMqttClient<'a> {
                 unsafe_callback.as_ptr(),
             )
         })?;
+
+        // Apply MQTT 5.0 CONNECT properties in the safe window between init
+        // and start. Once `esp_mqtt_client_start` spawns `mqtt_task`, the
+        // setter would deadlock the caller against `MQTT_API_LOCK` held by
+        // that task across `esp_transport_connect()` (multi-second TLS
+        // handshake). If this returns an error, `client` drops here and
+        // `esp_mqtt_client_destroy` cleans up the not-yet-started handle.
+        #[cfg(esp_idf_mqtt_protocol_5)]
+        if let Some(props) = conf.mqtt5_connection_property.as_ref() {
+            // SAFETY: All fields of esp_mqtt5_connection_property_config_t are
+            // integers, booleans, or nullable pointers — zero is a valid
+            // representation for every field. Same pattern used elsewhere in
+            // the C library for initialising MQTT 5.0 property configs.
+            let mut c_props: esp_mqtt5_connection_property_config_t =
+                unsafe { core::mem::zeroed() };
+            if let Some(v) = props.session_expiry_interval {
+                c_props.session_expiry_interval = v;
+            }
+            if let Some(v) = props.will_delay_interval {
+                c_props.will_delay_interval = v;
+            }
+            if let Some(v) = props.receive_maximum {
+                c_props.receive_maximum = v;
+            }
+            if let Some(v) = props.maximum_packet_size {
+                c_props.maximum_packet_size = v;
+            }
+            if let Some(v) = props.topic_alias_maximum {
+                c_props.topic_alias_maximum = v;
+            }
+            if let Some(v) = props.request_response_info {
+                c_props.request_resp_info = v;
+            }
+            if let Some(v) = props.request_problem_info {
+                c_props.request_problem_info = v;
+            }
+            // SAFETY: client.raw_client is the just-initialised, not-yet-started
+            // client. mqtt_task does not exist yet, so MQTT_API_LOCK is
+            // uncontested. The setter requires protocol_version == V5; we rely
+            // on the user setting MqttClientConfiguration::protocol_version to
+            // Some(MqttProtocolVersion::V5). ESP_FAIL surfaces here and
+            // `client` drops, freeing all state.
+            esp!(unsafe {
+                esp_mqtt5_client_set_connect_property(client.raw_client, &c_props)
+            })?;
+        }
 
         esp!(unsafe { esp_mqtt_client_start(client.raw_client) })?;
 
