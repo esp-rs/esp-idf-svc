@@ -62,7 +62,6 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 /// C boundary: the ESP-IDF encoder skips zero/false values, so `Some(0)`
 /// and `Some(false)` are indistinguishable from `None` for all fields.
 #[cfg(esp_idf_mqtt_protocol_5)]
-#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct Mqtt5ConnectionPropertyConfig {
     /// Seconds the broker retains the session after disconnect (default: 0 = don't retain).
@@ -622,9 +621,7 @@ impl<'a> EspMqttClient<'a> {
             // on the user setting MqttClientConfiguration::protocol_version to
             // Some(MqttProtocolVersion::V5). ESP_FAIL surfaces here and
             // `client` drops, freeing all state.
-            esp!(unsafe {
-                esp_mqtt5_client_set_connect_property(client.raw_client, &c_props)
-            })?;
+            esp!(unsafe { esp_mqtt5_client_set_connect_property(client.raw_client, &c_props) })?;
         }
 
         esp!(unsafe { esp_mqtt_client_start(client.raw_client) })?;
