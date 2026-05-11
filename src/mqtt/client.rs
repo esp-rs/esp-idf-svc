@@ -70,6 +70,8 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 /// - `topic_alias_maximum`: 0 (no topic-alias support)
 /// - `request_response_info`: false
 /// - `request_problem_info`: true (broker MAY return reason strings on errors)
+/// - `message_expiry_interval`: 0 (LWT message never expires)
+/// - `payload_format_indicator`: false (LWT payload is opaque bytes)
 ///
 /// All values are applied via one `esp_mqtt5_client_set_connect_property`
 /// call inside the library; users do not invoke the FFI directly.
@@ -95,6 +97,15 @@ pub struct Mqtt5ConnectionPropertyConfig {
     /// Whether the broker should include human-readable reason strings on
     /// failures. Defaults to true per protocol spec.
     pub request_problem_info: Option<bool>,
+    /// Seconds after which the broker discards the Last Will message if it
+    /// has not yet been delivered. `0` means no expiry. Only meaningful when
+    /// [`MqttClientConfiguration::lwt`] is also set.
+    pub message_expiry_interval: Option<u32>,
+    /// Whether the Last Will payload is UTF-8 (`true`) or arbitrary bytes
+    /// (`false`). Lets subscribers reason about LWT payload shape without
+    /// guessing. Only meaningful when [`MqttClientConfiguration::lwt`] is
+    /// also set.
+    pub payload_format_indicator: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -613,6 +624,12 @@ impl<'a> EspMqttClient<'a> {
             }
             if let Some(v) = props.request_problem_info {
                 c_props.request_problem_info = v;
+            }
+            if let Some(v) = props.message_expiry_interval {
+                c_props.message_expiry_interval = v;
+            }
+            if let Some(v) = props.payload_format_indicator {
+                c_props.payload_format_indicator = v;
             }
             // SAFETY: client.raw_client is the just-initialised, not-yet-started
             // client. mqtt_task does not exist yet, so MQTT_API_LOCK is
