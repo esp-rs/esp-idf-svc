@@ -51,97 +51,43 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
     }
 }
 
-/// MQTT 5.0 CONNECT-time properties applied to the client between
-/// [`esp_mqtt_client_init`] and [`esp_mqtt_client_start`]. These are
-/// negotiated with the broker during the initial CONNECT packet and cannot
-/// be modified afterwards.
+/// MQTT 5.0 CONNECT properties. Requires
+/// `protocol_version: Some(MqttProtocolVersion::V5)`; omitting it returns
+/// `Err(ESP_ERR_INVALID_ARG)` from [`EspMqttClient::new`].
 ///
-/// Only used when [`MqttClientConfiguration::protocol_version`] is set to
-/// [`MqttProtocolVersion::V5`]. Setting this field without also setting
-/// `protocol_version: Some(MqttProtocolVersion::V5)` causes
-/// [`EspMqttClient::new`] to return `Err(ESP_ERR_INVALID_ARG)`.
+/// Properties are applied in the `init`→`start` gap before `mqtt_task`
+/// spawns and are re-sent on every reconnect; they cannot be changed after
+/// construction without destroying and recreating the client.
 ///
-/// **Reconnect behaviour:** the properties are stored in the client handle
-/// and re-applied automatically on every reconnect. They cannot be changed
-/// after client creation without destroying and recreating the client.
-///
-/// All fields are optional. `None` means "use the protocol default":
-///
-/// - `session_expiry_interval`: 0 (session not retained beyond disconnect)
-/// - `will_delay_interval`: 0 (LWT fires immediately on ungraceful disconnect)
-/// - `receive_maximum`: 65535 (no client-side flow-control limit)
-/// - `maximum_packet_size`: clamps to the client's RX buffer length
-/// - `topic_alias_maximum`: 0 (no topic-alias support)
-/// - `request_response_info`: false
-/// - `request_problem_info`: true (broker MAY return reason strings on errors)
-/// - `message_expiry_interval`: 0 (LWT message never expires)
-/// - `payload_format_indicator`: false (LWT payload is opaque bytes)
-///
-/// All values are applied via one `esp_mqtt5_client_set_connect_property`
-/// call inside the library; users do not invoke the FFI directly.
+/// C boundary: the ESP-IDF encoder skips zero/false values, so `Some(0)`
+/// and `Some(false)` are indistinguishable from `None` for all fields.
 #[cfg(esp_idf_mqtt_protocol_5)]
 #[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct Mqtt5ConnectionPropertyConfig {
-    /// Seconds the broker should retain the session after disconnect.
-    /// Required for QoS 1/2 redelivery after the client reconnects.
-    ///
-    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
-    /// boundary — the ESP-IDF encoder skips zero-valued numeric properties.
-    /// Both mean "session not retained beyond disconnect" (the protocol default).
+    /// Seconds the broker retains the session after disconnect (default: 0 = don't retain).
     pub session_expiry_interval: Option<u32>,
-    /// Seconds to delay LWT publication after an ungraceful disconnect.
-    ///
-    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
-    /// boundary (encoder skips zero values). Both mean "publish LWT
-    /// immediately on disconnect" (the protocol default).
+    /// Seconds to delay LWT publish after disconnect (default: 0 = immediate).
     pub will_delay_interval: Option<u32>,
-    /// Maximum number of QoS 1/2 PUBLISHes the client is willing to receive
-    /// concurrently before sending PUBACK/PUBREC. Flow-control mechanism.
-    ///
-    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
-    /// boundary (encoder skips zero values). Use `Some(65535)` to explicitly
-    /// advertise the maximum rather than relying on `None`.
+    /// Max concurrent inbound QoS 1/2 PUBLISHes before sending PUBACK/PUBREC
+    /// (default: 65535 = no limit).
     pub receive_maximum: Option<u16>,
-    /// Maximum MQTT packet size in bytes the client is willing to accept.
-    ///
-    /// `None` caps at the client's RX buffer size (`buffer_size` in
-    /// [`MqttClientConfiguration`]), not at an unlimited value — the broker
-    /// is asked to constrain packets to what the client can actually receive.
+    /// Max MQTT packet size the client accepts. `None` caps at the configured
+    /// `buffer_size` (not unlimited — the broker is told not to exceed it).
     pub maximum_packet_size: Option<u32>,
-    /// Highest topic-alias value the broker may use in outbound PUBLISHes.
-    ///
-    /// **Note:** `Some(0)` and `None` are indistinguishable at the C
-    /// boundary (encoder skips zero values). Both disable topic aliasing from
-    /// broker to client (the protocol default). To explicitly disable, `None`
-    /// is sufficient.
+    /// Max topic alias the broker may use in outbound PUBLISHes
+    /// (default: 0 = no aliasing).
     pub topic_alias_maximum: Option<u16>,
-    /// Whether the broker should include response information in CONNACK
-    /// (used for request/response patterns over MQTT).
-    ///
-    /// C binding field: `request_resp_info` (abbreviated in ESP-IDF headers).
-    ///
-    /// **Note:** `Some(false)` is indistinguishable from `None` at the C
-    /// boundary — the ESP-IDF encoder only emits this property when the value
-    /// is `true`. The protocol default (false) applies for both `None` and
-    /// `Some(false)`.
+    /// Ask the broker to include response info in CONNACK for request/response
+    /// patterns. C field: `request_resp_info`. Default: false.
     pub request_response_info: Option<bool>,
-    /// Whether the broker should include human-readable reason strings on
-    /// failures. Defaults to true per protocol spec.
-    ///
-    /// **Note:** `Some(false)` is indistinguishable from `None` at the C
-    /// boundary — the ESP-IDF encoder only emits this property when the value
-    /// is `true`. Setting `Some(false)` does NOT explicitly suppress broker
-    /// reason strings; the broker chooses per its own default (usually true).
+    /// Ask the broker to include reason strings on failures. Default: true.
     pub request_problem_info: Option<bool>,
-    /// Seconds after which the broker discards the Last Will message if it
-    /// has not yet been delivered. `0` means no expiry. Only meaningful when
-    /// [`MqttClientConfiguration::lwt`] is also set.
+    /// Seconds before the broker discards the LWT if undelivered
+    /// (default: 0 = never). Meaningful only with [`MqttClientConfiguration::lwt`].
     pub message_expiry_interval: Option<u32>,
-    /// Whether the Last Will payload is UTF-8 (`true`) or arbitrary bytes
-    /// (`false`). Lets subscribers reason about LWT payload shape without
-    /// guessing. Only meaningful when [`MqttClientConfiguration::lwt`] is
-    /// also set.
+    /// LWT payload encoding: UTF-8 (`true`) or opaque bytes (`false`).
+    /// Meaningful only with [`MqttClientConfiguration::lwt`].
     pub payload_format_indicator: Option<bool>,
 }
 
@@ -494,17 +440,10 @@ impl RawHandle for EspMqttClient<'_> {
 impl EspMqttClient<'static> {
     /// Creates and immediately starts an MQTT client.
     ///
-    /// # MQTT 5.0 connect-time properties
-    ///
-    /// To set MQTT 5.0 CONNECT properties (session expiry, receive maximum,
-    /// etc.) before the initial CONNECT packet, populate
-    /// [`MqttClientConfiguration::mqtt5_connection_property`] and set
+    /// For MQTT 5.0 CONNECT properties, set
+    /// [`MqttClientConfiguration::mqtt5_connection_property`] and
     /// [`MqttClientConfiguration::protocol_version`] to
-    /// [`MqttProtocolVersion::V5`]. The properties are applied inside the
-    /// library in the safe window between `esp_mqtt_client_init` and
-    /// `esp_mqtt_client_start` (before `mqtt_task` spawns). Calling
-    /// `esp_mqtt5_client_set_connect_property` manually after this
-    /// constructor returns deadlocks the caller against `mqtt_task`.
+    /// [`MqttProtocolVersion::V5`].
     pub fn new(
         url: &str,
         conf: &MqttClientConfiguration,
@@ -640,17 +579,12 @@ impl<'a> EspMqttClient<'a> {
             )
         })?;
 
-        // Apply MQTT 5.0 CONNECT properties in the safe window between init
-        // and start. Once `esp_mqtt_client_start` spawns `mqtt_task`, the
-        // setter would deadlock the caller against `MQTT_API_LOCK` held by
-        // that task across `esp_transport_connect()` (multi-second TLS
-        // handshake). If this returns an error, `client` drops here and
-        // `esp_mqtt_client_destroy` cleans up the not-yet-started handle.
+        // Apply MQTT 5.0 CONNECT properties before start() — mqtt_task doesn't
+        // exist yet so MQTT_API_LOCK is uncontested. On error `client` drops,
+        // calling esp_mqtt_client_destroy on the uninitialised handle.
         #[cfg(esp_idf_mqtt_protocol_5)]
         if let Some(props) = conf.mqtt5_connection_property.as_ref() {
-            // Pre-flight: the C setter returns ESP_FAIL if protocol_ver != V5,
-            // which surfaces as an opaque error. Catch the misconfiguration here
-            // with a clearer ESP_ERR_INVALID_ARG before crossing the FFI boundary.
+            // C setter returns opaque ESP_FAIL without V5; surface it earlier.
             if conf.protocol_version != Some(MqttProtocolVersion::V5) {
                 return Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>());
             }
