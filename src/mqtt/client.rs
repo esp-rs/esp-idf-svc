@@ -66,7 +66,7 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 /// - `session_expiry_interval`: 0 (session not retained beyond disconnect)
 /// - `will_delay_interval`: 0 (LWT fires immediately on ungraceful disconnect)
 /// - `receive_maximum`: 65535 (no client-side flow-control limit)
-/// - `maximum_packet_size`: unlimited
+/// - `maximum_packet_size`: clamps to the client's RX buffer length
 /// - `topic_alias_maximum`: 0 (no topic-alias support)
 /// - `request_response_info`: false
 /// - `request_problem_info`: true (broker MAY return reason strings on errors)
@@ -87,15 +87,31 @@ pub struct Mqtt5ConnectionPropertyConfig {
     /// concurrently before sending PUBACK/PUBREC. Flow-control mechanism.
     pub receive_maximum: Option<u16>,
     /// Maximum MQTT packet size in bytes the client is willing to accept.
+    ///
+    /// `None` caps at the client's RX buffer size (`buffer_size` in
+    /// [`MqttClientConfiguration`]), not at an unlimited value — the broker
+    /// is asked to constrain packets to what the client can actually receive.
     pub maximum_packet_size: Option<u32>,
     /// Highest topic-alias value the broker may use in outbound PUBLISHes.
     /// `0` disables topic aliasing from broker to client.
     pub topic_alias_maximum: Option<u16>,
     /// Whether the broker should include response information in CONNACK
     /// (used for request/response patterns over MQTT).
+    ///
+    /// C binding field: `request_resp_info` (abbreviated in ESP-IDF headers).
+    ///
+    /// **Note:** `Some(false)` is indistinguishable from `None` at the C
+    /// boundary — the ESP-IDF encoder only emits this property when the value
+    /// is `true`. The protocol default (false) applies for both `None` and
+    /// `Some(false)`.
     pub request_response_info: Option<bool>,
     /// Whether the broker should include human-readable reason strings on
     /// failures. Defaults to true per protocol spec.
+    ///
+    /// **Note:** `Some(false)` is indistinguishable from `None` at the C
+    /// boundary — the ESP-IDF encoder only emits this property when the value
+    /// is `true`. Setting `Some(false)` does NOT explicitly suppress broker
+    /// reason strings; the broker chooses per its own default (usually true).
     pub request_problem_info: Option<bool>,
     /// Seconds after which the broker discards the Last Will message if it
     /// has not yet been delivered. `0` means no expiry. Only meaningful when
@@ -455,6 +471,19 @@ impl RawHandle for EspMqttClient<'_> {
 }
 
 impl EspMqttClient<'static> {
+    /// Creates and immediately starts an MQTT client.
+    ///
+    /// # MQTT 5.0 connect-time properties
+    ///
+    /// To set MQTT 5.0 CONNECT properties (session expiry, receive maximum,
+    /// etc.) before the initial CONNECT packet, populate
+    /// [`MqttClientConfiguration::mqtt5_connection_property`] and set
+    /// [`MqttClientConfiguration::protocol_version`] to
+    /// [`MqttProtocolVersion::V5`]. The properties are applied inside the
+    /// library in the safe window between `esp_mqtt_client_init` and
+    /// `esp_mqtt_client_start` (before `mqtt_task` spawns). Calling
+    /// `esp_mqtt5_client_set_connect_property` manually after this
+    /// constructor returns deadlocks the caller against `mqtt_task`.
     pub fn new(
         url: &str,
         conf: &MqttClientConfiguration,
@@ -602,8 +631,7 @@ impl<'a> EspMqttClient<'a> {
             // integers, booleans, or nullable pointers — zero is a valid
             // representation for every field. Same pattern used elsewhere in
             // the C library for initialising MQTT 5.0 property configs.
-            let mut c_props: esp_mqtt5_connection_property_config_t =
-                unsafe { core::mem::zeroed() };
+            let mut c_props = esp_mqtt5_connection_property_config_t::default();
             if let Some(v) = props.session_expiry_interval {
                 c_props.session_expiry_interval = v;
             }
