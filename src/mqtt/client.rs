@@ -26,6 +26,7 @@ pub use embedded_svc::mqtt::client::{
 pub use super::*;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum MqttProtocolVersion {
     V3_1,
     V3_1_1,
