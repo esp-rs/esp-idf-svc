@@ -104,8 +104,10 @@ mod example {
 
         info!("step 9: subscribed; registering SEPs");
         // AAC at seid 0 (preferred), SBC at seid 1 (mandatory fallback).
-        a2dp.register_sink_endpoint(0, &Codec::aac_default())?;
-        a2dp.register_sink_endpoint(1, &Codec::sbc_default())?;
+        for (seid, codec) in [(0, Codec::aac_default()), (1, Codec::sbc_default())] {
+            info!("registering {} at seid {}", codec.name(), seid);
+            a2dp.register_sink_endpoint(seid, &codec)?;
+        }
 
         info!("step 10: A2DP sink ready; pair with phone and play audio");
 
