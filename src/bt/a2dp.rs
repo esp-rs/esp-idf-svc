@@ -76,30 +76,61 @@ pub enum Codec {
 }
 
 impl Codec {
+    /// Negotiated audio sample rate (not bitrate — the method name is kept for
+    /// API stability).
     pub fn bitrate(&self) -> Option<u32> {
-        if let Self::Sbc(data) = self {
-            let oct0 = data[0];
-            let sample_rate = if (oct0 & (0x01 << 6)) != 0 {
-                32000
-            } else if (oct0 & (0x01 << 5)) != 0 {
-                44100
-            } else if (oct0 & (0x01 << 4)) != 0 {
-                48000
-            } else {
-                16000
-            };
-
-            Some(sample_rate)
-        } else {
-            None
+        match self {
+            Self::Sbc(data) => {
+                let oct0 = data[0];
+                Some(if (oct0 & (0x01 << 6)) != 0 {
+                    32000
+                } else if (oct0 & (0x01 << 5)) != 0 {
+                    44100
+                } else if (oct0 & (0x01 << 4)) != 0 {
+                    48000
+                } else {
+                    16000
+                })
+            }
+            Self::Mpeg2_4(data) => {
+                // AAC sample-frequency bitmap (AVDTP A2DP 4.5.2):
+                // byte 1 covers 8 kHz..44.1 kHz, byte 2 high nibble covers 48..96 kHz.
+                // After negotiation exactly one bit is set.
+                if data[2] & 0x80 != 0 { Some(48000) }
+                else if data[1] & 0x01 != 0 { Some(44100) }
+                else if data[1] & 0x02 != 0 { Some(32000) }
+                else if data[1] & 0x04 != 0 { Some(24000) }
+                else if data[1] & 0x08 != 0 { Some(22050) }
+                else if data[1] & 0x10 != 0 { Some(16000) }
+                else if data[1] & 0x20 != 0 { Some(12000) }
+                else if data[1] & 0x40 != 0 { Some(11025) }
+                else if data[1] & 0x80 != 0 { Some(8000) }
+                else if data[2] & 0x40 != 0 { Some(64000) }
+                else if data[2] & 0x20 != 0 { Some(88200) }
+                else if data[2] & 0x10 != 0 { Some(96000) }
+                else { None }
+            }
+            _ => None,
         }
     }
 
     pub fn stereo(&self) -> Option<bool> {
-        if let Self::Sbc(data) = self {
-            Some((data[0] & (0x01 << 3)) == 0)
-        } else {
-            None
+        match self {
+            Self::Sbc(data) => Some((data[0] & (0x01 << 3)) == 0),
+            // AAC byte 2 bit 2 = 2-channel mode (stereo); bit 3 = 1-channel (mono).
+            Self::Mpeg2_4(data) => Some((data[2] & 0x04) != 0),
+            _ => None,
+        }
+    }
+
+    /// Short codec name for display.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Sbc(_) => "SBC",
+            Self::Mpeg1_2(_) => "MPEG-1/2 Audio",
+            Self::Mpeg2_4(_) => "AAC",
+            Self::Atrac(_) => "ATRAC",
+            Self::Unknown => "Unknown",
         }
     }
 
