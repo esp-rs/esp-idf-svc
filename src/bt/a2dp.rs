@@ -96,19 +96,33 @@ impl Codec {
                 // AAC sample-frequency bitmap (AVDTP A2DP 4.5.2):
                 // byte 1 covers 8 kHz..44.1 kHz, byte 2 high nibble covers 48..96 kHz.
                 // After negotiation exactly one bit is set.
-                if data[2] & 0x80 != 0 { Some(48000) }
-                else if data[1] & 0x01 != 0 { Some(44100) }
-                else if data[1] & 0x02 != 0 { Some(32000) }
-                else if data[1] & 0x04 != 0 { Some(24000) }
-                else if data[1] & 0x08 != 0 { Some(22050) }
-                else if data[1] & 0x10 != 0 { Some(16000) }
-                else if data[1] & 0x20 != 0 { Some(12000) }
-                else if data[1] & 0x40 != 0 { Some(11025) }
-                else if data[1] & 0x80 != 0 { Some(8000) }
-                else if data[2] & 0x40 != 0 { Some(64000) }
-                else if data[2] & 0x20 != 0 { Some(88200) }
-                else if data[2] & 0x10 != 0 { Some(96000) }
-                else { None }
+                if data[2] & 0x80 != 0 {
+                    Some(48000)
+                } else if data[1] & 0x01 != 0 {
+                    Some(44100)
+                } else if data[1] & 0x02 != 0 {
+                    Some(32000)
+                } else if data[1] & 0x04 != 0 {
+                    Some(24000)
+                } else if data[1] & 0x08 != 0 {
+                    Some(22050)
+                } else if data[1] & 0x10 != 0 {
+                    Some(16000)
+                } else if data[1] & 0x20 != 0 {
+                    Some(12000)
+                } else if data[1] & 0x40 != 0 {
+                    Some(11025)
+                } else if data[1] & 0x80 != 0 {
+                    Some(8000)
+                } else if data[2] & 0x40 != 0 {
+                    Some(64000)
+                } else if data[2] & 0x20 != 0 {
+                    Some(88200)
+                } else if data[2] & 0x10 != 0 {
+                    Some(96000)
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -378,7 +392,10 @@ pub enum A2dpEvent<'a> {
     SinkAudioData(A2dpAudioBuf),
     /// Result of a prior `register_sink_endpoint` call.
     #[cfg(esp_idf_bt_a2dp_use_external_codec)]
-    SinkEndpointRegistered { seid: u8, state: SepRegState },
+    SinkEndpointRegistered {
+        seid: u8,
+        state: SepRegState,
+    },
     Other {
         raw_event: esp_a2d_cb_event_t,
         raw_data: EventRawData<'a>,
