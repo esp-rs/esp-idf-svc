@@ -52,9 +52,6 @@ mod example {
     use log::info;
 
     pub fn main() -> anyhow::Result<()> {
-        // step 0 must use println! — runs BEFORE EspLogger::initialize_default(),
-        // so the `log` crate has no backend yet and `info!` would be a no-op.
-        println!("step 0: entered example::main");
         esp_idf_svc::sys::link_patches();
         EspLogger::initialize_default();
         info!("step 1: logger up");
