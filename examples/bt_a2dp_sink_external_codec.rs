@@ -15,13 +15,15 @@
 //! CONFIG_BT_CLASSIC_ENABLED=y
 //! CONFIG_BT_A2DP_ENABLE=y
 //! CONFIG_BT_A2DP_USE_EXTERNAL_CODEC=y
-//! CONFIG_BT_A2DP_CODEC_AAC_ENABLED=y
 //! CONFIG_BT_A2DP_SEP_NUM_MAX=2
 //! CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
 //! CONFIG_BTDM_CTRL_MODE_BLE_ONLY=n
 //! CONFIG_BTDM_CTRL_MODE_BTDM=n
 //! CONFIG_BT_BTC_TASK_STACK_SIZE=15000
 //! ```
+//!
+//! To run this example:
+//! MCU=esp32 ESP_IDF_SDKCONFIG_DEFAULTS=.github/configs/sdkconfig.a2dp_external_codec cargo +esp espflash flash --target xtensa-esp32-espidf --example bt_a2dp_sink_external_codec --monitor
 
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
