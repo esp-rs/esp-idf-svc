@@ -227,29 +227,11 @@ pub enum ConnectionStatus {
 pub enum AudioStatus {
     // The C enum dropped REMOTE_SUSPEND in favour of plain SUSPEND in
     // esp-idf >= 5.2; the Rust variant name is kept stable for API users.
-    #[cfg(any(
-        esp_idf_version_major = "4",
-        all(
-            esp_idf_version_major = "5",
-            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
-        ),
-    ))]
+    #[cfg(not(esp_idf_version_at_least_5_2_0))]
     SuspendedByRemote = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND,
-    #[cfg(not(any(
-        esp_idf_version_major = "4",
-        all(
-            esp_idf_version_major = "5",
-            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
-        ),
-    )))]
+    #[cfg(esp_idf_version_at_least_5_2_0)]
     SuspendedByRemote = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_SUSPEND,
-    #[cfg(any(
-        esp_idf_version_major = "4",
-        all(
-            esp_idf_version_major = "5",
-            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
-        ),
-    ))]
+    #[cfg(not(esp_idf_version_at_least_5_2_0))]
     Stopped = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_STOPPED,
     Started = esp_a2d_audio_state_t_ESP_A2D_AUDIO_STATE_STARTED,
 }
@@ -261,13 +243,7 @@ pub enum MediaControlCommand {
     CheckSourceReady = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY,
     Start = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_START,
     // STOP was dropped in esp-idf >= 5.2.
-    #[cfg(any(
-        esp_idf_version_major = "4",
-        all(
-            esp_idf_version_major = "5",
-            any(esp_idf_version_minor = "0", esp_idf_version_minor = "1")
-        ),
-    ))]
+    #[cfg(not(esp_idf_version_at_least_5_2_0))]
     Stop = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_STOP,
     Suspend = esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_SUSPEND,
 }
