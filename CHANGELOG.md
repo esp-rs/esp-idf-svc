@@ -26,25 +26,10 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 ### Fixed
 - WiFi: receiving any of the six new events listed above on ESP-IDF v5.3+ / v5.5+ no longer causes a panic (fixes #618)
 - WebSocket: `EspWebSocketClient::drop()` no longer panics when `esp_websocket_client_close` returns `ESP_FAIL` (e.g. after a network disconnection); errors are now logged instead of unwrapped
-- MQTT: Setting MQTT 5.0 CONNECT properties on `EspMqttClient` no longer deadlocks.
-  Previously, calling `esp_mqtt5_client_set_connect_property()` after
-  `EspMqttClient::new()` blocked the caller indefinitely on the internal
-  `MQTT_API_LOCK` held by `mqtt_task` across `esp_transport_connect()` — fixed
-  by applying connect properties inside the library in the safe init/start
-  window. Configure via the new
-  [`MqttClientConfiguration::mqtt5_connection_property`] field.
+- MQTT: MQTT 5.0 CONNECT properties can now be set on `EspMqttClient` without deadlocking on `MQTT_API_LOCK`; they are applied inside the library between `esp_mqtt_client_init` and `esp_mqtt_client_start` via the new [`MqttClientConfiguration::mqtt5_connection_property`] field.
 
 ### Added
-- MQTT: New [`Mqtt5ConnectionPropertyConfig`] struct exposing MQTT 5.0 CONNECT-time
-  properties (`session_expiry_interval`, `will_delay_interval`,
-  `receive_maximum`, `maximum_packet_size`, `topic_alias_maximum`,
-  `request_response_info`, `request_problem_info`, `message_expiry_interval`,
-  `payload_format_indicator`). Set via
-  [`MqttClientConfiguration::mqtt5_connection_property`]. Requires
-  `CONFIG_MQTT_PROTOCOL_5=y` in sdkconfig and
-  `protocol_version: Some(MqttProtocolVersion::V5)`.
-- MQTT: New `MqttProtocolVersion::V5` enum variant (gated on
-  `CONFIG_MQTT_PROTOCOL_5=y`) required to negotiate MQTT 5.0 on the wire.
+- MQTT: `MqttProtocolVersion::V5` variant and [`Mqtt5ConnectionPropertyConfig`] struct exposing MQTT 5.0 CONNECT properties (session/will/message expiry intervals, receive/packet/topic-alias maxima, request-response/problem info, payload format indicator). Gated on `CONFIG_MQTT_PROTOCOL_5=y`.
 - Compatibility with ESP-IDF V6.0, and some pre-release 6.0.x.
 - Added support for the Generic Ethernet PHY driver: particularly useful on ESP-IDF 6.0+ as it is built-in.
 
