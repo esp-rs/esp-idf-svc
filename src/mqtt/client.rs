@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
+use ::log::error;
 use embedded_svc::mqtt::client::{asynch, Client, Connection, Enqueue, ErrorType, Publish};
 
 use crate::private::unblocker::Unblocker;
@@ -46,17 +47,27 @@ impl From<MqttProtocolVersion> for esp_mqtt_protocol_ver_t {
 }
 
 /// MQTT 5.0 CONNECT properties. Requires `protocol_version: Some(MqttProtocolVersion::V5)`.
+/// `None` on a field leaves the property unset and the broker applies the MQTT 5 default.
 #[cfg(esp_idf_mqtt_protocol_5)]
 #[derive(Debug, Clone, Default)]
 pub struct Mqtt5ConnectionPropertyConfig {
+    /// Session Expiry Interval, seconds (MQTT5 §3.1.2.11.2).
     pub session_expiry_interval: Option<u32>,
+    /// Will Delay Interval, seconds (MQTT5 §3.1.3.2.2).
     pub will_delay_interval: Option<u32>,
+    /// Receive Maximum, max concurrent inbound QoS>0 PUBLISHes (MQTT5 §3.1.2.11.3).
     pub receive_maximum: Option<u16>,
+    /// Maximum Packet Size the client accepts, bytes (MQTT5 §3.1.2.11.4).
     pub maximum_packet_size: Option<u32>,
+    /// Topic Alias Maximum the broker may use (MQTT5 §3.1.2.11.5).
     pub topic_alias_maximum: Option<u16>,
+    /// Request Response Information (MQTT5 §3.1.2.11.6). C field: `request_resp_info`.
     pub request_response_info: Option<bool>,
+    /// Request Problem Information (MQTT5 §3.1.2.11.7). Protocol default is `true`.
     pub request_problem_info: Option<bool>,
+    /// Will Message Expiry Interval, seconds (MQTT5 §3.3.2.3.3).
     pub message_expiry_interval: Option<u32>,
+    /// Will Payload Format Indicator: UTF-8 (`true`) or bytes (`false`) (MQTT5 §3.3.2.3.2).
     pub payload_format_indicator: Option<bool>,
 }
 
@@ -540,20 +551,39 @@ impl<'a> EspMqttClient<'a> {
         #[cfg(esp_idf_mqtt_protocol_5)]
         if let Some(props) = conf.mqtt5_connection_property.as_ref() {
             if conf.protocol_version != Some(MqttProtocolVersion::V5) {
+                error!(
+                    "mqtt5_connection_property requires protocol_version = Some(MqttProtocolVersion::V5)"
+                );
                 return Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>());
             }
-            let c_props = esp_mqtt5_connection_property_config_t {
-                session_expiry_interval: props.session_expiry_interval.unwrap_or(0),
-                will_delay_interval: props.will_delay_interval.unwrap_or(0),
-                receive_maximum: props.receive_maximum.unwrap_or(0),
-                maximum_packet_size: props.maximum_packet_size.unwrap_or(0),
-                topic_alias_maximum: props.topic_alias_maximum.unwrap_or(0),
-                request_resp_info: props.request_response_info.unwrap_or(false),
-                request_problem_info: props.request_problem_info.unwrap_or(false),
-                message_expiry_interval: props.message_expiry_interval.unwrap_or(0),
-                payload_format_indicator: props.payload_format_indicator.unwrap_or(false),
-                ..Default::default()
-            };
+            let mut c_props = esp_mqtt5_connection_property_config_t::default();
+            if let Some(v) = props.session_expiry_interval {
+                c_props.session_expiry_interval = v;
+            }
+            if let Some(v) = props.will_delay_interval {
+                c_props.will_delay_interval = v;
+            }
+            if let Some(v) = props.receive_maximum {
+                c_props.receive_maximum = v;
+            }
+            if let Some(v) = props.maximum_packet_size {
+                c_props.maximum_packet_size = v;
+            }
+            if let Some(v) = props.topic_alias_maximum {
+                c_props.topic_alias_maximum = v;
+            }
+            if let Some(v) = props.request_response_info {
+                c_props.request_resp_info = v;
+            }
+            if let Some(v) = props.request_problem_info {
+                c_props.request_problem_info = v;
+            }
+            if let Some(v) = props.message_expiry_interval {
+                c_props.message_expiry_interval = v;
+            }
+            if let Some(v) = props.payload_format_indicator {
+                c_props.payload_format_indicator = v;
+            }
             esp!(unsafe { esp_mqtt5_client_set_connect_property(client.raw_client, &c_props) })?;
         }
 

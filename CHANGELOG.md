@@ -29,7 +29,17 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 - MQTT: MQTT 5.0 CONNECT properties can now be set on `EspMqttClient` without deadlocking on `MQTT_API_LOCK`; they are applied inside the library between `esp_mqtt_client_init` and `esp_mqtt_client_start` via the new [`MqttClientConfiguration::mqtt5_connection_property`] field.
 
 ### Added
-- MQTT: `MqttProtocolVersion::V5` variant and [`Mqtt5ConnectionPropertyConfig`] struct exposing MQTT 5.0 CONNECT properties (session/will/message expiry intervals, receive/packet/topic-alias maxima, request-response/problem info, payload format indicator). Gated on `CONFIG_MQTT_PROTOCOL_5=y`.
+- MQTT: `MqttProtocolVersion::V5` variant and [`Mqtt5ConnectionPropertyConfig`] struct exposing MQTT 5.0 CONNECT properties (session/will/message expiry intervals, receive/packet/topic-alias maxima, request-response/problem info, payload format indicator). Gated on `CONFIG_MQTT_PROTOCOL_5=y`. To negotiate MQTT 5 and set properties:
+  ```rust
+  MqttClientConfiguration {
+      protocol_version: Some(MqttProtocolVersion::V5),
+      mqtt5_connection_property: Some(Mqtt5ConnectionPropertyConfig {
+          session_expiry_interval: Some(60),
+          ..Default::default()
+      }),
+      ..Default::default()
+  }
+  ```
 - Compatibility with ESP-IDF V6.0, and some pre-release 6.0.x.
 - Added support for the Generic Ethernet PHY driver: particularly useful on ESP-IDF 6.0+ as it is built-in.
 
