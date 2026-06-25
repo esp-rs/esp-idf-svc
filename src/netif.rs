@@ -363,6 +363,8 @@ impl EspNetif {
                     route_prio: conf.route_priority as _,
                     #[cfg(not(esp_idf_version_major = "4"))]
                     bridge_info: ptr::null_mut(),
+                    #[cfg(esp_idf_version_at_least_6_0_0)]
+                    mtu: 0,
                 },
                 match ip_conf {
                     ipv4::ClientConfiguration::DHCP(_) => None,
@@ -404,6 +406,8 @@ impl EspNetif {
                     route_prio: conf.route_priority as _,
                     #[cfg(not(esp_idf_version_major = "4"))]
                     bridge_info: ptr::null_mut(),
+                    #[cfg(esp_idf_version_at_least_6_0_0)]
+                    mtu: 0,
                 },
                 Some(esp_netif_ip_info_t {
                     ip: Newtype::<esp_ip4_addr_t>::from(ip_conf.subnet.gateway).0,
@@ -427,6 +431,8 @@ impl EspNetif {
                     route_prio: conf.route_priority as _,
                     #[cfg(not(esp_idf_version_major = "4"))]
                     bridge_info: ptr::null_mut(),
+                    #[cfg(esp_idf_version_at_least_6_0_0)]
+                    mtu: 0,
                 },
                 None,
                 false,
@@ -779,6 +785,13 @@ pub enum IpEvent<'a> {
     DhcpIpAssigned(DhcpIpAssignment<'a>),
     DhcpIp6Assigned(DhcpIp6Assignment<'a>),
     DhcpIpDeassigned(*mut esp_netif_t),
+
+    /// An event ID not recognised by this version of the library was received.
+    ///
+    /// This variant is produced instead of panicking when an unknown event ID
+    /// arrives, allowing applications to remain forward-compatible with
+    /// ESP-IDF versions that introduce new IP events.
+    Other(i32),
 }
 
 unsafe impl Send for IpEvent<'_> {}
@@ -803,6 +816,7 @@ impl IpEvent<'_> {
             Self::DhcpIpAssigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIp6Assigned(assignment) => Some(assignment.netif_handle()),
             Self::DhcpIpDeassigned(handle) => Some(*handle),
+            Self::Other(_) => None,
         }
     }
 }
@@ -859,7 +873,8 @@ impl EspEventDeserializer for IpEvent<'_> {
 
             IpEvent::DhcpIpDeassigned(netif_handle_mut as *mut _)
         } else {
-            panic!("Unknown event ID: {event_id}");
+            ::log::warn!("IpEvent: unknown event ID {event_id}, ignoring");
+            IpEvent::Other(event_id as i32)
         }
     }
 }
@@ -1395,6 +1410,13 @@ mod ppp {
         PhaseTerminate,
         PhaseDisconnect,
         PhaseFailed,
+
+        /// An event ID not recognised by this version of the library was received.
+        ///
+        /// This variant is produced instead of panicking when an unknown event ID
+        /// arrives, allowing applications to remain forward-compatible with
+        /// ESP-IDF versions that introduce new PPP events.
+        Other(i32),
     }
 
     unsafe impl EspEventSource for PppEvent {
@@ -1450,7 +1472,10 @@ mod ppp {
                     PppEvent::PhaseDisconnect
                 }
                 esp_netif_ppp_status_event_t_NETIF_PPP_CONNECT_FAILED => PppEvent::PhaseFailed,
-                _ => panic!("Unknown event ID: {event_id}"),
+                _ => {
+                    ::log::warn!("PppEvent: unknown event ID {event_id}, ignoring");
+                    PppEvent::Other(event_id as i32)
+                }
             }
         }
     }
