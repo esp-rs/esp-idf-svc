@@ -389,9 +389,24 @@ mod esptls {
         pub hint: &'a CStr,
     }
 
+    /// Progress of a non-blocking server-side TLS handshake.
     #[cfg(any(
         esp_idf_esp_tls_server,
-        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
+    ))]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ServerHandshakeStatus {
+        /// Handshake finished; the session can read/write application data.
+        Complete,
+        /// Waiting for the peer to send more handshake bytes.
+        WantRead,
+        /// Waiting for the local socket to accept more outbound handshake bytes.
+        WantWrite,
+    }
+
+    #[cfg(any(
+        esp_idf_esp_tls_server,
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
     ))]
     pub struct ServerConfig<'a> {
         /// up to 9 ALPNs allowed, with avg 10 bytes for each name
@@ -401,13 +416,19 @@ mod esptls {
         pub server_key: Option<X509<'a>>,
         pub server_key_password: Option<&'a str>,
         pub use_secure_element: bool,
+        /// Overall TLS handshake timeout in milliseconds.
+        ///
+        /// `0` means the ESP-TLS default (10 seconds). Used by both the
+        /// blocking [`EspTls::negotiate_server`] path and the async
+        /// init/continue helpers.
+        pub tls_handshake_timeout_ms: u32,
         #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
         pub handshake_callback: Option<extern "C" fn(*mut sys::mbedtls_ssl_context) -> c_int>,
     }
 
     #[cfg(any(
         esp_idf_esp_tls_server,
-        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
     ))]
     impl<'a> ServerConfig<'a> {
         pub const fn new() -> Self {
@@ -418,6 +439,7 @@ mod esptls {
                 server_key: None,
                 server_key_password: None,
                 use_secure_element: false,
+                tls_handshake_timeout_ms: 0,
                 #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
                 handshake_callback: None,
             }
@@ -456,6 +478,7 @@ mod esptls {
             }
 
             rcfg.use_secure_element = self.use_secure_element;
+            rcfg.tls_handshake_timeout_ms = self.tls_handshake_timeout_ms;
 
             #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
             if let Some(cb) = self.handshake_callback {
@@ -468,7 +491,7 @@ mod esptls {
 
     #[cfg(any(
         esp_idf_esp_tls_server,
-        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
     ))]
     impl<'a> Default for ServerConfig<'a> {
         fn default() -> Self {
@@ -511,7 +534,7 @@ mod esptls {
         socket: S,
         #[cfg(any(
             esp_idf_esp_tls_server,
-            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
         ))]
         server_session: bool,
     }
@@ -540,7 +563,7 @@ mod esptls {
                     socket: InternalSocket(()),
                     #[cfg(any(
                         esp_idf_esp_tls_server,
-                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
                     ))]
                     server_session: false,
                 })
@@ -605,7 +628,7 @@ mod esptls {
                     socket,
                     #[cfg(any(
                         esp_idf_esp_tls_server,
-                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
                     ))]
                     server_session: false,
                 })
@@ -646,12 +669,17 @@ mod esptls {
 
         /// Establish a TLS/SSL connection using the adopted connection, acting as the server.
         ///
+        /// This call is **blocking** for up to `cfg.tls_handshake_timeout_ms`
+        /// (or the ESP-TLS default of 10 s when that field is `0`). Prefer
+        /// [`Self::negotiate_server_init`] + [`Self::negotiate_server_continue`]
+        /// on a non-blocking socket when the caller cannot afford to stall.
+        ///
         /// # Errors
         ///
         /// * `ESP_FAIL` if connection could not be established
         #[cfg(any(
             esp_idf_esp_tls_server,
-            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
         ))]
         pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
             let mut bufs = RawConfigBufs::default();
@@ -672,6 +700,61 @@ mod esptls {
             drop(bufs);
 
             Ok(())
+        }
+
+        /// Begin a server-side TLS handshake on an already-adopted socket.
+        ///
+        /// The socket should typically be non-blocking. Complete the handshake
+        /// by repeatedly calling [`Self::negotiate_server_continue`] until it
+        /// returns `Ok(true)`. Certificate material referenced by `cfg` must
+        /// remain valid for the duration of this call (mbedTLS parses it here).
+        ///
+        /// # Errors
+        ///
+        /// * `ESP_FAIL` / other ESP-TLS errors if session setup fails
+        #[cfg(any(
+            esp_idf_esp_tls_server,
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
+        ))]
+        pub fn negotiate_server_init(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
+            let mut bufs = RawConfigBufs::default();
+            let mut rcfg = cfg.try_into_raw(&mut bufs)?;
+
+            // esp_tls_server_session_init returns esp_err_t (0 on success).
+            sys::esp!(unsafe {
+                sys::esp_tls_server_session_init(&mut rcfg, self.socket.handle(), self.raw)
+            })?;
+            self.server_session = true;
+
+            #[allow(clippy::drop_non_drop)]
+            drop(bufs);
+
+            Ok(())
+        }
+
+        /// Continue a server-side handshake started with [`Self::negotiate_server_init`].
+        ///
+        /// Returns:
+        /// * `Ok(ServerHandshakeStatus::Complete)` — session ready for read/write
+        /// * `Ok(ServerHandshakeStatus::WantRead)` — wait for socket readability
+        /// * `Ok(ServerHandshakeStatus::WantWrite)` — wait for socket writability
+        /// * `Err(_)` — fatal handshake error; drop the connection
+        #[cfg(any(
+            esp_idf_esp_tls_server,
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls,),
+        ))]
+        pub fn negotiate_server_continue(&mut self) -> Result<ServerHandshakeStatus, EspError> {
+            let ret = unsafe { sys::esp_tls_server_session_continue_async(self.raw) };
+            if ret == 0 {
+                Ok(ServerHandshakeStatus::Complete)
+            } else if ret == ESP_TLS_ERR_SSL_WANT_READ {
+                Ok(ServerHandshakeStatus::WantRead)
+            } else if ret == ESP_TLS_ERR_SSL_WANT_WRITE {
+                Ok(ServerHandshakeStatus::WantWrite)
+            } else {
+                log::error!("TLS server handshake continue failed (error {ret})");
+                Err(EspError::from_infallible::<ESP_FAIL>())
+            }
         }
 
         #[allow(clippy::unnecessary_cast)]
