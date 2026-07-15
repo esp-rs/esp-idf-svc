@@ -48,6 +48,7 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 - Compatibility with ESP-IDF V6.0, and some pre-release 6.0.x.
 - Added support for the Generic Ethernet PHY driver: particularly useful on ESP-IDF 6.0+ as it is built-in.
 - TLS: Non-blocking server handshake helpers `EspTls::negotiate_server_init` / `negotiate_server_continue` and `ServerHandshakeStatus`, for driving handshakes on a non-blocking socket without blocking the event loop
+- TLS: `examples/tls_server.rs` — multi-connection non-blocking TLS echo server using the async handshake helpers
 
 ## [0.52.1] - 2026-03-10
 
