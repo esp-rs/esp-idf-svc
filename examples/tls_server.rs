@@ -1,5 +1,5 @@
 //! Non-blocking TLS echo server using `EspTls::negotiate_server_init` /
-//! `negotiate_server_continue`.
+//! `negotiate_server_continue` (ESP-IDF ≥ 5.5.1, mbedTLS).
 //!
 //! A single thread drives several handshakes via `select()`: each
 //! `negotiate_server_continue` reports `WantRead` / `WantWrite`, and the loop
@@ -14,7 +14,11 @@
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 
-#[cfg(all(not(any(esp32h2, esp32h4, esp32p4)), esp_idf_esp_tls_using_mbedtls))]
+#[cfg(all(
+    not(any(esp32h2, esp32h4, esp32p4)),
+    esp_idf_esp_tls_using_mbedtls,
+    esp_idf_version_at_least_5_5_1,
+))]
 fn main() -> anyhow::Result<()> {
     example::main()
 }
@@ -26,13 +30,20 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(all(
     not(any(esp32h2, esp32h4, esp32p4)),
-    not(esp_idf_esp_tls_using_mbedtls)
+    not(all(esp_idf_esp_tls_using_mbedtls, esp_idf_version_at_least_5_5_1,)),
 ))]
 fn main() -> anyhow::Result<()> {
-    panic!("This example requires the mbedTLS-based ESP-TLS stack (CONFIG_ESP_TLS_USING_MBEDTLS=y); the server role is always available there.");
+    panic!(
+        "This example requires ESP-IDF ≥ 5.5.1 with the mbedTLS ESP-TLS stack \
+         (CONFIG_ESP_TLS_USING_MBEDTLS=y) for negotiate_server_init/continue."
+    );
 }
 
-#[cfg(all(not(any(esp32h2, esp32h4, esp32p4)), esp_idf_esp_tls_using_mbedtls))]
+#[cfg(all(
+    not(any(esp32h2, esp32h4, esp32p4)),
+    esp_idf_esp_tls_using_mbedtls,
+    esp_idf_version_at_least_5_5_1,
+))]
 mod example {
     use std::io;
     use std::mem;

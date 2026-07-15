@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   }
   ```
 - HTTP: Add `keep_alive: Option<KeepAlive>` and `so_linger: Option<Duration>` to server `Configuration`
-- TLS: Add `tls_handshake_timeout_ms: u32` to server `ServerConfig` (`0` keeps the ESP-TLS default of 10 seconds). Struct literals must set the new field (or use `ServerConfig::default()` / `..Default::default()`).
+- TLS: Add `tls_handshake_timeout_ms: u32` to server `ServerConfig` on ESP-IDF ≥ 5.5.1 (`0` keeps the ESP-TLS default of 10 seconds). Struct literals on those IDF versions must set the new field (or use `ServerConfig::default()` / `..Default::default()`).
 - New events need to be handled in the WiFi event loop:
   - `WifiEvent::StaNeighborRep` / `StaNeighborRepRef` (v5.3.0+)
   - `WifiEvent::ApWrongPassword` / `ApWrongPasswordRef` (v5.3.3+, v5.4.1+, v5.5.0+)
@@ -47,8 +47,8 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 ### Added
 - Compatibility with ESP-IDF V6.0, and some pre-release 6.0.x.
 - Added support for the Generic Ethernet PHY driver: particularly useful on ESP-IDF 6.0+ as it is built-in.
-- TLS: Non-blocking server handshake helpers `EspTls::negotiate_server_init` / `negotiate_server_continue` and `ServerHandshakeStatus`, for driving handshakes on a non-blocking socket without blocking the event loop
-- TLS: `examples/tls_server.rs` — multi-connection non-blocking TLS echo server using the async handshake helpers
+- TLS: Non-blocking server handshake helpers `EspTls::negotiate_server_init` / `negotiate_server_continue` and `ServerHandshakeStatus` (ESP-IDF ≥ 5.5.1, mbedTLS), for driving handshakes on a non-blocking socket without blocking the event loop
+- TLS: `examples/tls_server.rs` — multi-connection non-blocking TLS echo server using the async handshake helpers (ESP-IDF ≥ 5.5.1)
 
 ## [0.52.1] - 2026-03-10
 
