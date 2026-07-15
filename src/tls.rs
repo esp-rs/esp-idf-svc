@@ -389,7 +389,10 @@ mod esptls {
         pub hint: &'a CStr,
     }
 
-    #[cfg(esp_idf_esp_tls_server)]
+    #[cfg(any(
+        esp_idf_esp_tls_server,
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+    ))]
     pub struct ServerConfig<'a> {
         /// up to 9 ALPNs allowed, with avg 10 bytes for each name
         pub alpn_protos: Option<&'a [&'a str]>,
@@ -402,7 +405,10 @@ mod esptls {
         pub handshake_callback: Option<extern "C" fn(*mut sys::mbedtls_ssl_context) -> c_int>,
     }
 
-    #[cfg(esp_idf_esp_tls_server)]
+    #[cfg(any(
+        esp_idf_esp_tls_server,
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+    ))]
     impl<'a> ServerConfig<'a> {
         pub const fn new() -> Self {
             Self {
@@ -460,7 +466,10 @@ mod esptls {
         }
     }
 
-    #[cfg(esp_idf_esp_tls_server)]
+    #[cfg(any(
+        esp_idf_esp_tls_server,
+        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+    ))]
     impl<'a> Default for ServerConfig<'a> {
         fn default() -> Self {
             Self::new()
@@ -500,7 +509,10 @@ mod esptls {
     {
         raw: *mut sys::esp_tls,
         socket: S,
-        #[cfg(esp_idf_esp_tls_server)]
+        #[cfg(any(
+            esp_idf_esp_tls_server,
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+        ))]
         server_session: bool,
     }
 
@@ -526,7 +538,10 @@ mod esptls {
                 Ok(Self {
                     raw,
                     socket: InternalSocket(()),
-                    #[cfg(esp_idf_esp_tls_server)]
+                    #[cfg(any(
+                        esp_idf_esp_tls_server,
+                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+                    ))]
                     server_session: false,
                 })
             } else {
@@ -588,7 +603,10 @@ mod esptls {
                 Ok(Self {
                     raw,
                     socket,
-                    #[cfg(esp_idf_esp_tls_server)]
+                    #[cfg(any(
+                        esp_idf_esp_tls_server,
+                        all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+                    ))]
                     server_session: false,
                 })
             } else {
@@ -631,7 +649,10 @@ mod esptls {
         /// # Errors
         ///
         /// * `ESP_FAIL` if connection could not be established
-        #[cfg(esp_idf_esp_tls_server)]
+        #[cfg(any(
+            esp_idf_esp_tls_server,
+            all(esp_idf_version_at_least_5_3_0, esp_idf_esp_tls_using_mbedtls),
+        ))]
         pub fn negotiate_server(&mut self, cfg: &ServerConfig) -> Result<(), EspError> {
             let mut bufs = RawConfigBufs::default();
             let mut rcfg = cfg.try_into_raw(&mut bufs)?;
