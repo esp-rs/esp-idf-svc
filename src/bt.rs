@@ -563,19 +563,41 @@ where
             scan_en: crate::sys::BT_CTRL_BLE_SCAN != 0,
             ble_aa_check: crate::sys::BLE_CTRL_CHECK_CONNECT_IND_ACCESS_ADDRESS_ENABLED != 0,
             #[cfg(any(
-                esp_idf_version_patch_at_least_5_1_7,
-                esp_idf_version_patch_at_least_5_2_6,
-                esp_idf_version_patch_at_least_5_3_3,
-                esp_idf_version_patch_at_least_5_4_2,
-                esp_idf_version_at_least_5_5_0,
+                all(
+                    esp_idf_version_patch_at_least_5_2_6,
+                    esp_idf_version_patch_at_most_5_2_6
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_3_3,
+                    esp_idf_version_patch_at_most_5_3_4
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_4_2,
+                    esp_idf_version_patch_at_most_5_4_3
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_5_0,
+                    esp_idf_version_patch_at_most_5_5_1
+                ),
             ))]
             ble_log_mode_en: crate::sys::BLE_LOG_MODE_EN,
             #[cfg(any(
-                esp_idf_version_patch_at_least_5_1_7,
-                esp_idf_version_patch_at_least_5_2_6,
-                esp_idf_version_patch_at_least_5_3_3,
-                esp_idf_version_patch_at_least_5_4_2,
-                esp_idf_version_at_least_5_5_0,
+                all(
+                    esp_idf_version_patch_at_least_5_2_6,
+                    esp_idf_version_patch_at_most_5_2_6
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_3_3,
+                    esp_idf_version_patch_at_most_5_3_4
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_4_2,
+                    esp_idf_version_patch_at_most_5_4_3
+                ),
+                all(
+                    esp_idf_version_patch_at_least_5_5_0,
+                    esp_idf_version_patch_at_most_5_5_1
+                ),
             ))]
             ble_log_level: crate::sys::BLE_LOG_LEVEL as _,
             #[cfg(any(
