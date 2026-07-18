@@ -624,7 +624,13 @@ impl Drop for EspWebSocketClient<'_> {
             log::warn!("WebSocket close failed during drop: {e:?}");
         }
 
-        esp!(unsafe { esp_websocket_client_destroy(self.handle) }).unwrap();
+        // A Drop impl must not panic, especially on panic=abort targets where
+        // panicking here aborts the whole application. This matches the
+        // matching esp_websocket_client_close treatment above and extends the
+        // fix from #648 to the destroy call. See #653.
+        if let Err(e) = esp!(unsafe { esp_websocket_client_destroy(self.handle) }) {
+            log::warn!("WebSocket destroy failed during drop: {e:?}");
+        }
 
         // timeout and callback dropped automatically
     }
