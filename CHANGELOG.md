@@ -76,6 +76,7 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
   - Check https://github.com/esp-rs/esp-idf-hal/pull/529 for details on that change
 - HTTP: added `task_caps` option into server `Configuration`
 - Update `heapless` dependency
+- NVS: exposed `keys` and `erase_all` functions on `EspKeyValueStorage`
 
 ### Fixed
 - `WifiDriver::get_ap_info` not takes `&self` instead of `&mut self`. Convenience method `EspWifi::get_ap_info` that delegates
