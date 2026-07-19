@@ -19,7 +19,50 @@ pub fn svc_set_device_name(name: &str) -> Result<(), BleError> {
     BleError::from_raw(unsafe { ble_svc_gap_device_name_set(name.as_ptr()) })
 }
 
+
+
+// Advertising. Drive these from an `on_sync` closure once the host has synced,
+// and restart from an `on_gap_event` disconnect handler.
+//
+// NimBLE exposes two mutually-exclusive advertising APIs. The legacy API below is
+// the default; the extended API (`ext_adv_*`) is only compiled when the controller
+// is built with `CONFIG_BT_NIMBLE_EXT_ADV=y`.
+
+/// Parameters for a legacy advertising procedure (safe version of `ble_gap_adv_params`).
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+#[derive(Clone, Copy, Default)]
+pub struct BleAdvParams {
+    pub conn_mode: u8,
+    pub disc_mode: u8,
+    pub itvl_min: u16,
+    pub itvl_max: u16,
+    pub channel_map: u8,
+    pub filter_policy: u8,
+    pub high_duty_cycle: bool,
+}
+
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+impl From<&BleAdvParams> for ble_gap_adv_params {
+    fn from(params: &BleAdvParams) -> Self {
+        let mut raw: ble_gap_adv_params = unsafe { core::mem::zeroed() };
+
+        raw.conn_mode = params.conn_mode;
+        raw.disc_mode = params.disc_mode;
+        raw.itvl_min = params.itvl_min;
+        raw.itvl_max = params.itvl_max;
+        raw.channel_map = params.channel_map;
+        raw.filter_policy = params.filter_policy;
+        raw.high_duty_cycle = params.high_duty_cycle as _;
+
+        raw
+    }
+}
+
 /// Parameters for an extended advertising instance (safe version of `ble_gap_ext_adv_params`).
+///
+/// Only available when the controller is built with `CONFIG_BT_NIMBLE_EXT_ADV=y`;
+/// the default build exposes the legacy [`BleAdvParams`].
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 #[derive(Clone, Copy, Default)]
 pub struct BleExtAdvParams {
     pub connectable: bool,
@@ -39,6 +82,7 @@ pub struct BleExtAdvParams {
     pub sid: u8,
 }
 
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 impl From<&BleExtAdvParams> for ble_gap_ext_adv_params {
     fn from(params: &BleExtAdvParams) -> Self {
         let mut raw: ble_gap_ext_adv_params = unsafe { core::mem::zeroed() };
@@ -65,7 +109,7 @@ impl From<&BleExtAdvParams> for ble_gap_ext_adv_params {
 }
 
 /// Structured advertising payload (safe version of `ble_hs_adv_fields`).
-/// You can also directly use ext_adv_set_data to set the raw data yourself.
+/// You can also directly use ext_adv_set_data/adv_set_data to set the raw data yourself.
 #[derive(Clone, Copy, Default)]
 pub struct BleAdvFields<'a> {
     pub flags: u8,
@@ -203,11 +247,46 @@ pub fn conn_find(conn_handle: ConnectionId) -> Result<BleConnDesc, BleError> {
     Ok(BleConnDesc(desc))
 }
 
-// Extended advertising. Drive these from an `on_sync` closure once the host has
-// synced, and restart from an `on_gap_event` disconnect handler.
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+pub fn adv_set_data(data: &[u8]) -> Result<(), BleError> {
+    // NimBLE copies the payload into its own buffer, so `data` need not outlive the call.
+    BleError::from_raw(unsafe { ble_gap_adv_set_data(data.as_ptr(), data.len() as c_int) })
+}
 
-/// Configure extended-advertising `instance` and return the controller-selected
-/// TX power.
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+pub fn adv_set_fields(fields: &BleAdvFields) -> Result<(), BleError> {
+    let raw: ble_hs_adv_fields = fields.into();
+
+    BleError::from_raw(unsafe { ble_gap_adv_set_fields(&raw) })
+}
+
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+pub fn adv_start(own_addr_type: u8, params: &BleAdvParams) -> Result<(), BleError> {
+    let raw: ble_gap_adv_params = params.into();
+
+    let rc = unsafe {
+        ble_gap_adv_start(
+            own_addr_type,
+            ptr::null(),
+            BLE_HS_FOREVER as _,
+            &raw,
+            Some(super::gap_event_cb),
+            ptr::null_mut(),
+        )
+    };
+    if rc == BLE_HS_EALREADY as c_int {
+        return Ok(());
+    }
+
+    BleError::from_raw(rc)
+}
+
+#[cfg(not(esp_idf_bt_nimble_ext_adv))]
+pub fn adv_stop() -> Result<(), BleError> {
+    BleError::from_raw(unsafe { ble_gap_adv_stop() })
+}
+
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_configure(instance: u8, params: &BleExtAdvParams) -> Result<i8, BleError> {
     let raw: ble_gap_ext_adv_params = params.into();
     let mut selected_tx_power: i8 = 0;
@@ -225,10 +304,12 @@ pub fn ext_adv_configure(instance: u8, params: &BleExtAdvParams) -> Result<i8, B
     Ok(selected_tx_power)
 }
 
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_set_addr(instance: u8, addr: &BleAddr) -> Result<(), BleError> {
     BleError::from_raw(unsafe { ble_gap_ext_adv_set_addr(instance, addr.raw()) })
 }
 
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_set_data(instance: u8, data: &[u8]) -> Result<(), BleError> {
     let om = super::mbuf::mbuf_from_slice(data)?;
 
@@ -236,6 +317,7 @@ pub fn ext_adv_set_data(instance: u8, data: &[u8]) -> Result<(), BleError> {
 }
 
 /// Encode `fields` into an advertising payload and install it on `instance`.
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_set_fields(instance: u8, fields: &BleAdvFields) -> Result<(), BleError> {
     let raw: ble_hs_adv_fields = fields.into();
 
@@ -248,6 +330,7 @@ pub fn ext_adv_set_fields(instance: u8, fields: &BleAdvFields) -> Result<(), Ble
     ext_adv_set_data(instance, &buf[..len as usize])
 }
 
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_start(instance: u8) -> Result<(), BleError> {
     let rc = unsafe { ble_gap_ext_adv_start(instance, 0, 0) };
     if rc == BLE_HS_EALREADY as c_int {
@@ -257,6 +340,7 @@ pub fn ext_adv_start(instance: u8) -> Result<(), BleError> {
     BleError::from_raw(rc)
 }
 
+#[cfg(esp_idf_bt_nimble_ext_adv)]
 pub fn ext_adv_stop(instance: u8) -> Result<(), BleError> {
     BleError::from_raw(unsafe { ble_gap_ext_adv_stop(instance) })
 }

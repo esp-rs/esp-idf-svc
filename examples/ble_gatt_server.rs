@@ -20,7 +20,7 @@ mod example {
     use core::sync::atomic::{AtomicU16, Ordering};
     use std::sync::Mutex;
 
-    use esp_idf_svc::ble::gap::{self, BleAdvFields, BleExtAdvParams, BleGapEvent};
+    use esp_idf_svc::ble::gap::{self, BleAdvFields, BleGapEvent};
     use esp_idf_svc::ble::gatt::gatts::{
         self, BleGattAccess, BleGattCharacteristic, BleGattService, BleGattServices, ConnectionId,
         GattsSetup,
@@ -35,7 +35,6 @@ mod example {
     use log::{info, warn};
 
     const DEVICE_NAME: &str = "esp-nimble";
-    const ADV_INSTANCE: u8 = 0;
 
     // Our service UUID
     pub const SERVICE_UUID: u128 = 0xad91b201734740479e173bed82d75f9d;
@@ -160,33 +159,29 @@ mod example {
         }
     }
 
-    /// Configure and start a connectable legacy advertisement.
+    /// Configure and start a connectable legacy advertisement 
+    /// n.b. NimBLE exposes a mutually-exclusive "extended" advertisement API as well
+    /// if you set the right build flags
     fn start_advertising() -> Result<(), BleError> {
+        use esp_idf_svc::ble::gap::BleAdvParams;
+
         ensure_addr(false)?;
         gap::svc_set_device_name(DEVICE_NAME)?;
-
-        let params = BleExtAdvParams {
-            connectable: true,
-            scannable: true,
-            legacy_pdu: true,
-            itvl_min: 0x30,   // 30 ms, in 0.625 ms units
-            itvl_max: 0x60,   // 60 ms
-            own_addr_type: 0, // BLE_OWN_ADDR_PUBLIC
-            primary_phy: 1,   // BLE_HCI_LE_PHY_1M
-            secondary_phy: 1, // BLE_HCI_LE_PHY_1M
-            tx_power: 127,    // no preference
-            ..Default::default()
-        };
-
-        gap::ext_adv_configure(ADV_INSTANCE, &params)?;
 
         let fields = BleAdvFields {
             flags: 0x06, // LE General Discoverable, BR/EDR unsupported
             name: Some(DEVICE_NAME),
             ..Default::default()
         };
-        gap::ext_adv_set_fields(ADV_INSTANCE, &fields)?;
+        gap::adv_set_fields(&fields)?;
 
-        gap::ext_adv_start(ADV_INSTANCE)
+        let params = BleAdvParams {
+            conn_mode: 2, // BLE_GAP_CONN_MODE_UND
+            disc_mode: 2, // BLE_GAP_DISC_MODE_GEN
+            itvl_min: 0x30, // 30 ms, in 0.625 ms units
+            itvl_max: 0x60, // 60 ms
+            ..Default::default()
+        };
+        gap::adv_start(0 /* BLE_OWN_ADDR_PUBLIC */, &params)
     }
 }
