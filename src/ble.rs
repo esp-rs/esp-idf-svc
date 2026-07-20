@@ -157,6 +157,45 @@ impl fmt::Display for BleError {
 #[cfg(feature = "std")]
 impl std::error::Error for BleError {}
 
+/// Security Manager (SMP) configuration, applied via
+/// [`BleSetup::set_security`](BleSetup::set_security) before the host starts.
+#[derive(Clone, Copy)]
+pub struct BleSecurity {
+    /// Local IO capabilities (`BLE_HS_IO_*`).
+    pub io_cap: u8,
+    pub oob_data_flag: bool,
+    pub bonding: bool,
+    pub mitm: bool,
+    /// LE Secure Connections.
+    pub secure_connections: bool,
+    /// Restrict pairing to LE Secure Connections only.
+    pub secure_connections_only: bool,
+    pub keypress: bool,
+    /// Minimum GATT security level (`sm_sec_lvl`); 0 is ignored.
+    pub min_sec_level: u8,
+    /// Keys we distribute (`BLE_SM_PAIR_KEY_DIST_*` mask).
+    pub our_key_dist: u8,
+    /// Keys the peer distributes (`BLE_SM_PAIR_KEY_DIST_*` mask).
+    pub their_key_dist: u8,
+}
+
+impl Default for BleSecurity {
+    fn default() -> Self {
+        Self {
+            io_cap: BLE_HS_IO_NO_INPUT_OUTPUT as u8,
+            oob_data_flag: false,
+            bonding: false,
+            mitm: false,
+            secure_connections: false,
+            secure_connections_only: false,
+            keypress: false,
+            min_sec_level: 0,
+            our_key_dist: 0,
+            their_key_dist: 0,
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct BleCallback<A, R> {
@@ -411,6 +450,24 @@ impl<'ble> BleSetup<'ble> {
         F: FnMut(gap::BleGapEvent) -> i32 + Send + 'ble,
     {
         unsafe { SINGLETON.gap_event.subscribe_nonstatic(callback) };
+    }
+
+    /// Configure the Security Manager (SMP) parameters. Must be called before
+    /// [`start`](Self::start); the settings take effect once the host task runs.
+    pub fn set_security(&self, security: &BleSecurity) {
+        unsafe {
+            let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
+            (*cfg).sm_io_cap = security.io_cap;
+            (*cfg).set_sm_oob_data_flag(security.oob_data_flag as _);
+            (*cfg).set_sm_bonding(security.bonding as _);
+            (*cfg).set_sm_mitm(security.mitm as _);
+            (*cfg).set_sm_sc(security.secure_connections as _);
+            (*cfg).set_sm_sc_only(security.secure_connections_only as _);
+            (*cfg).set_sm_keypress(security.keypress as _);
+            (*cfg).sm_sec_lvl = security.min_sec_level;
+            (*cfg).sm_our_key_dist = security.our_key_dist;
+            (*cfg).sm_their_key_dist = security.their_key_dist;
+        }
     }
 
     /// Once you are done with setup, call this function to start the BLE task. The task will
