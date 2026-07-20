@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   }
   ```
 - HTTP: Add `keep_alive: Option<KeepAlive>` and `so_linger: Option<Duration>` to server `Configuration`
-- TLS: Add `tls_handshake_timeout_ms: u32` to server `ServerConfig` on ESP-IDF ≥ 5.5.1 (`0` keeps the ESP-TLS default of 10 seconds). Struct literals on those IDF versions must set the new field (or use `ServerConfig::default()` / `..Default::default()`).
+- TLS: Add `tls_handshake_timeout_ms: u32` to server `ServerConfig` on ESP-IDF >= 5.5.0 (`0` keeps the ESP-TLS default of 10 seconds; only honored by the blocking `EspTls::negotiate_server`). Struct literals on those IDF versions must set the new field (or use `ServerConfig::default()` / `..Default::default()`).
 - New events need to be handled in the WiFi event loop:
   - `WifiEvent::StaNeighborRep` / `StaNeighborRepRef` (v5.3.0+)
   - `WifiEvent::ApWrongPassword` / `ApWrongPasswordRef` (v5.3.3+, v5.4.1+, v5.5.0+)
