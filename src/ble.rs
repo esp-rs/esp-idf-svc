@@ -179,6 +179,15 @@ impl fmt::Display for BleError {
 #[cfg(feature = "std")]
 impl std::error::Error for BleError {}
 
+impl From<BleError> for EspError {
+    /// NimBLE host codes (`BLE_HS_E*`) are a separate namespace from `esp_err_t`
+    /// with no faithful mapping, so any [`BleError`] collapses to `ESP_FAIL`. Match
+    /// on the [`BleError`] directly if you need the specific NimBLE code.
+    fn from(_err: BleError) -> Self {
+        EspError::from_infallible::<ESP_FAIL>()
+    }
+}
+
 /// Security Manager (SMP) configuration, applied via
 /// [`BleSetup::set_security`](BleSetup::set_security) before the host starts.
 #[derive(Clone, Copy)]
