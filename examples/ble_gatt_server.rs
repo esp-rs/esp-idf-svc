@@ -94,7 +94,10 @@ mod example {
         // on the host task. We stash the indicate handle so the loop below can push to
         // it; matching on the UUID is how we tell our characteristics apart.
         setup.on_gatts_register(|event| {
-            if let BleGattRegister::Characteristic { uuid, val_handle, .. } = event {
+            if let BleGattRegister::Characteristic {
+                uuid, val_handle, ..
+            } = event
+            {
                 if uuid == BleUuid::uuid128(IND_CHARACTERISTIC_UUID) {
                     IND_VAL_HANDLE.store(val_handle, Ordering::Relaxed);
                 }
@@ -170,7 +173,7 @@ mod example {
         }
     }
 
-    /// Configure and start a connectable legacy advertisement 
+    /// Configure and start a connectable legacy advertisement
     /// n.b. NimBLE exposes a mutually-exclusive "extended" advertisement API as well
     /// if you set the right build flags
     fn start_advertising() -> Result<(), BleError> {
@@ -187,8 +190,8 @@ mod example {
         gap::adv_set_fields(&fields)?;
 
         let params = BleAdvParams {
-            conn_mode: 2, // BLE_GAP_CONN_MODE_UND
-            disc_mode: 2, // BLE_GAP_DISC_MODE_GEN
+            conn_mode: 2,   // BLE_GAP_CONN_MODE_UND
+            disc_mode: 2,   // BLE_GAP_DISC_MODE_GEN
             itvl_min: 0x30, // 30 ms, in 0.625 ms units
             itvl_max: 0x60, // 60 ms
             ..Default::default()

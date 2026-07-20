@@ -19,8 +19,6 @@ pub fn svc_set_device_name(name: &str) -> Result<(), BleError> {
     BleError::from_raw(unsafe { ble_svc_gap_device_name_set(name.as_ptr()) })
 }
 
-
-
 // Advertising. Drive these from an `on_sync` closure once the host has synced,
 // and restart from an `on_gap_event` disconnect handler.
 //
