@@ -255,6 +255,6 @@ pub fn indicate(
 ) -> Result<(), BleError> {
     let om = mbuf_from_slice(data)?;
 
-    // No cleanup of om, ble_gatts_indicate_custom takes ownership
+    // `ble_gatts_indicate_custom` takes ownership of `om` and frees it on all paths (no leak, no double-free).
     BleError::from_raw(unsafe { ble_gatts_indicate_custom(conn_handle, val_handle, om) })
 }

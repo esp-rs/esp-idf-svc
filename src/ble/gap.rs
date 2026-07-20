@@ -311,6 +311,7 @@ pub fn ext_adv_set_addr(instance: u8, addr: &BleAddr) -> Result<(), BleError> {
 pub fn ext_adv_set_data(instance: u8, data: &[u8]) -> Result<(), BleError> {
     let om = super::mbuf::mbuf_from_slice(data)?;
 
+    // `ble_gap_ext_adv_set_data` takes ownership of `om` and frees it on all paths (no leak, no double-free).
     BleError::from_raw(unsafe { ble_gap_ext_adv_set_data(instance, om) })
 }
 
