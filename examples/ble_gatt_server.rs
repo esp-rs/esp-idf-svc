@@ -22,8 +22,8 @@ mod example {
 
     use esp_idf_svc::ble::gap::{self, BleAdvFields, BleGapEvent};
     use esp_idf_svc::ble::gatt::gatts::{
-        self, BleGattAccess, BleGattCharacteristic, BleGattService, BleGattServices, ConnectionId,
-        GattsSetup,
+        self, BleGattAccess, BleGattCharacteristic, BleGattRegister, BleGattService,
+        BleGattServices, ConnectionId, GattsSetup,
     };
     use esp_idf_svc::ble::gatt::BleGattCharFlag;
     use esp_idf_svc::ble::{ensure_addr, BleError, BleSetup, BleUuid};
@@ -44,9 +44,10 @@ mod example {
     /// Our "indicate" characteristic - i.e. where clients can receive data if they subscribe to it
     pub const IND_CHARACTERISTIC_UUID: u128 = 0x503de214868246c4828fd59144da41be;
 
-    // Server state. NimBLE fills the value handles during registration.
+    // Server state. We capture the indicate characteristic's value handle from the
+    // registration callback (see `on_gatts_register` below); a real server tracking
+    // several handles would keep a uuid -> handle map instead of a single slot.
     static SUBSCRIBERS: Mutex<Vec<ConnectionId>> = Mutex::new(Vec::new());
-    static RECV_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
     static IND_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
 
     pub fn main() -> anyhow::Result<()> {
@@ -63,7 +64,6 @@ mod example {
                 BleGattCharacteristic::new(
                     BleUuid::uuid128(RECV_CHARACTERISTIC_UUID),
                     enum_set!(BleGattCharFlag::Write),
-                    &RECV_VAL_HANDLE,
                     |access| {
                         if let BleGattAccess::Write { data, .. } = access {
                             let mut buf = [0u8; 200];
@@ -81,7 +81,6 @@ mod example {
                 BleGattCharacteristic::new(
                     BleUuid::uuid128(IND_CHARACTERISTIC_UUID),
                     enum_set!(BleGattCharFlag::Indicate),
-                    &IND_VAL_HANDLE,
                     |_access| 0,
                 ),
             ],
@@ -90,6 +89,17 @@ mod example {
         let mut setup = BleSetup::new(peripherals.modem)?;
 
         GattsSetup::new(&mut setup).add_services(&services)?;
+
+        // NimBLE assigns attribute handles during registration and reports them here,
+        // on the host task. We stash the indicate handle so the loop below can push to
+        // it; matching on the UUID is how we tell our characteristics apart.
+        setup.on_gatts_register(|event| {
+            if let BleGattRegister::Characteristic { uuid, val_handle, .. } = event {
+                if uuid == BleUuid::uuid128(IND_CHARACTERISTIC_UUID) {
+                    IND_VAL_HANDLE.store(val_handle, Ordering::Relaxed);
+                }
+            }
+        });
 
         // We wait until the stack is "in sync" before we can start using it. Note this
         // closure needs to handle being called multiple times in case the stack resets.
@@ -141,7 +151,8 @@ mod example {
         loop {
             FreeRtos::delay_ms(1000);
 
-            // The handle stays 0 until NimBLE has registered the characteristic.
+            // The handle stays 0 until the GATT registration callback sets it to
+            // whatver val_handle NimBLE assigned.
             let ind_handle = IND_VAL_HANDLE.load(Ordering::Relaxed);
             if ind_handle == 0 {
                 continue;

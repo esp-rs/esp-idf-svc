@@ -2,7 +2,6 @@
 
 use core::ffi::{c_int, c_void};
 use core::ptr;
-use core::sync::atomic::AtomicU16;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -62,30 +61,76 @@ unsafe extern "C" fn access_trampoline(
     rc as c_int
 }
 
-/// A characteristic in a [`BleGattService`]. `val_handle` is a caller-owned slot
-/// NimBLE fills with the value attribute handle during registration; `access`
-/// is invoked on the host task for every read and write.
+/// A GATT registration event, delivered on the host task via
+/// [`BleSetup::on_gatts_register`](super::super::BleSetup::on_gatts_register) as the
+/// service table is registered. This is how you learn the attribute handles NimBLE
+/// assigns; capture the value handles you need (matching on `uuid`) here.
+pub enum BleGattRegister {
+    Service {
+        uuid: BleUuid,
+        handle: Handle,
+    },
+    Characteristic {
+        uuid: BleUuid,
+        def_handle: Handle,
+        val_handle: Handle,
+    },
+    Descriptor {
+        uuid: BleUuid,
+        handle: Handle,
+    },
+    Other,
+}
+
+impl From<&ble_gatt_register_ctxt> for BleGattRegister {
+    fn from(ctxt: &ble_gatt_register_ctxt) -> Self {
+        let anon = &ctxt.__bindgen_anon_1;
+
+        match ctxt.op as u32 {
+            BLE_GATT_REGISTER_OP_SVC => {
+                let svc = unsafe { &anon.svc };
+                Self::Service {
+                    uuid: unsafe { BleUuid::from_raw((*svc.svc_def).uuid) },
+                    handle: svc.handle,
+                }
+            }
+            BLE_GATT_REGISTER_OP_CHR => {
+                let chr = unsafe { &anon.chr };
+                Self::Characteristic {
+                    uuid: unsafe { BleUuid::from_raw((*chr.chr_def).uuid) },
+                    def_handle: chr.def_handle,
+                    val_handle: chr.val_handle,
+                }
+            }
+            BLE_GATT_REGISTER_OP_DSC => {
+                let dsc = unsafe { &anon.dsc };
+                Self::Descriptor {
+                    uuid: unsafe { BleUuid::from_raw((*dsc.dsc_def).uuid) },
+                    handle: dsc.handle,
+                }
+            }
+            _ => Self::Other,
+        }
+    }
+}
+
+/// A characteristic in a [`BleGattService`]. `access` is invoked on the host task
+/// for every read and write; the value attribute handle NimBLE assigns is reported
+/// via [`BleGattRegister`] during registration.
 pub struct BleGattCharacteristic<'ble> {
     uuid: BleUuid,
     flags: EnumSet<BleGattCharFlag>,
-    val_handle: &'ble AtomicU16,
     access: Box<AccessClosure<'ble>>,
 }
 
 impl<'ble> BleGattCharacteristic<'ble> {
-    pub fn new<F>(
-        uuid: BleUuid,
-        flags: EnumSet<BleGattCharFlag>,
-        val_handle: &'ble AtomicU16,
-        access: F,
-    ) -> Self
+    pub fn new<F>(uuid: BleUuid, flags: EnumSet<BleGattCharFlag>, access: F) -> Self
     where
         F: FnMut(BleGattAccess) -> i32 + Send + 'ble,
     {
         Self {
             uuid,
             flags,
-            val_handle,
             access: Box::new(access),
         }
     }
@@ -114,8 +159,8 @@ impl<'ble> BleGattService<'ble> {
 
 /// This defines GATT services as a tree structure. You allocate this
 /// and let the BLE stack borrow it. You can add callbacks to handle reads/writes, and,
-/// once the stack is started, use the val_handle references on BleGattCharacteristic to
-/// access the value slots the BLE stack will set up.
+/// once the stack is started, learn the attribute handles the BLE stack assigns via
+/// [`BleSetup::on_gatts_register`](super::super::BleSetup::on_gatts_register).
 pub struct BleGattServices<'ble> {
     // There are dragons here. The overall structure combines safe Rust types with the
     // c-level service definitions NimBLE expects. The structure is self-referential, so
@@ -141,15 +186,17 @@ impl<'ble> BleGattServices<'ble> {
             for chr in &mut service.characteristics {
                 let uuid = chr.uuid.as_ptr();
                 let flags = flags_to_repr(chr.flags);
-                let val_handle = chr.val_handle.as_ptr();
                 let arg = &mut chr.access as *mut Box<AccessClosure<'ble>> as *mut c_void;
 
+                // `val_handle` is left null: handles are reported via `BleGattRegister`
+                // rather than written back through a caller-owned pointer, because I wasn't
+                // able to think up a safe API for the in-tree val_handles.
                 chr_defs.push(ble_gatt_chr_def {
                     uuid,
                     access_cb: Some(access_trampoline),
                     arg,
                     flags,
-                    val_handle,
+                    val_handle: ptr::null_mut(),
                     ..Default::default()
                 });
             }

@@ -49,7 +49,27 @@ impl BleUuid {
             Self::Uuid128(uuid) => &uuid.u as *const ble_uuid_t,
         }
     }
+
+    /// # Safety
+    ///
+    /// `uuid` must point to a valid `ble_uuid_t` header and the concrete
+    /// 16-/128-bit body it introduces.
+    pub(crate) unsafe fn from_raw(uuid: *const ble_uuid_t) -> Self {
+        match unsafe { (*uuid).type_ } as u32 {
+            BLE_UUID_TYPE_128 => Self::Uuid128(unsafe { *uuid.cast::<ble_uuid128_t>() }),
+            // Only 16- and 128-bit UUIDs are modelled; anything else reads as 16-bit.
+            _ => Self::Uuid16(unsafe { *uuid.cast::<ble_uuid16_t>() }),
+        }
+    }
 }
+
+impl PartialEq for BleUuid {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { ble_uuid_cmp(self.as_ptr(), other.as_ptr()) == 0 }
+    }
+}
+
+impl Eq for BleUuid {}
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -271,6 +291,7 @@ pub(crate) struct BleSingleton {
     sync: BleCallback<(), ()>,
     reset: BleCallback<i32, ()>,
     gap_event: BleCallback<gap::BleGapEvent, i32>,
+    gatts_register: BleCallback<gatt::gatts::BleGattRegister, ()>,
 }
 
 #[allow(dead_code)]
@@ -281,6 +302,7 @@ impl BleSingleton {
             sync: BleCallback::new(()),
             reset: BleCallback::new(()),
             gap_event: BleCallback::new(0),
+            gatts_register: BleCallback::new(()),
         }
     }
 
@@ -317,6 +339,12 @@ unsafe extern "C" fn gap_event_cb(event: *mut ble_gap_event, _arg: *mut c_void) 
     unsafe { SINGLETON.gap_event.call(event) }
 }
 
+unsafe extern "C" fn gatts_register_cb(ctxt: *mut ble_gatt_register_ctxt, _arg: *mut c_void) {
+    let event = gatt::gatts::BleGattRegister::from(unsafe { &*ctxt });
+
+    unsafe { SINGLETON.gatts_register.call(event) }
+}
+
 unsafe extern "C" fn host_task(_arg: *mut c_void) {
     unsafe {
         nimble_port_run();
@@ -343,11 +371,13 @@ impl Drop for BleDriver<'_> {
             let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
             (*cfg).sync_cb = None;
             (*cfg).reset_cb = None;
+            (*cfg).gatts_register_cb = None;
         }
 
         SINGLETON.sync.unsubscribe();
         SINGLETON.reset.unsubscribe();
         SINGLETON.gap_event.unsubscribe();
+        SINGLETON.gatts_register.unsubscribe();
         let _ = SINGLETON.release();
     }
 }
@@ -452,6 +482,32 @@ impl<'ble> BleSetup<'ble> {
         F: FnMut(gap::BleGapEvent) -> i32 + Send + 'ble,
     {
         unsafe { SINGLETON.gap_event.subscribe_nonstatic(callback) };
+    }
+
+    /// Called on the host task as each GATT service, characteristic, and descriptor
+    /// is registered, carrying the attribute handles NimBLE assigned. Capture the
+    /// value handles you need here (e.g. by UUID).
+    pub fn on_gatts_register<F>(&self, callback: F)
+    where
+        F: FnMut(gatt::gatts::BleGattRegister) + Send + 'static,
+    {
+        unsafe { self.on_gatts_register_nonstatic(callback) }
+    }
+
+    /// # Safety
+    ///
+    /// The non-`'static` counterpart of `on_gatts_register`. See
+    /// [`on_sync_nonstatic`](Self::on_sync_nonstatic) for the borrowing rules and
+    /// the `core::mem::forget` hazard.
+    pub unsafe fn on_gatts_register_nonstatic<F>(&self, callback: F)
+    where
+        F: FnMut(gatt::gatts::BleGattRegister) + Send + 'ble,
+    {
+        unsafe { SINGLETON.gatts_register.subscribe_nonstatic(callback) };
+
+        unsafe {
+            (*core::ptr::addr_of_mut!(ble_hs_cfg)).gatts_register_cb = Some(gatts_register_cb);
+        }
     }
 
     /// Configure the Security Manager (SMP) parameters. Must be called before
