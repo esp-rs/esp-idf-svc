@@ -103,11 +103,13 @@ pub fn ensure_addr(prefer_random: bool) -> Result<(), BleError> {
 }
 
 /// Read back the device's identity address of the given type.
-pub fn id_copy_addr(kind: u8) -> BleAddr {
+pub fn id_copy_addr(kind: u8) -> Result<BleAddr, BleError> {
     let mut val = [0u8; 6];
-    let _ = unsafe { ble_hs_id_copy_addr(kind, val.as_mut_ptr(), core::ptr::null_mut()) };
+    BleError::from_raw(unsafe {
+        ble_hs_id_copy_addr(kind, val.as_mut_ptr(), core::ptr::null_mut())
+    })?;
 
-    BleAddr::new(kind, val)
+    Ok(BleAddr::new(kind, val))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
