@@ -15,7 +15,13 @@ use crate::sys::*;
 
 pub mod gap;
 pub mod gatt;
-#[cfg(any(esp_idf_bt_nimble_gatt_server, esp_idf_bt_nimble_gatt_client))]
+#[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+pub mod l2cap;
+#[cfg(any(
+    esp_idf_bt_nimble_gatt_server,
+    esp_idf_bt_nimble_gatt_client,
+    not(esp_idf_bt_nimble_l2cap_coc_max_num = "0")
+))]
 pub mod mbuf;
 
 /// A connection handle (NimBLE's `conn_handle`). A *connection* is a cross-cutting concept — born
@@ -430,6 +436,65 @@ unsafe impl Sync for GattcCallback {}
 #[cfg(esp_idf_bt_nimble_gatt_client)]
 unsafe impl Send for GattcCallback {}
 
+/// The L2CAP CoC hook. Its argument [`L2capEvent`](l2cap::L2capEvent) is higher-ranked (its
+/// `Received` variant borrows the SDU mbuf). It returns an ATT-style status (`0` = ok), consulted
+/// only for `Accept`, where non-zero rejects the incoming channel.
+#[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+#[allow(clippy::type_complexity)]
+pub(crate) struct L2capCallback {
+    callback:
+        Mutex<Option<Arc<UnsafeCell<Box<dyn for<'a> FnMut(l2cap::L2capEvent<'a>) -> i32 + Send>>>>>,
+}
+
+#[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+impl L2capCallback {
+    pub const fn new() -> Self {
+        Self {
+            callback: Mutex::new(None),
+        }
+    }
+
+    /// # Safety
+    ///
+    /// See [`GattsCallback::subscribe_nonstatic`].
+    #[allow(clippy::arc_with_non_send_sync)]
+    pub unsafe fn subscribe_nonstatic<'a, F>(&self, callback: F)
+    where
+        F: for<'e> FnMut(l2cap::L2capEvent<'e>) -> i32 + Send + 'a,
+    {
+        let callback: Box<dyn for<'e> FnMut(l2cap::L2capEvent<'e>) -> i32 + Send + 'a> =
+            Box::new(callback);
+        let callback: Box<dyn for<'e> FnMut(l2cap::L2capEvent<'e>) -> i32 + Send + 'static> =
+            unsafe { core::mem::transmute(callback) };
+        *self.callback.lock() = Some(Arc::new(UnsafeCell::new(callback)));
+    }
+
+    pub fn unsubscribe(&self) {
+        *self.callback.lock() = None;
+    }
+
+    /// # Safety
+    ///
+    /// Safe to use only from within the NimBLE host task.
+    pub unsafe fn call(&self, event: l2cap::L2capEvent<'_>) -> i32 {
+        if let Some(callback) = self
+            .callback
+            .lock()
+            .as_ref()
+            .map(|callback| callback.clone())
+        {
+            unsafe { ((callback.get()).as_mut().unwrap())(event) }
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+unsafe impl Sync for L2capCallback {}
+#[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+unsafe impl Send for L2capCallback {}
+
 /// The NimBLE stack has several globally-singleton things; we enforce that by
 /// the calling take/release on this. BleSingleton also wraps the globally singleton state
 /// that requires well-known static addresses.
@@ -442,6 +507,8 @@ pub(crate) struct BleSingleton {
     gatts: GattsCallback,
     #[cfg(esp_idf_bt_nimble_gatt_client)]
     gattc: GattcCallback,
+    #[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+    l2cap: L2capCallback,
 }
 
 #[allow(dead_code)]
@@ -455,6 +522,8 @@ impl BleSingleton {
             gatts: GattsCallback::new(),
             #[cfg(esp_idf_bt_nimble_gatt_client)]
             gattc: GattcCallback::new(),
+            #[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+            l2cap: L2capCallback::new(),
         }
     }
 
@@ -673,6 +742,32 @@ impl BleSingleton {
         0
     }
 
+    /// The L2CAP CoC event callback (wired at `create_server` / `connect`). Unlike the GATT server,
+    /// L2CAP has its own dedicated callback, so there is no demux off the GAP callback. NimBLE hands
+    /// us ownership of a received SDU's mbuf, so we free it once the hook has read it.
+    #[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+    unsafe extern "C" fn l2cap_event_cb(event: *mut ble_l2cap_event, _arg: *mut c_void) -> c_int {
+        let event = unsafe { &*event };
+
+        // A received SDU's mbuf is ours to free after dispatch; grab the pointer before dispatching.
+        let received_sdu = if event.type_ as u32 == BLE_L2CAP_EVENT_COC_DATA_RECEIVED {
+            Some(unsafe { event.__bindgen_anon_1.receive.sdu_rx })
+        } else {
+            None
+        };
+
+        let status = match l2cap::L2capEvent::from_raw(event) {
+            Some(event) => unsafe { SINGLETON.l2cap.call(event) },
+            None => 0,
+        };
+
+        if let Some(om) = received_sdu {
+            l2cap::free_mbuf(om);
+        }
+
+        status as c_int
+    }
+
     unsafe extern "C" fn host_task(_arg: *mut c_void) {
         unsafe {
             nimble_port_run();
@@ -867,6 +962,8 @@ impl<S> Drop for BleDriver<'_, S> {
         SINGLETON.gatts.unsubscribe();
         #[cfg(esp_idf_bt_nimble_gatt_client)]
         SINGLETON.gattc.unsubscribe();
+        #[cfg(not(esp_idf_bt_nimble_l2cap_coc_max_num = "0"))]
+        SINGLETON.l2cap.unsubscribe();
         let _ = SINGLETON.release();
     }
 }
