@@ -1,32 +1,32 @@
 //! Example of a BLE GATT server using the ESP IDF NimBLE bindings.
 //!
-//! Requires a NimBLE-enabled build.
+//! Requires a NimBLE-enabled build with the GATT server (`CONFIG_BT_NIMBLE_GATT_SERVER=y`).
 
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 
-#[cfg(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_enabled))]
+#[cfg(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_gatt_server))]
 fn main() -> anyhow::Result<()> {
     example::main()
 }
 
-#[cfg(not(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_enabled)))]
+#[cfg(not(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_gatt_server)))]
 fn main() -> anyhow::Result<()> {
-    panic!("This example requires a NimBLE-enabled build (CONFIG_BT_NIMBLE_ENABLED=y) on a chip with a BLE radio");
+    panic!("This example requires a NimBLE GATT-server build (CONFIG_BT_NIMBLE_GATT_SERVER=y) on a chip with a BLE radio");
 }
 
-#[cfg(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_enabled))]
+#[cfg(all(not(any(esp32s2, esp32p4)), esp_idf_bt_nimble_gatt_server))]
 mod example {
-    use core::sync::atomic::{AtomicU16, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
     use std::sync::Mutex;
 
-    use esp_idf_svc::ble::gap::{self, BleAdvFields, BleGapEvent};
+    use esp_idf_svc::ble::gap::{BleAdvFields, BleAdvParams, BleGapEvent};
     use esp_idf_svc::ble::gatt::gatts::{
-        self, BleGattAccess, BleGattCharacteristic, BleGattRegister, BleGattService,
-        BleGattServices, ConnectionId, GattsSetup,
+        BleGattCharacteristic, BleGattRegister, BleGattService, BleGattServices, ConnHandle,
+        GattsEvent,
     };
     use esp_idf_svc::ble::gatt::BleGattCharFlag;
-    use esp_idf_svc::ble::{ensure_addr, BleError, BleSetup, BleUuid};
+    use esp_idf_svc::ble::{ensure_addr, BleDriver, BleError, BleUuid};
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::log::EspLogger;
@@ -44,11 +44,15 @@ mod example {
     /// Our "indicate" characteristic - i.e. where clients can receive data if they subscribe to it
     pub const IND_CHARACTERISTIC_UUID: u128 = 0x503de214868246c4828fd59144da41be;
 
-    // Server state. We capture the indicate characteristic's value handle from the
-    // registration callback (see `on_gatts_register` below); a real server tracking
-    // several handles would keep a uuid -> handle map instead of a single slot.
-    static SUBSCRIBERS: Mutex<Vec<ConnectionId>> = Mutex::new(Vec::new());
+    // Server state. We capture each characteristic's value handle from the `Register` events (see
+    // `on_gatts_event` below); a real server tracking many handles would keep a uuid -> handle map.
+    static SUBSCRIBERS: Mutex<Vec<ConnHandle>> = Mutex::new(Vec::new());
     static IND_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
+    static RECV_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
+    // The GAP / sync callbacks run on the host task and only flip flags / touch the statics above,
+    // so they stay `'static` and use the plain (safe) subscribe forms. `main` owns the driver and
+    // does the advertising / indicating in response.
+    static NEEDS_ADV: AtomicBool = AtomicBool::new(false);
 
     pub fn main() -> anyhow::Result<()> {
         esp_idf_svc::sys::link_patches();
@@ -60,58 +64,56 @@ mod example {
             true,
             BleUuid::uuid128(SERVICE_UUID),
             vec![
-                // "recv": clients write here; we just log what arrives.
+                // "recv": clients write here; the single `on_gatts_event` hook logs it.
                 BleGattCharacteristic::new(
                     BleUuid::uuid128(RECV_CHARACTERISTIC_UUID),
                     enum_set!(BleGattCharFlag::Write),
-                    |access| {
-                        if let BleGattAccess::Write { data, .. } = access {
-                            let mut buf = [0u8; 200];
-                            match data.read(&mut buf) {
-                                Ok(n) => info!("recv {n} bytes: {:?}", &buf[..n]),
-                                Err(e) => warn!("recv read failed: {e}"),
-                            }
-                        }
-                        0
-                    },
                 ),
-                // "indicate": clients subscribe and get the counter pushed from the loop
-                // below. NimBLE adds the CCCD (0x2902) automatically for this flag, so
-                // there is no descriptor to declare and no read/write to service here.
+                // "indicate": clients subscribe and get the counter pushed from the loop below.
+                // NimBLE adds the CCCD (0x2902) automatically for this flag.
                 BleGattCharacteristic::new(
                     BleUuid::uuid128(IND_CHARACTERISTIC_UUID),
                     enum_set!(BleGattCharFlag::Indicate),
-                    |_access| 0,
                 ),
             ],
         )]);
 
-        let mut setup = BleSetup::new(peripherals.modem)?;
+        // Initialize the host as a GATT server: the service table is registered now (its pointer
+        // graph is owned by the driver), the host task starts at `start()`.
+        let driver = BleDriver::new_with_services(peripherals.modem, services)?;
 
-        GattsSetup::new(&mut setup).add_services(&services)?;
-
-        // NimBLE assigns attribute handles during registration and reports them here,
-        // on the host task. We stash the indicate handle so the loop below can push to
-        // it; matching on the UUID is how we tell our characteristics apart.
-        setup.on_gatts_register(|event| {
-            if let BleGattRegister::Characteristic {
-                uuid, val_handle, ..
-            } = event
-            {
-                if uuid == BleUuid::uuid128(IND_CHARACTERISTIC_UUID) {
-                    IND_VAL_HANDLE.store(val_handle, Ordering::Relaxed);
+        // One hook for the whole GATT server: registration (to learn handles) plus every read and
+        // write, dispatched by `attr_handle`. Must be set before `start()`.
+        driver.on_gatts_event(|event| {
+            match event {
+                GattsEvent::Register(BleGattRegister::Characteristic {
+                    uuid, val_handle, ..
+                }) => {
+                    if uuid == BleUuid::uuid128(IND_CHARACTERISTIC_UUID) {
+                        IND_VAL_HANDLE.store(val_handle, Ordering::Relaxed);
+                    } else if uuid == BleUuid::uuid128(RECV_CHARACTERISTIC_UUID) {
+                        RECV_VAL_HANDLE.store(val_handle, Ordering::Relaxed);
+                    }
                 }
+                GattsEvent::Write {
+                    attr_handle, data, ..
+                } if attr_handle == RECV_VAL_HANDLE.load(Ordering::Relaxed) => {
+                    let mut buf = [0u8; 200];
+                    match data.read(&mut buf) {
+                        Ok(n) => info!("recv {n} bytes: {:?}", &buf[..n]),
+                        Err(e) => warn!("recv read failed: {e}"),
+                    }
+                }
+                _ => {}
             }
+
+            0 // ATT status (ignored for `Register`)
         });
 
-        // We wait until the stack is "in sync" before we can start using it. Note this
-        // closure needs to handle being called multiple times in case the stack resets.
-        setup.on_sync(|| match start_advertising() {
-            Ok(()) => info!("advertising as {DEVICE_NAME:?}"),
-            Err(e) => warn!("failed to start advertising: {e}"),
-        });
+        // Advertise once the stack is "in sync"; re-armed on reset (so it can fire again).
+        driver.on_sync(|| NEEDS_ADV.store(true, Ordering::Relaxed));
 
-        setup.on_gap_event(|event| {
+        driver.on_gap_event(|event| {
             match event {
                 BleGapEvent::Connect {
                     conn_handle,
@@ -121,11 +123,9 @@ mod example {
                     conn_handle,
                     reason,
                 } => {
-                    info!("disconnected ({reason}); restarting advertising");
+                    info!("disconnected ({reason}); re-advertising");
                     SUBSCRIBERS.lock().unwrap().retain(|&c| c != conn_handle);
-                    if let Err(e) = start_advertising() {
-                        warn!("failed to restart advertising: {e}");
-                    }
+                    NEEDS_ADV.store(true, Ordering::Relaxed);
                 }
                 BleGapEvent::Subscribe {
                     conn_handle,
@@ -145,15 +145,20 @@ mod example {
             0
         });
 
-        let _driver = setup.start()?;
+        driver.start()?;
         info!("NimBLE host started");
 
         let mut counter: u16 = 0;
         loop {
             FreeRtos::delay_ms(1000);
 
-            // The handle stays 0 until the GATT registration callback sets it to
-            // whatver val_handle NimBLE assigned.
+            if NEEDS_ADV.swap(false, Ordering::Relaxed) {
+                match start_advertising(&driver) {
+                    Ok(()) => info!("advertising as {DEVICE_NAME:?}"),
+                    Err(e) => warn!("failed to start advertising: {e}"),
+                }
+            }
+
             let ind_handle = IND_VAL_HANDLE.load(Ordering::Relaxed);
             if ind_handle == 0 {
                 continue;
@@ -164,28 +169,24 @@ mod example {
             // Copy the subscriber list out so the lock isn't held across `indicate`.
             let subs = SUBSCRIBERS.lock().unwrap().clone();
             for conn in subs {
-                if let Err(e) = gatts::indicate(conn, ind_handle, &counter.to_le_bytes()) {
+                if let Err(e) = driver.indicate(conn, ind_handle, &counter.to_le_bytes()) {
                     warn!("indicate to {conn} failed: {e}");
                 }
             }
         }
     }
 
-    /// Configure and start a connectable legacy advertisement
-    /// n.b. NimBLE exposes a mutually-exclusive "extended" advertisement API as well
-    /// if you set the right build flags
-    fn start_advertising() -> Result<(), BleError> {
-        use esp_idf_svc::ble::gap::BleAdvParams;
-
+    /// Configure and start a connectable legacy advertisement.
+    fn start_advertising<S>(driver: &BleDriver<'_, S>) -> Result<(), BleError> {
         ensure_addr(false)?;
-        gap::svc_set_device_name(DEVICE_NAME)?;
+        driver.set_device_name(DEVICE_NAME)?;
 
         let fields = BleAdvFields {
             flags: 0x06, // LE General Discoverable, BR/EDR unsupported
             name: Some(DEVICE_NAME),
             ..Default::default()
         };
-        gap::adv_set_fields(&fields)?;
+        driver.adv_set_fields(&fields)?;
 
         let params = BleAdvParams {
             conn_mode: 2,   // BLE_GAP_CONN_MODE_UND
@@ -194,6 +195,6 @@ mod example {
             itvl_max: 0x60, // 60 ms
             ..Default::default()
         };
-        gap::adv_start(0 /* BLE_OWN_ADDR_PUBLIC */, &params)
+        driver.adv_start(0 /* BLE_OWN_ADDR_PUBLIC */, &params)
     }
 }

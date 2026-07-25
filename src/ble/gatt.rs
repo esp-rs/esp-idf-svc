@@ -11,7 +11,7 @@ use super::BleError;
 pub mod gatts;
 
 /// A GATT attribute handle (e.g. a characteristic's value handle).
-pub type Handle = u16;
+pub type AttrHandle = u16;
 
 /// Set the preferred ATT MTU. Safe to call before or after the host starts.
 pub fn set_preferred_mtu(mtu: u16) -> Result<(), BleError> {
@@ -19,7 +19,7 @@ pub fn set_preferred_mtu(mtu: u16) -> Result<(), BleError> {
 }
 
 /// The negotiated ATT MTU for a connection
-pub fn att_mtu(conn_handle: gatts::ConnectionId) -> Result<u16, BleError> {
+pub fn att_mtu(conn_handle: gatts::ConnHandle) -> Result<u16, BleError> {
     match unsafe { ble_att_mtu(conn_handle) } {
         0 => Err(BleError::new(BLE_HS_ENOTCONN as c_int)),
         mtu => Ok(mtu),
