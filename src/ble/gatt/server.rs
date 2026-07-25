@@ -167,10 +167,12 @@ impl BleGattService {
     }
 }
 
-/// The GATT service table as the raw NimBLE `ble_gatt_svc_def` tree, ready to hand to
+/// A GATT service table built **at runtime** (heap-allocated), as the raw NimBLE
+/// `ble_gatt_svc_def` tree, ready to hand to
 /// [`BleDriver::new_with_services`](crate::ble::BleDriver::new_with_services). Implements
-/// `Deref<Target = [ble_gatt_svc_def]>`, so it is one valid `S`; a `&'static` table or a
-/// `Box<[ble_gatt_svc_def]>` are others.
+/// `AsRef<[ble_gatt_svc_def]>`, so it is one valid `S`; a `&'static` table or a
+/// `Box<[ble_gatt_svc_def]>` are others. For a **compile-time** table (no heap), see the
+/// [`gatt_services!`](crate::gatt_services) macro.
 pub struct BleGattServices {
     // There are dragons here. The C def arrays hold raw pointers into `_services` (UUIDs) and into
     // `_chr_defs`. Those targets are heap-allocated, so they stay put when this struct's handle
@@ -229,21 +231,19 @@ impl BleGattServices {
     }
 }
 
-impl core::ops::Deref for BleGattServices {
-    type Target = [ble_gatt_svc_def];
-
-    fn deref(&self) -> &[ble_gatt_svc_def] {
+impl AsRef<[ble_gatt_svc_def]> for BleGattServices {
+    fn as_ref(&self) -> &[ble_gatt_svc_def] {
         &self.svc_defs
     }
 }
 
 /// GATT-server operations on the [`BleDriver`], available only when the driver was built with a
-/// service table (`S: Deref<Target = [ble_gatt_svc_def]>`) via
+/// service table (`S: AsRef<[ble_gatt_svc_def]>`) via
 /// [`new_with_services`](BleDriver::new_with_services). `&self`, so callable re-entrantly.
 #[cfg(esp_idf_bt_nimble_gatt_server)]
 impl<'d, S> BleDriver<'d, S>
 where
-    S: core::ops::Deref<Target = [ble_gatt_svc_def]>,
+    S: AsRef<[ble_gatt_svc_def]>,
 {
     /// Subscribe to GATT-server events ([`GattsEvent`]). Set this **before**
     /// [`start`](BleDriver::start): the `Register` events (carrying the attribute handles NimBLE
@@ -289,4 +289,197 @@ where
         // `ble_gatts_indicate_custom` takes ownership of `om` and frees it on all paths (no leak, no double-free).
         BleError::from_raw(unsafe { ble_gatts_indicate_custom(conn_handle, val_handle, om) })
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Static (compile-time) service tables — see the `gatt_services!` macro.
+//
+// The C def structs hold raw pointers, so they are `!Sync` and cannot go in a `static` directly.
+// These `#[repr(transparent)]` wrappers add the `unsafe impl Sync`; the macro then builds the
+// null-terminated tree bottom-up out of *block-scoped inner statics*, which is what gives every
+// pointer target a stable `'static` address (a `const` has no stable address; a `static` does).
+// -------------------------------------------------------------------------------------------------
+
+/// A **static** (compile-time) GATT service table: a null-terminated `ble_gatt_svc_def` array
+/// wrapped so it can live in a `static`. Build one with the [`gatt_services!`](crate::gatt_services)
+/// macro and pass `&MY_SERVICES` to [`new_with_services`](BleDriver::new_with_services) — it needs
+/// no heap and lands in flash. `N` (services + terminator) is inferred by the macro; you never write
+/// it.
+#[repr(transparent)]
+pub struct GattServices<const N: usize>([ble_gatt_svc_def; N]);
+
+// SAFETY: the raw pointers in the table only address other items of the same `'static` tree, and
+// NimBLE consumes the table read-only (assigned handles are reported via the register events, not
+// written back into it).
+unsafe impl<const N: usize> Sync for GattServices<N> {}
+
+impl<const N: usize> GattServices<N> {
+    /// Wrap a fully-built, null-terminated service array. Prefer the
+    /// [`gatt_services!`](crate::gatt_services) macro over calling this directly.
+    #[doc(hidden)]
+    pub const fn new(defs: [ble_gatt_svc_def; N]) -> Self {
+        Self(defs)
+    }
+}
+
+impl<const N: usize> AsRef<[ble_gatt_svc_def]> for GattServices<N> {
+    fn as_ref(&self) -> &[ble_gatt_svc_def] {
+        &self.0
+    }
+}
+
+/// The characteristics of one service, as a null-terminated `ble_gatt_chr_def` array wrapped for
+/// `static` storage. An implementation detail of [`gatt_services!`](crate::gatt_services).
+#[doc(hidden)]
+#[repr(transparent)]
+pub struct GattChrs<const N: usize>([ble_gatt_chr_def; N]);
+
+// SAFETY: as for `GattServices`.
+unsafe impl<const N: usize> Sync for GattChrs<N> {}
+
+impl<const N: usize> GattChrs<N> {
+    pub const fn new(defs: [ble_gatt_chr_def; N]) -> Self {
+        Self(defs)
+    }
+
+    pub const fn as_ptr(&self) -> *const ble_gatt_chr_def {
+        self.0.as_ptr()
+    }
+}
+
+// All-zero templates. A zeroed `ble_gatt_*_def` is exactly the null terminator, and is the base the
+// builders below fill in — the `const` analog of the runtime path's `..Default::default()`, so that
+// fields we do not set (and any the bindings gain across ESP-IDF versions, e.g. `cpfd`) are zeroed
+// without having to enumerate them. Every field is a pointer / fn-pointer / integer, so all-zero is
+// a valid, meaningful value.
+const ZERO_SVC: ble_gatt_svc_def = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+const ZERO_CHR: ble_gatt_chr_def = unsafe { core::mem::MaybeUninit::zeroed().assume_init() };
+
+/// The service-array terminator. Public only for the macro.
+#[doc(hidden)]
+pub const SVC_SENTINEL: ble_gatt_svc_def = ZERO_SVC;
+
+/// The characteristic-array terminator. Public only for the macro.
+#[doc(hidden)]
+pub const CHR_SENTINEL: ble_gatt_chr_def = ZERO_CHR;
+
+/// Build one characteristic def for a static table. Public only for the macro. Wires the crate's
+/// single access trampoline (as the runtime path does); the assigned handle is learned from the
+/// register events, so `val_handle` is null.
+#[doc(hidden)]
+pub const fn make_chr(uuid: *const ble_uuid_t, flags: ble_gatt_chr_flags) -> ble_gatt_chr_def {
+    ble_gatt_chr_def {
+        uuid,
+        access_cb: Some(super::super::BleSingleton::gatts_access_cb),
+        flags,
+        ..ZERO_CHR
+    }
+}
+
+/// Build one service def for a static table. Public only for the macro.
+#[doc(hidden)]
+pub const fn make_svc(
+    primary: bool,
+    uuid: *const ble_uuid_t,
+    characteristics: *const ble_gatt_chr_def,
+) -> ble_gatt_svc_def {
+    ble_gatt_svc_def {
+        type_: if primary {
+            BLE_GATT_SVC_TYPE_PRIMARY as u8
+        } else {
+            BLE_GATT_SVC_TYPE_SECONDARY as u8
+        },
+        uuid,
+        characteristics,
+        ..ZERO_SVC
+    }
+}
+
+/// Define a **static** (compile-time, heap-free) GATT service table.
+///
+/// Expands to a `static NAME` holding the null-terminated NimBLE `ble_gatt_svc_def` tree (services,
+/// characteristics, UUIDs), all in flash. Pass `&NAME` to
+/// [`new_with_services`](crate::ble::BleDriver::new_with_services). Reads and writes are serviced
+/// the same way as the runtime table — through the single
+/// [`gatts_subscribe`](crate::ble::BleDriver::gatts_subscribe) hook, keyed by the value handle
+/// reported in the `Register` events (so learn handles there, exactly as the runtime example does).
+///
+/// Each UUID slot is any `const` [`BleUuid`](crate::ble::BleUuid) expression — declare your UUIDs as
+/// `const FOO: BleUuid = BleUuid::uuid128(..)` (or `uuid16`) and name them. Characteristic flags are
+/// any `|`-separated [`BleGattCharFlag`](crate::ble::gatt::BleGattCharFlag) variants (`Read`,
+/// `Write`, `Notify`, `Indicate`). Services are `primary(..)` or `secondary(..)`.
+///
+/// The `NAME` and the body live inside the one macro group (a macro invocation is a single token
+/// tree), so it reads `gatt_services!(NAME { .. });` — use `!{ .. }` to drop the trailing `;`.
+///
+/// ```ignore
+/// use esp_idf_svc::ble::BleUuid;
+/// use esp_idf_svc::gatt_services;
+///
+/// const SVC: BleUuid = BleUuid::uuid128(0xad91b201_73474047_9e173bed_82d75f9d);
+/// const RECV: BleUuid = BleUuid::uuid128(0xb6fccb50_87be44f3_ae22f854_85ea42c4);
+/// const HR: BleUuid = BleUuid::uuid16(0x2A37);
+///
+/// gatt_services!(SERVICES {
+///     primary(SVC) {
+///         chr(RECV, Write);
+///         chr(HR, Notify | Indicate);
+///     }
+/// });
+/// // ... let driver = BleDriver::new_with_services(modem, &SERVICES)?;
+/// ```
+#[macro_export]
+macro_rules! gatt_services {
+    // --- internal helpers (matched before the public arm) ---
+
+    // a `*const ble_uuid_t` backed by a fresh block-scoped `'static` (stable address)
+    (@uuid_ptr $uuid:expr) => {{
+        static U: $crate::ble::BleUuid = $uuid;
+        U.as_ptr()
+    }};
+
+    // one characteristic def
+    (@chr $uuid:expr, $($flag:ident)|+ ) => {
+        $crate::ble::gatt::server::make_chr(
+            $crate::gatt_services!(@uuid_ptr $uuid),
+            0 $( | $crate::ble::gatt::BleGattCharFlag::$flag.repr() )+,
+        )
+    };
+
+    // map `primary`/`secondary` to a bool; a unit token used only for counting repetitions
+    (@primary primary) => { true };
+    (@primary secondary) => { false };
+    (@unit $_t:expr) => { () };
+
+    // --- public entry: `gatt_services!(NAME { primary(uuid) { chr(uuid, Flags); .. } .. })` ---
+    (
+        $vis:vis $NAME:ident {
+            $(
+                $kind:ident ( $svc_uuid:expr ) {
+                    $( chr ( $chr_uuid:expr, $($flag:ident)|+ ) ; )*
+                }
+            )+
+        }
+    ) => {
+        $vis static $NAME: $crate::ble::gatt::server::GattServices<
+            { <[()]>::len(&[ $( $crate::gatt_services!(@unit $svc_uuid) ),+ ]) + 1 }
+        > = $crate::ble::gatt::server::GattServices::new([
+            $(
+                {
+                    static CHRS: $crate::ble::gatt::server::GattChrs<
+                        { <[()]>::len(&[ $( $crate::gatt_services!(@unit $chr_uuid) ),* ]) + 1 }
+                    > = $crate::ble::gatt::server::GattChrs::new([
+                        $( $crate::gatt_services!(@chr $chr_uuid, $($flag)|+), )*
+                        $crate::ble::gatt::server::CHR_SENTINEL
+                    ]);
+                    $crate::ble::gatt::server::make_svc(
+                        $crate::gatt_services!(@primary $kind),
+                        $crate::gatt_services!(@uuid_ptr $svc_uuid),
+                        CHRS.as_ptr(),
+                    )
+                },
+            )+
+            $crate::ble::gatt::server::SVC_SENTINEL
+        ]);
+    };
 }

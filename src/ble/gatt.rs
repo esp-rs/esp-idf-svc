@@ -41,14 +41,23 @@ pub enum BleGattCharFlag {
 }
 
 #[cfg(esp_idf_bt_nimble_gatt_server)]
+impl BleGattCharFlag {
+    /// The raw NimBLE flag bit (`BLE_GATT_CHR_F_*`). `const`, so it can be used to build a static
+    /// service table (see the [`gatt_services!`](crate::gatt_services) macro).
+    pub const fn repr(self) -> ble_gatt_chr_flags {
+        match self {
+            Self::Read => BLE_GATT_CHR_F_READ,
+            Self::Write => BLE_GATT_CHR_F_WRITE,
+            Self::Notify => BLE_GATT_CHR_F_NOTIFY,
+            Self::Indicate => BLE_GATT_CHR_F_INDICATE,
+        }
+    }
+}
+
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 impl From<BleGattCharFlag> for ble_gatt_chr_flags {
     fn from(flag: BleGattCharFlag) -> Self {
-        match flag {
-            BleGattCharFlag::Read => BLE_GATT_CHR_F_READ,
-            BleGattCharFlag::Write => BLE_GATT_CHR_F_WRITE,
-            BleGattCharFlag::Notify => BLE_GATT_CHR_F_NOTIFY,
-            BleGattCharFlag::Indicate => BLE_GATT_CHR_F_INDICATE,
-        }
+        flag.repr()
     }
 }
 

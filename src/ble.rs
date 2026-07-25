@@ -55,7 +55,7 @@ impl BleUuid {
         })
     }
 
-    pub fn as_ptr(&self) -> *const ble_uuid_t {
+    pub const fn as_ptr(&self) -> *const ble_uuid_t {
         match self {
             Self::Uuid16(uuid) => &uuid.u as *const ble_uuid_t,
             Self::Uuid128(uuid) => &uuid.u as *const ble_uuid_t,
@@ -832,15 +832,16 @@ impl<'ble> BleDriver<'ble, ()> {
 #[cfg(esp_idf_bt_nimble_gatt_server)]
 impl<'ble, S> BleDriver<'ble, S>
 where
-    S: core::ops::Deref<Target = [ble_gatt_svc_def]>,
+    S: AsRef<[ble_gatt_svc_def]>,
 {
     /// Initialize the NimBLE host as a **GATT server**, registering `services` in NimBLE's
     /// pre-start window (this is why service registration is a construction concern, not a runtime
-    /// one — see [`ble_gatts_add_svcs`]). `S` may be an owned bundle (e.g.
-    /// [`BleGattServices`](gatt::server::BleGattServices)), a `Box<[ble_gatt_svc_def]>`, or a
-    /// `&'static [ble_gatt_svc_def]`; whatever it is, it must keep the *entire* pointer graph the
-    /// table references (characteristics, UUIDs) alive and at stable addresses for as long as it is
-    /// held. The driver owns it, so drop order does the rest.
+    /// one — see [`ble_gatts_add_svcs`]). `S` may be an owned bundle built at runtime (e.g.
+    /// [`BleGattServices`](gatt::server::BleGattServices)), a `Box<[ble_gatt_svc_def]>`, a
+    /// `&'static [ble_gatt_svc_def]`, or a `&'static` static table built with the
+    /// [`gatt_services!`](crate::gatt_services) macro; whatever it is, it must keep the *entire*
+    /// pointer graph the table references (characteristics, UUIDs) alive and at stable addresses for
+    /// as long as it is held. The driver owns it, so drop order does the rest.
     ///
     /// Does not start the host task; hook [`gatts_subscribe`](Self::gatts_subscribe) (to learn the
     /// assigned attribute handles), configure security/callbacks, then call [`start`](Self::start).
@@ -851,7 +852,7 @@ where
         host_init(modem)?;
 
         // `?` converts `BleError` to `EspError` via `From<BleError>`.
-        let defs = services.deref().as_ptr();
+        let defs = services.as_ref().as_ptr();
         BleError::from_raw(unsafe { ble_gatts_count_cfg(defs) })?;
         BleError::from_raw(unsafe { ble_gatts_add_svcs(defs) })?;
 
