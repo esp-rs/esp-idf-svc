@@ -15,6 +15,7 @@ use crate::sys::*;
 
 pub mod gap;
 pub mod gatt;
+#[cfg(any(esp_idf_bt_nimble_gatt_server, esp_idf_bt_nimble_gatt_client))]
 pub mod mbuf;
 
 /// A connection handle (NimBLE's `conn_handle`). A *connection* is a cross-cutting concept — born
@@ -232,6 +233,16 @@ impl Default for BleSecurity {
     }
 }
 
+/// Host-lifecycle events, delivered to the [`host_subscribe`](BleDriver::host_subscribe) hook.
+pub enum HostEvent {
+    /// The host has synchronized with the controller and is ready for BLE operations. Re-entrant:
+    /// fires again after a [`Reset`](Self::Reset).
+    Sync,
+    /// The host reset (e.g. a fatal controller error), carrying the reason code. A
+    /// [`Sync`](Self::Sync) follows once the stack re-synchronizes.
+    Reset { reason: i32 },
+}
+
 #[allow(dead_code)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct BleCallback<A, R> {
@@ -297,17 +308,19 @@ unsafe impl<A, R> Sync for BleCallback<A, R> {}
 unsafe impl<A, R> Send for BleCallback<A, R> {}
 
 /// The GATT-server hook. Unlike [`BleCallback`], the argument
-/// [`GattsEvent`](gatt::gatts::GattsEvent) is lifetime-parametrized (its `Read`/`Write` variants
+/// [`GattsEvent`](gatt::server::GattsEvent) is lifetime-parametrized (its `Read`/`Write` variants
 /// borrow the operation's mbuf, valid only for the duration of the call), so the stored closure is
 /// higher-ranked over that lifetime. The return value is the ATT status for `Read`/`Write` and is
 /// ignored for the registration events.
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct GattsCallback {
     callback: Mutex<
-        Option<Arc<UnsafeCell<Box<dyn for<'a> FnMut(gatt::gatts::GattsEvent<'a>) -> u8 + Send>>>>,
+        Option<Arc<UnsafeCell<Box<dyn for<'a> FnMut(gatt::server::GattsEvent<'a>) -> u8 + Send>>>>,
     >,
 }
 
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 impl GattsCallback {
     pub const fn new() -> Self {
         Self {
@@ -325,11 +338,11 @@ impl GattsCallback {
     #[allow(clippy::arc_with_non_send_sync)]
     pub unsafe fn subscribe_nonstatic<'a, F>(&self, callback: F)
     where
-        F: for<'e> FnMut(gatt::gatts::GattsEvent<'e>) -> u8 + Send + 'a,
+        F: for<'e> FnMut(gatt::server::GattsEvent<'e>) -> u8 + Send + 'a,
     {
-        let callback: Box<dyn for<'e> FnMut(gatt::gatts::GattsEvent<'e>) -> u8 + Send + 'a> =
+        let callback: Box<dyn for<'e> FnMut(gatt::server::GattsEvent<'e>) -> u8 + Send + 'a> =
             Box::new(callback);
-        let callback: Box<dyn for<'e> FnMut(gatt::gatts::GattsEvent<'e>) -> u8 + Send + 'static> =
+        let callback: Box<dyn for<'e> FnMut(gatt::server::GattsEvent<'e>) -> u8 + Send + 'static> =
             unsafe { core::mem::transmute(callback) };
         *self.callback.lock() = Some(Arc::new(UnsafeCell::new(callback)));
     }
@@ -341,7 +354,7 @@ impl GattsCallback {
     /// # Safety
     ///
     /// Safe to use only from within the NimBLE host task.
-    pub unsafe fn call(&self, event: gatt::gatts::GattsEvent<'_>) -> u8 {
+    pub unsafe fn call(&self, event: gatt::server::GattsEvent<'_>) -> u8 {
         if let Some(callback) = self
             .callback
             .lock()
@@ -355,17 +368,19 @@ impl GattsCallback {
     }
 }
 
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 unsafe impl Sync for GattsCallback {}
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 unsafe impl Send for GattsCallback {}
 
 /// The GATT-client hook — the dual of [`GattsCallback`] for the client side. Its argument
-/// [`GattcEvent`](gatt::gattc::GattcEvent) is likewise higher-ranked (its `Read`/`NotifyRx`
+/// [`GattcEvent`](gatt::client::GattcEvent) is likewise higher-ranked (its `ReadComplete`/`Notify`
 /// variants borrow an mbuf). It has no return value: the client produces no ATT responses.
 #[cfg(esp_idf_bt_nimble_gatt_client)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct GattcCallback {
     callback:
-        Mutex<Option<Arc<UnsafeCell<Box<dyn for<'a> FnMut(gatt::gattc::GattcEvent<'a>) + Send>>>>>,
+        Mutex<Option<Arc<UnsafeCell<Box<dyn for<'a> FnMut(gatt::client::GattcEvent<'a>) + Send>>>>>,
 }
 
 #[cfg(esp_idf_bt_nimble_gatt_client)]
@@ -382,11 +397,11 @@ impl GattcCallback {
     #[allow(clippy::arc_with_non_send_sync)]
     pub unsafe fn subscribe_nonstatic<'a, F>(&self, callback: F)
     where
-        F: for<'e> FnMut(gatt::gattc::GattcEvent<'e>) + Send + 'a,
+        F: for<'e> FnMut(gatt::client::GattcEvent<'e>) + Send + 'a,
     {
-        let callback: Box<dyn for<'e> FnMut(gatt::gattc::GattcEvent<'e>) + Send + 'a> =
+        let callback: Box<dyn for<'e> FnMut(gatt::client::GattcEvent<'e>) + Send + 'a> =
             Box::new(callback);
-        let callback: Box<dyn for<'e> FnMut(gatt::gattc::GattcEvent<'e>) + Send + 'static> =
+        let callback: Box<dyn for<'e> FnMut(gatt::client::GattcEvent<'e>) + Send + 'static> =
             unsafe { core::mem::transmute(callback) };
         *self.callback.lock() = Some(Arc::new(UnsafeCell::new(callback)));
     }
@@ -398,7 +413,7 @@ impl GattcCallback {
     /// # Safety
     ///
     /// Safe to use only from within the NimBLE host task.
-    pub unsafe fn call(&self, event: gatt::gattc::GattcEvent<'_>) {
+    pub unsafe fn call(&self, event: gatt::client::GattcEvent<'_>) {
         if let Some(callback) = self
             .callback
             .lock()
@@ -421,9 +436,9 @@ unsafe impl Send for GattcCallback {}
 #[allow(dead_code)]
 pub(crate) struct BleSingleton {
     initialized: AtomicBool,
-    sync: BleCallback<(), ()>,
-    reset: BleCallback<i32, ()>,
-    gap_event: BleCallback<gap::BleGapEvent, i32>,
+    host: BleCallback<HostEvent, ()>,
+    gap: BleCallback<gap::GapEvent, i32>,
+    #[cfg(esp_idf_bt_nimble_gatt_server)]
     gatts: GattsCallback,
     #[cfg(esp_idf_bt_nimble_gatt_client)]
     gattc: GattcCallback,
@@ -434,9 +449,9 @@ impl BleSingleton {
     pub const fn new() -> Self {
         Self {
             initialized: AtomicBool::new(false),
-            sync: BleCallback::new(()),
-            reset: BleCallback::new(()),
-            gap_event: BleCallback::new(0),
+            host: BleCallback::new(()),
+            gap: BleCallback::new(0),
+            #[cfg(esp_idf_bt_nimble_gatt_server)]
             gatts: GattsCallback::new(),
             #[cfg(esp_idf_bt_nimble_gatt_client)]
             gattc: GattcCallback::new(),
@@ -464,24 +479,25 @@ impl BleSingleton {
     // all dispatch through it. (They cannot live on `BleDriver`, which is generic.)
 
     unsafe extern "C" fn host_sync_cb() {
-        unsafe { SINGLETON.sync.call(()) }
+        unsafe { SINGLETON.host.call(HostEvent::Sync) }
     }
 
     unsafe extern "C" fn host_reset_cb(reason: i32) {
-        unsafe { SINGLETON.reset.call(reason) }
+        unsafe { SINGLETON.host.call(HostEvent::Reset { reason }) }
     }
 
     /// The connection event callback (wired at `adv_start` for a server, at `connect` for a
     /// client). NimBLE multiplexes role-specific events onto it, so we **demux by role**: the
     /// role-agnostic connection events go to the GAP hook, the server-role events
-    /// (`Subscribe`/`NotifyTx`) to the GATTS hook, and the client-role event (`NotifyRx`) to the
-    /// GATTC hook.
+    /// (`Subscribe`/`NotifyComplete`) to the GATTS hook, and the client-role event (`Notify`) to
+    /// the GATTC hook.
     unsafe extern "C" fn gap_event_cb(event: *mut ble_gap_event, _arg: *mut c_void) -> c_int {
         let event = unsafe { &*event };
 
         match event.type_ as u32 {
+            #[cfg(esp_idf_bt_nimble_gatt_server)]
             BLE_GAP_EVENT_SUBSCRIBE | BLE_GAP_EVENT_NOTIFY_TX => {
-                if let Some(event) = gatt::gatts::GattsEvent::from_gap(event) {
+                if let Some(event) = gatt::server::GattsEvent::from_gap(event) {
                     unsafe { SINGLETON.gatts.call(event) };
                 }
                 0
@@ -491,18 +507,20 @@ impl BleSingleton {
                 unsafe {
                     SINGLETON
                         .gattc
-                        .call(gatt::gattc::GattcEvent::from_notify_rx(event))
+                        .call(gatt::client::GattcEvent::from_notify_rx(event))
                 };
                 0
             }
-            _ => unsafe { SINGLETON.gap_event.call(gap::BleGapEvent::from(event)) },
+            _ => unsafe { SINGLETON.gap.call(gap::GapEvent::from(event)) },
         }
     }
 
+    #[cfg(esp_idf_bt_nimble_gatt_server)]
     unsafe extern "C" fn gatts_register_cb(ctxt: *mut ble_gatt_register_ctxt, _arg: *mut c_void) {
-        let event = gatt::gatts::GattsEvent::Register(gatt::gatts::BleGattRegister::from(unsafe {
-            &*ctxt
-        }));
+        let event =
+            gatt::server::GattsEvent::Register(gatt::server::BleGattRegister::from(unsafe {
+                &*ctxt
+            }));
 
         // The registration events carry no reply; the hook's status return is ignored.
         unsafe {
@@ -511,8 +529,9 @@ impl BleSingleton {
     }
 
     /// The single access trampoline shared by *every* characteristic — NimBLE dispatches reads and
-    /// writes here, and we route them to the one [`on_gatts_event`](BleDriver::on_gatts_event) hook,
+    /// writes here, and we route them to the one [`gatts_subscribe`](BleDriver::gatts_subscribe) hook,
     /// keyed by the (globally unique) `attr_handle`. There are no per-characteristic closures.
+    #[cfg(esp_idf_bt_nimble_gatt_server)]
     unsafe extern "C" fn gatts_access_cb(
         conn_handle: u16,
         attr_handle: u16,
@@ -522,12 +541,12 @@ impl BleSingleton {
         let mbuf = mbuf::Mbuf::from_raw(unsafe { (*ctxt).om });
 
         let event = match unsafe { (*ctxt).op } as u32 {
-            BLE_GATT_ACCESS_OP_READ_CHR => gatt::gatts::GattsEvent::Read {
+            BLE_GATT_ACCESS_OP_READ_CHR => gatt::server::GattsEvent::Read {
                 conn_handle,
                 attr_handle,
                 reply: mbuf,
             },
-            BLE_GATT_ACCESS_OP_WRITE_CHR => gatt::gatts::GattsEvent::Write {
+            BLE_GATT_ACCESS_OP_WRITE_CHR => gatt::server::GattsEvent::Write {
                 conn_handle,
                 attr_handle,
                 data: mbuf,
@@ -555,10 +574,10 @@ impl BleSingleton {
             unsafe { (*error).status }
         };
         let service =
-            (!service.is_null()).then(|| gatt::gattc::GattcService::from(unsafe { &*service }));
+            (!service.is_null()).then(|| gatt::client::GattcService::from(unsafe { &*service }));
 
         unsafe {
-            SINGLETON.gattc.call(gatt::gattc::GattcEvent::Service {
+            SINGLETON.gattc.call(gatt::client::GattcEvent::Service {
                 conn_handle,
                 status,
                 service,
@@ -579,12 +598,12 @@ impl BleSingleton {
         } else {
             unsafe { (*error).status }
         };
-        let chr = (!chr.is_null()).then(|| gatt::gattc::GattcChr::from(unsafe { &*chr }));
+        let chr = (!chr.is_null()).then(|| gatt::client::GattcChr::from(unsafe { &*chr }));
 
         unsafe {
             SINGLETON
                 .gattc
-                .call(gatt::gattc::GattcEvent::Characteristic {
+                .call(gatt::client::GattcEvent::Characteristic {
                     conn_handle,
                     status,
                     chr,
@@ -612,12 +631,14 @@ impl BleSingleton {
         };
 
         unsafe {
-            SINGLETON.gattc.call(gatt::gattc::GattcEvent::Read {
-                conn_handle,
-                status,
-                attr_handle,
-                data: mbuf::Mbuf::from_raw(om),
-            });
+            SINGLETON
+                .gattc
+                .call(gatt::client::GattcEvent::ReadComplete {
+                    conn_handle,
+                    status,
+                    attr_handle,
+                    data: mbuf::Mbuf::from_raw(om),
+                });
         }
         0
     }
@@ -641,11 +662,13 @@ impl BleSingleton {
         };
 
         unsafe {
-            SINGLETON.gattc.call(gatt::gattc::GattcEvent::Write {
-                conn_handle,
-                status,
-                attr_handle,
-            });
+            SINGLETON
+                .gattc
+                .call(gatt::client::GattcEvent::WriteComplete {
+                    conn_handle,
+                    status,
+                    attr_handle,
+                });
         }
         0
     }
@@ -719,12 +742,12 @@ where
     /// Initialize the NimBLE host as a **GATT server**, registering `services` in NimBLE's
     /// pre-start window (this is why service registration is a construction concern, not a runtime
     /// one — see [`ble_gatts_add_svcs`]). `S` may be an owned bundle (e.g.
-    /// [`BleGattServices`](gatt::gatts::BleGattServices)), a `Box<[ble_gatt_svc_def]>`, or a
+    /// [`BleGattServices`](gatt::server::BleGattServices)), a `Box<[ble_gatt_svc_def]>`, or a
     /// `&'static [ble_gatt_svc_def]`; whatever it is, it must keep the *entire* pointer graph the
     /// table references (characteristics, UUIDs) alive and at stable addresses for as long as it is
     /// held. The driver owns it, so drop order does the rest.
     ///
-    /// Does not start the host task; hook [`on_gatts_event`](Self::on_gatts_event) (to learn the
+    /// Does not start the host task; hook [`gatts_subscribe`](Self::gatts_subscribe) (to learn the
     /// assigned attribute handles), configure security/callbacks, then call [`start`](Self::start).
     pub fn new_with_services<M: BluetoothModemPeripheral + 'ble>(
         modem: M,
@@ -746,62 +769,42 @@ where
 }
 
 impl<'ble, S> BleDriver<'ble, S> {
-    /// Once the BLE stack is "in sync", this gets called; you should delay BLE operations until
-    /// this gets called. Note the stack can also go out-of-sync for various reasons, indicated by
-    /// on_reset being called followed by this being called again, so the callback must be re-entrant.
+    /// Subscribe to host-lifecycle events ([`HostEvent`]): `Sync` when the host and controller are
+    /// synchronized (you must delay BLE operations until then), and `Reset` when the host resets.
+    /// The hook must be re-entrant — a reset is followed by another `Sync` once re-synced.
     /// See https://mynewt.apache.org/latest/network/ble_setup/ble_sync_cb.html
-    pub fn on_sync<F>(&self, callback: F)
+    pub fn host_subscribe<F>(&self, callback: F)
     where
-        F: FnMut() + Send + 'static,
+        F: FnMut(HostEvent) + Send + 'static,
     {
-        unsafe { self.on_sync_nonstatic(callback) }
+        unsafe { self.host_subscribe_nonstatic(callback) }
     }
 
     /// # Safety
     ///
-    /// This method - in contrast to `on_sync` - allows a non-`'static` callback,
-    /// so it may borrow variables that live as long as this [`BleDriver`]. The callback stays
-    /// registered with the running NimBLE host task until the driver is dropped, which
-    /// un-subscribes it.
+    /// The non-`'static` counterpart of [`host_subscribe`](Self::host_subscribe): the callback may
+    /// borrow variables that live as long as this [`BleDriver`]. It stays registered with the
+    /// running NimBLE host task until the driver is dropped, which un-subscribes it.
     ///
-    /// Care must be taken NOT to `core::mem::forget` the driver: that skips the
-    /// un-subscription, leaving the host task holding a callback with dangling
-    /// borrows. This "local borrowing" can only be expressed safely once/if `!Leak`
-    /// types are introduced to Rust.
-    pub unsafe fn on_sync_nonstatic<F>(&self, mut callback: F)
+    /// Care must be taken NOT to `core::mem::forget` the driver: that skips the un-subscription,
+    /// leaving the host task holding a callback with dangling borrows. This "local borrowing" can
+    /// only be expressed safely once/if `!Leak` types are introduced to Rust.
+    pub unsafe fn host_subscribe_nonstatic<F>(&self, callback: F)
     where
-        F: FnMut() + Send + 'ble,
+        F: FnMut(HostEvent) + Send + 'ble,
     {
-        unsafe { SINGLETON.sync.subscribe_nonstatic(move |()| callback()) };
+        unsafe { SINGLETON.host.subscribe_nonstatic(callback) };
 
         unsafe {
-            (*core::ptr::addr_of_mut!(ble_hs_cfg)).sync_cb = Some(BleSingleton::host_sync_cb);
+            let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
+            (*cfg).sync_cb = Some(BleSingleton::host_sync_cb);
+            (*cfg).reset_cb = Some(BleSingleton::host_reset_cb);
         }
     }
 
-    /// Called if the BLE host goes out of sync with the controller after on_sync has been called.
-    /// See https://mynewt.apache.org/latest/network/ble_setup/ble_sync_cb.html
-    pub fn on_reset<F>(&self, callback: F)
-    where
-        F: FnMut(i32) + Send + 'static,
-    {
-        unsafe { self.on_reset_nonstatic(callback) }
-    }
-
-    /// # Safety
-    ///
-    /// The non-`'static` counterpart of `on_reset`. See
-    /// [`on_sync_nonstatic`](Self::on_sync_nonstatic) for the borrowing rules and
-    /// the `core::mem::forget` hazard.
-    pub unsafe fn on_reset_nonstatic<F>(&self, callback: F)
-    where
-        F: FnMut(i32) + Send + 'ble,
-    {
-        unsafe { SINGLETON.reset.subscribe_nonstatic(callback) };
-
-        unsafe {
-            (*core::ptr::addr_of_mut!(ble_hs_cfg)).reset_cb = Some(BleSingleton::host_reset_cb);
-        }
+    /// Stop delivering host-lifecycle events to the subscribed hook.
+    pub fn host_unsubscribe(&self) {
+        SINGLETON.host.unsubscribe();
     }
 
     /// Configure the Security Manager (SMP) parameters. Must be called before
@@ -823,7 +826,7 @@ impl<'ble, S> BleDriver<'ble, S> {
     }
 
     /// Start the NimBLE host task. It runs in the background and calls the
-    /// [`on_sync`](Self::on_sync) callback once the stack is ready for use. Call this once
+    /// [`Sync`](HostEvent::Sync) via [`host_subscribe`](Self::host_subscribe) callback once the stack is ready for use. Call this once
     /// services, security and callbacks are set up; you must retain the driver, as the BLE stack
     /// is stopped when it drops.
     ///
@@ -852,12 +855,15 @@ impl<S> Drop for BleDriver<'_, S> {
             let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
             (*cfg).sync_cb = None;
             (*cfg).reset_cb = None;
-            (*cfg).gatts_register_cb = None;
+            #[cfg(esp_idf_bt_nimble_gatt_server)]
+            {
+                (*cfg).gatts_register_cb = None;
+            }
         }
 
-        SINGLETON.sync.unsubscribe();
-        SINGLETON.reset.unsubscribe();
-        SINGLETON.gap_event.unsubscribe();
+        SINGLETON.host.unsubscribe();
+        SINGLETON.gap.unsubscribe();
+        #[cfg(esp_idf_bt_nimble_gatt_server)]
         SINGLETON.gatts.unsubscribe();
         #[cfg(esp_idf_bt_nimble_gatt_client)]
         SINGLETON.gattc.unsubscribe();

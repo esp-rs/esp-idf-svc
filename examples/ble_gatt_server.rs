@@ -20,12 +20,12 @@ mod example {
     use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
     use std::sync::Mutex;
 
-    use esp_idf_svc::ble::gap::{BleAdvFields, BleAdvParams, BleGapEvent};
-    use esp_idf_svc::ble::gatt::gatts::{
+    use esp_idf_svc::ble::gap::{BleAdvFields, BleAdvParams, GapEvent};
+    use esp_idf_svc::ble::gatt::server::{
         BleGattCharacteristic, BleGattRegister, BleGattService, BleGattServices, GattsEvent,
     };
     use esp_idf_svc::ble::gatt::BleGattCharFlag;
-    use esp_idf_svc::ble::{ensure_addr, BleDriver, BleError, BleUuid, ConnHandle};
+    use esp_idf_svc::ble::{ensure_addr, BleDriver, BleError, BleUuid, ConnHandle, HostEvent};
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::log::EspLogger;
@@ -44,7 +44,7 @@ mod example {
     pub const IND_CHARACTERISTIC_UUID: u128 = 0x503de214868246c4828fd59144da41be;
 
     // Server state. We capture each characteristic's value handle from the `Register` events (see
-    // `on_gatts_event` below); a real server tracking many handles would keep a uuid -> handle map.
+    // `gatts_subscribe` below); a real server tracking many handles would keep a uuid -> handle map.
     static SUBSCRIBERS: Mutex<Vec<ConnHandle>> = Mutex::new(Vec::new());
     static IND_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
     static RECV_VAL_HANDLE: AtomicU16 = AtomicU16::new(0);
@@ -63,7 +63,7 @@ mod example {
             true,
             BleUuid::uuid128(SERVICE_UUID),
             vec![
-                // "recv": clients write here; the single `on_gatts_event` hook logs it.
+                // "recv": clients write here; the single `gatts_subscribe` hook logs it.
                 BleGattCharacteristic::new(
                     BleUuid::uuid128(RECV_CHARACTERISTIC_UUID),
                     enum_set!(BleGattCharFlag::Write),
@@ -83,7 +83,7 @@ mod example {
 
         // One hook for the whole GATT server: registration (to learn handles) plus every read and
         // write, dispatched by `attr_handle`. Must be set before `start()`.
-        driver.on_gatts_event(|event| {
+        driver.gatts_subscribe(|event| {
             match event {
                 GattsEvent::Register(BleGattRegister::Characteristic {
                     uuid, val_handle, ..
@@ -122,15 +122,19 @@ mod example {
         });
 
         // Advertise once the stack is "in sync"; re-armed on reset (so it can fire again).
-        driver.on_sync(|| NEEDS_ADV.store(true, Ordering::Relaxed));
+        driver.host_subscribe(|event| {
+            if let HostEvent::Sync = event {
+                NEEDS_ADV.store(true, Ordering::Relaxed);
+            }
+        });
 
-        driver.on_gap_event(|event| {
+        driver.gap_subscribe(|event| {
             match event {
-                BleGapEvent::Connect {
+                GapEvent::Connect {
                     conn_handle,
                     status,
                 } => info!("connected (handle {conn_handle}): {status:?}"),
-                BleGapEvent::Disconnect {
+                GapEvent::Disconnect {
                     conn_handle,
                     reason,
                 } => {

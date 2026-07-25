@@ -14,13 +14,13 @@ use super::super::{BleDriver, BleError, BleUuid, ConnHandle};
 use super::{flags_to_repr, AttrHandle, BleGattCharFlag};
 
 /// A GATT-server event, delivered on the host task to the single
-/// [`on_gatts_event`](BleDriver::on_gatts_event) hook.
+/// [`gatts_subscribe`](BleDriver::gatts_subscribe) hook.
 ///
 /// There are no per-characteristic callbacks: NimBLE dispatches *every* characteristic read and
 /// write through one shared trampoline, and they arrive here as [`Read`](Self::Read) /
 /// [`Write`](Self::Write), keyed by the globally-unique `attr_handle`. The
 /// [`Register`](Self::Register) variants fire as the service table is registered (at `start`).
-/// [`Subscribe`](Self::Subscribe) and [`NotifyTx`](Self::NotifyTx) are server-role connection
+/// [`Subscribe`](Self::Subscribe) and [`NotifyComplete`](Self::NotifyComplete) are server-role connection
 /// events that NimBLE delivers on the GAP callback and we demux here.
 ///
 /// The hook returns the ATT status (`0` on success) for `Read`/`Write`; the return is ignored for
@@ -46,7 +46,7 @@ pub enum GattsEvent<'a> {
     },
     /// An indication/notification we sent completed (for an indication, `status` is the peer's
     /// confirmation result).
-    NotifyTx {
+    NotifyComplete {
         conn_handle: ConnHandle,
         attr_handle: AttrHandle,
         indication: bool,
@@ -55,7 +55,7 @@ pub enum GattsEvent<'a> {
 }
 
 impl GattsEvent<'static> {
-    /// Build the server-role `Subscribe` / `NotifyTx` events from a raw GAP event. Returns `None`
+    /// Build the server-role `Subscribe` / `NotifyComplete` events from a raw GAP event. Returns `None`
     /// for any other event type. Called from the GAP trampoline's demux.
     pub(crate) fn from_gap(event: &ble_gap_event) -> Option<Self> {
         let anon = &event.__bindgen_anon_1;
@@ -72,7 +72,7 @@ impl GattsEvent<'static> {
             }
             BLE_GAP_EVENT_NOTIFY_TX => {
                 let notify_tx = unsafe { &anon.notify_tx };
-                Some(Self::NotifyTx {
+                Some(Self::NotifyComplete {
                     conn_handle: notify_tx.conn_handle,
                     attr_handle: notify_tx.attr_handle,
                     indication: notify_tx.indication() != 0,
@@ -136,7 +136,7 @@ impl From<&ble_gatt_register_ctxt> for BleGattRegister {
 }
 
 /// A characteristic in a [`BleGattService`] — just its UUID and flags. Reads and writes are
-/// serviced by the single [`on_gatts_event`](BleDriver::on_gatts_event) hook (dispatched by the
+/// serviced by the single [`gatts_subscribe`](BleDriver::gatts_subscribe) hook (dispatched by the
 /// value handle reported via [`BleGattRegister`]), so there is no per-characteristic closure and
 /// no per-characteristic allocation.
 pub struct BleGattCharacteristic {
@@ -248,19 +248,19 @@ where
     /// Subscribe to GATT-server events ([`GattsEvent`]). Set this **before**
     /// [`start`](BleDriver::start): the `Register` events (carrying the attribute handles NimBLE
     /// assigned) fire during host start.
-    pub fn on_gatts_event<F>(&self, callback: F)
+    pub fn gatts_subscribe<F>(&self, callback: F)
     where
         F: for<'a> FnMut(GattsEvent<'a>) -> u8 + Send + 'static,
     {
-        unsafe { self.on_gatts_event_nonstatic(callback) }
+        unsafe { self.gatts_subscribe_nonstatic(callback) }
     }
 
     /// # Safety
     ///
-    /// The non-`'static` counterpart of [`on_gatts_event`](Self::on_gatts_event). See
-    /// [`BleDriver::on_sync_nonstatic`](crate::ble::BleDriver::on_sync_nonstatic) for the borrowing
+    /// The non-`'static` counterpart of [`gatts_subscribe`](Self::gatts_subscribe). See
+    /// [`BleDriver::host_subscribe_nonstatic`](crate::ble::BleDriver::host_subscribe_nonstatic) for the borrowing
     /// rules and the `core::mem::forget` hazard.
-    pub unsafe fn on_gatts_event_nonstatic<F>(&self, callback: F)
+    pub unsafe fn gatts_subscribe_nonstatic<F>(&self, callback: F)
     where
         F: for<'a> FnMut(GattsEvent<'a>) -> u8 + Send + 'd,
     {

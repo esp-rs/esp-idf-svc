@@ -25,9 +25,9 @@ mod example {
     use core::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
-    use esp_idf_svc::ble::gap::BleGapEvent;
-    use esp_idf_svc::ble::gatt::gattc::GattcEvent;
-    use esp_idf_svc::ble::{ensure_addr, BleAddr, BleDriver, ConnHandle};
+    use esp_idf_svc::ble::gap::GapEvent;
+    use esp_idf_svc::ble::gatt::client::GattcEvent;
+    use esp_idf_svc::ble::{ensure_addr, BleAddr, BleDriver, ConnHandle, HostEvent};
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::log::EspLogger;
@@ -54,11 +54,15 @@ mod example {
         let driver = BleDriver::new(peripherals.modem)?;
 
         // Connect once the stack is in sync (re-armed on reset).
-        driver.on_sync(|| NEEDS_CONNECT.store(true, Ordering::Relaxed));
+        driver.host_subscribe(|event| {
+            if let HostEvent::Sync = event {
+                NEEDS_CONNECT.store(true, Ordering::Relaxed);
+            }
+        });
 
-        driver.on_gap_event(|event| {
+        driver.gap_subscribe(|event| {
             match event {
-                BleGapEvent::Connect {
+                GapEvent::Connect {
                     conn_handle,
                     status,
                 } => match status {
@@ -72,12 +76,12 @@ mod example {
                         NEEDS_CONNECT.store(true, Ordering::Relaxed);
                     }
                 },
-                BleGapEvent::Disconnect { reason, .. } => {
+                GapEvent::Disconnect { reason, .. } => {
                     info!("disconnected ({reason}); reconnecting");
                     *CONN.lock().unwrap() = None;
                     NEEDS_CONNECT.store(true, Ordering::Relaxed);
                 }
-                BleGapEvent::Mtu { value, .. } => info!("MTU negotiated: {value}"),
+                GapEvent::Mtu { value, .. } => info!("MTU negotiated: {value}"),
                 _ => {}
             }
 
@@ -85,7 +89,7 @@ mod example {
         });
 
         // One hook for all client completions plus received notifications/indications.
-        driver.on_gattc_event(|event| match event {
+        driver.gattc_subscribe(|event| match event {
             GattcEvent::Service {
                 status, service, ..
             } => match service {
@@ -102,7 +106,7 @@ mod example {
                 ),
                 None => info!("  characteristic discovery complete (status {status})"),
             },
-            GattcEvent::Read {
+            GattcEvent::ReadComplete {
                 status,
                 attr_handle,
                 data,
@@ -115,12 +119,12 @@ mod example {
                     &buf[..n]
                 );
             }
-            GattcEvent::Write {
+            GattcEvent::WriteComplete {
                 status,
                 attr_handle,
                 ..
             } => info!("write of handle {attr_handle} complete (status {status})"),
-            GattcEvent::NotifyRx {
+            GattcEvent::Notify {
                 attr_handle,
                 indication,
                 data,

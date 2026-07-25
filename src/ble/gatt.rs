@@ -2,16 +2,17 @@
 
 use core::ffi::c_int;
 
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 use enumset::{EnumSet, EnumSetType};
 
 use crate::sys::*;
 
 use super::{BleError, ConnHandle};
 
-pub mod gatts;
-
 #[cfg(esp_idf_bt_nimble_gatt_client)]
-pub mod gattc;
+pub mod client;
+#[cfg(esp_idf_bt_nimble_gatt_server)]
+pub mod server;
 
 /// A GATT attribute handle (e.g. a characteristic's value handle).
 pub type AttrHandle = u16;
@@ -30,6 +31,7 @@ pub fn att_mtu(conn_handle: ConnHandle) -> Result<u16, BleError> {
 }
 
 /// A GATT characteristic operation flag (`BLE_GATT_CHR_F_*`).
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 #[derive(Debug, EnumSetType)]
 pub enum BleGattCharFlag {
     Read,
@@ -38,6 +40,7 @@ pub enum BleGattCharFlag {
     Indicate,
 }
 
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 impl From<BleGattCharFlag> for ble_gatt_chr_flags {
     fn from(flag: BleGattCharFlag) -> Self {
         match flag {
@@ -49,6 +52,7 @@ impl From<BleGattCharFlag> for ble_gatt_chr_flags {
     }
 }
 
+#[cfg(esp_idf_bt_nimble_gatt_server)]
 pub(crate) fn flags_to_repr(flags: EnumSet<BleGattCharFlag>) -> ble_gatt_chr_flags {
     flags
         .iter()

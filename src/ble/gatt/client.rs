@@ -3,8 +3,8 @@
 //!
 //! Every `ble_gattc_*` operation is initiate-now, complete-later: you start it, and NimBLE invokes
 //! a callback when it finishes. We route *all* of those per-operation callbacks through one shared
-//! [`on_gattc_event`](BleDriver::on_gattc_event) hook, correlated by `conn_handle` (GATT serializes
-//! one transaction per connection). Received notifications/indications ([`GattcEvent::NotifyRx`])
+//! [`gattc_subscribe`](BleDriver::gattc_subscribe) hook, correlated by `conn_handle` (GATT serializes
+//! one transaction per connection). Received notifications/indications ([`GattcEvent::Notify`])
 //! arrive on the connection's GAP callback and are demuxed here.
 
 use core::ffi::{c_int, c_void};
@@ -17,7 +17,7 @@ use super::super::{BleAddr, BleDriver, BleError, BleUuid, ConnHandle};
 use super::AttrHandle;
 
 /// A GATT-client event, delivered on the host task to the single
-/// [`on_gattc_event`](BleDriver::on_gattc_event) hook.
+/// [`gattc_subscribe`](BleDriver::gattc_subscribe) hook.
 ///
 /// The discovery variants fire once per discovered item and then once more with a `None` payload
 /// to signal completion. `status` is the raw ATT/`BLE_HS_*` status (`0` on success).
@@ -37,20 +37,20 @@ pub enum GattcEvent<'a> {
     },
     /// Completion of a [`read`](BleDriver::read). On success `data` holds the value; check `status`
     /// before reading it.
-    Read {
+    ReadComplete {
         conn_handle: ConnHandle,
         status: u16,
         attr_handle: AttrHandle,
         data: Mbuf<'a>,
     },
     /// Completion of a [`write`](BleDriver::write).
-    Write {
+    WriteComplete {
         conn_handle: ConnHandle,
         status: u16,
         attr_handle: AttrHandle,
     },
     /// A notification or indication pushed by the peer (after subscribing by writing its CCCD).
-    NotifyRx {
+    Notify {
         conn_handle: ConnHandle,
         attr_handle: AttrHandle,
         indication: bool,
@@ -59,12 +59,12 @@ pub enum GattcEvent<'a> {
 }
 
 impl<'a> GattcEvent<'a> {
-    /// Build [`NotifyRx`](Self::NotifyRx) from a raw GAP event. Called from the GAP trampoline's
+    /// Build [`Notify`](Self::Notify) from a raw GAP event. Called from the GAP trampoline's
     /// demux for `BLE_GAP_EVENT_NOTIFY_RX`.
     pub(crate) fn from_notify_rx(event: &'a ble_gap_event) -> Self {
         let notify_rx = unsafe { &event.__bindgen_anon_1.notify_rx };
 
-        Self::NotifyRx {
+        Self::Notify {
             conn_handle: notify_rx.conn_handle,
             attr_handle: notify_rx.attr_handle,
             indication: notify_rx.indication() != 0,
@@ -116,19 +116,19 @@ impl From<&ble_gatt_chr> for GattcChr {
 impl<'d, S> BleDriver<'d, S> {
     /// Subscribe to GATT-client events ([`GattcEvent`]): per-operation completions plus received
     /// notifications/indications.
-    pub fn on_gattc_event<F>(&self, callback: F)
+    pub fn gattc_subscribe<F>(&self, callback: F)
     where
         F: for<'a> FnMut(GattcEvent<'a>) + Send + 'static,
     {
-        unsafe { self.on_gattc_event_nonstatic(callback) }
+        unsafe { self.gattc_subscribe_nonstatic(callback) }
     }
 
     /// # Safety
     ///
-    /// The non-`'static` counterpart of [`on_gattc_event`](Self::on_gattc_event). See
-    /// [`BleDriver::on_sync_nonstatic`](crate::ble::BleDriver::on_sync_nonstatic) for the borrowing
+    /// The non-`'static` counterpart of [`gattc_subscribe`](Self::gattc_subscribe). See
+    /// [`BleDriver::host_subscribe_nonstatic`](crate::ble::BleDriver::host_subscribe_nonstatic) for the borrowing
     /// rules and the `core::mem::forget` hazard.
-    pub unsafe fn on_gattc_event_nonstatic<F>(&self, callback: F)
+    pub unsafe fn gattc_subscribe_nonstatic<F>(&self, callback: F)
     where
         F: for<'a> FnMut(GattcEvent<'a>) + Send + 'd,
     {
@@ -141,7 +141,7 @@ impl<'d, S> BleDriver<'d, S> {
     }
 
     /// Initiate a connection to `peer`. The connect/disconnect outcome arrives on the GAP hook
-    /// ([`on_gap_event`](BleDriver::on_gap_event)); the connection's received notifications arrive
+    /// ([`gap_subscribe`](BleDriver::gap_subscribe)); the connection's received notifications arrive
     /// on the GATTC hook.
     pub fn connect(&self, own_addr_type: u8, peer: &BleAddr) -> Result<(), BleError> {
         // bindgen does not emit `BLE_HS_FOREVER` (its C macro is `INT32_MAX`); inline it.
@@ -195,7 +195,8 @@ impl<'d, S> BleDriver<'d, S> {
         })
     }
 
-    /// Read the value of `attr_handle` on the peer. The result arrives as [`GattcEvent::Read`].
+    /// Read the value of `attr_handle` on the peer (a Read Request). The result arrives as
+    /// [`GattcEvent::ReadComplete`].
     pub fn read(&self, conn_handle: ConnHandle, attr_handle: AttrHandle) -> Result<(), BleError> {
         BleError::from_raw(unsafe {
             ble_gattc_read(
@@ -207,8 +208,8 @@ impl<'d, S> BleDriver<'d, S> {
         })
     }
 
-    /// Write `data` to `attr_handle` on the peer (with response). Completion arrives as
-    /// [`GattcEvent::Write`].
+    /// Write `data` to `attr_handle` on the peer as a **Write Request** (acknowledged): the peer
+    /// sends a Write Response, and its completion arrives as [`GattcEvent::WriteComplete`].
     pub fn write(
         &self,
         conn_handle: ConnHandle,
@@ -224,6 +225,25 @@ impl<'d, S> BleDriver<'d, S> {
                 data.len() as u16,
                 Some(super::super::BleSingleton::gattc_write_cb),
                 ptr::null_mut(),
+            )
+        })
+    }
+
+    /// Write `data` to `attr_handle` on the peer as a **Write Command** (unacknowledged): the peer
+    /// sends no response, so this is fire-and-forget — there is **no** completion event. The
+    /// returned `Result` only reflects whether the command was accepted for transmission.
+    pub fn write_cmd(
+        &self,
+        conn_handle: ConnHandle,
+        attr_handle: AttrHandle,
+        data: &[u8],
+    ) -> Result<(), BleError> {
+        BleError::from_raw(unsafe {
+            ble_gattc_write_no_rsp_flat(
+                conn_handle,
+                attr_handle,
+                data.as_ptr() as *const c_void,
+                data.len() as u16,
             )
         })
     }

@@ -145,10 +145,10 @@ impl From<&BleAdvFields<'_>> for ble_hs_adv_fields {
 }
 
 /// Role-agnostic connection events. NimBLE multiplexes *role-specific* events (server:
-/// `Subscribe`/`NotifyTx`; client: `NotifyRx`) onto the same connection callback, but those are
-/// demuxed to [`GattsEvent`](super::gatt::gatts::GattsEvent) /
-/// [`GattcEvent`](super::gatt::gattc::GattcEvent) — so they are not part of this enum.
-pub enum BleGapEvent {
+/// `Subscribe`/`NotifyComplete`; client: `Notify`) onto the same connection callback, but those are
+/// demuxed to [`GattsEvent`](super::gatt::server::GattsEvent) /
+/// [`GattcEvent`](super::gatt::client::GattcEvent) — so they are not part of this enum.
+pub enum GapEvent {
     Connect {
         conn_handle: ConnHandle,
         status: Result<(), BleError>,
@@ -164,7 +164,7 @@ pub enum BleGapEvent {
     Other,
 }
 
-impl From<&ble_gap_event> for BleGapEvent {
+impl From<&ble_gap_event> for GapEvent {
     fn from(event: &ble_gap_event) -> Self {
         let anon = &event.__bindgen_anon_1;
 
@@ -232,29 +232,29 @@ impl<'d, S> BleDriver<'d, S> {
     /// client — notify-rx). The callback runs on the NimBLE host task and returns the GAP status
     /// code (`0` on success). The trampoline is wired at [`adv_start`](Self::adv_start) (server) or
     /// at connect time (client), so this only needs to be set before whichever of those you use.
-    pub fn on_gap_event<F>(&self, callback: F)
+    pub fn gap_subscribe<F>(&self, callback: F)
     where
-        F: FnMut(BleGapEvent) -> i32 + Send + 'static,
+        F: FnMut(GapEvent) -> i32 + Send + 'static,
     {
-        unsafe { self.on_gap_event_nonstatic(callback) }
+        unsafe { self.gap_subscribe_nonstatic(callback) }
     }
 
     /// # Safety
     ///
-    /// The non-`'static` counterpart of [`on_gap_event`](Self::on_gap_event): the callback may
+    /// The non-`'static` counterpart of [`gap_subscribe`](Self::gap_subscribe): the callback may
     /// borrow data that lives as long as the [`BleDriver`]. It stays registered until the driver is
     /// dropped, which un-subscribes it, so the driver must not be `core::mem::forget`-ten. See
-    /// [`BleDriver::on_sync_nonstatic`](crate::ble::BleDriver::on_sync_nonstatic).
-    pub unsafe fn on_gap_event_nonstatic<F>(&self, callback: F)
+    /// [`BleDriver::host_subscribe_nonstatic`](crate::ble::BleDriver::host_subscribe_nonstatic).
+    pub unsafe fn gap_subscribe_nonstatic<F>(&self, callback: F)
     where
-        F: FnMut(BleGapEvent) -> i32 + Send + 'd,
+        F: FnMut(GapEvent) -> i32 + Send + 'd,
     {
-        unsafe { super::SINGLETON.gap_event.subscribe_nonstatic(callback) };
+        unsafe { super::SINGLETON.gap.subscribe_nonstatic(callback) };
     }
 
     /// Stop delivering GAP events to the subscribed callback.
     pub fn gap_unsubscribe(&self) {
-        super::SINGLETON.gap_event.unsubscribe();
+        super::SINGLETON.gap.unsubscribe();
     }
 
     /// Set the raw advertising payload.
@@ -272,11 +272,11 @@ impl<'d, S> BleDriver<'d, S> {
         BleError::from_raw(unsafe { ble_gap_adv_set_fields(&raw) })
     }
 
-    /// Start a legacy advertising procedure. Drive this from an [`on_sync`] closure once the host
-    /// has synced, and restart it from a [`BleGapEvent::Disconnect`] handler. Events for the
+    /// Start a legacy advertising procedure. Drive this from an [`host_subscribe`] closure once the host
+    /// has synced, and restart it from a [`GapEvent::Disconnect`] handler. Events for the
     /// resulting connection are delivered to the [`subscribe`](Self::subscribe) callback.
     ///
-    /// [`on_sync`]: crate::ble::BleDriver::on_sync
+    /// [`host_subscribe`]: crate::ble::BleDriver::host_subscribe
     #[cfg(not(esp_idf_bt_nimble_ext_adv))]
     pub fn adv_start(&self, own_addr_type: u8, params: &BleAdvParams) -> Result<(), BleError> {
         let raw: ble_gap_adv_params = params.into();
