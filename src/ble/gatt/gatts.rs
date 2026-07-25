@@ -10,10 +10,8 @@ use enumset::EnumSet;
 use crate::sys::*;
 
 use super::super::mbuf::{mbuf_from_slice, Mbuf};
-use super::super::{BleDriver, BleError, BleUuid};
+use super::super::{BleDriver, BleError, BleUuid, ConnHandle};
 use super::{flags_to_repr, AttrHandle, BleGattCharFlag};
-
-pub type ConnHandle = u16;
 
 /// A GATT-server event, delivered on the host task to the single
 /// [`on_gatts_event`](BleDriver::on_gatts_event) hook.
@@ -21,11 +19,12 @@ pub type ConnHandle = u16;
 /// There are no per-characteristic callbacks: NimBLE dispatches *every* characteristic read and
 /// write through one shared trampoline, and they arrive here as [`Read`](Self::Read) /
 /// [`Write`](Self::Write), keyed by the globally-unique `attr_handle`. The
-/// [`Register`](Self::Register) variants fire as the service table is registered (at `start`) and
-/// are how you learn the attribute handles NimBLE assigned.
+/// [`Register`](Self::Register) variants fire as the service table is registered (at `start`).
+/// [`Subscribe`](Self::Subscribe) and [`NotifyTx`](Self::NotifyTx) are server-role connection
+/// events that NimBLE delivers on the GAP callback and we demux here.
 ///
 /// The hook returns the ATT status (`0` on success) for `Read`/`Write`; the return is ignored for
-/// `Register`.
+/// the others.
 pub enum GattsEvent<'a> {
     Register(BleGattRegister),
     Read {
@@ -38,6 +37,51 @@ pub enum GattsEvent<'a> {
         attr_handle: AttrHandle,
         data: Mbuf<'a>,
     },
+    /// A peer subscribed to / unsubscribed from one of our characteristics (wrote its CCCD).
+    Subscribe {
+        conn_handle: ConnHandle,
+        attr_handle: AttrHandle,
+        cur_indicate: bool,
+        cur_notify: bool,
+    },
+    /// An indication/notification we sent completed (for an indication, `status` is the peer's
+    /// confirmation result).
+    NotifyTx {
+        conn_handle: ConnHandle,
+        attr_handle: AttrHandle,
+        indication: bool,
+        status: i32,
+    },
+}
+
+impl GattsEvent<'static> {
+    /// Build the server-role `Subscribe` / `NotifyTx` events from a raw GAP event. Returns `None`
+    /// for any other event type. Called from the GAP trampoline's demux.
+    pub(crate) fn from_gap(event: &ble_gap_event) -> Option<Self> {
+        let anon = &event.__bindgen_anon_1;
+
+        match event.type_ as u32 {
+            BLE_GAP_EVENT_SUBSCRIBE => {
+                let subscribe = unsafe { &anon.subscribe };
+                Some(Self::Subscribe {
+                    conn_handle: subscribe.conn_handle,
+                    attr_handle: subscribe.attr_handle,
+                    cur_indicate: subscribe.cur_indicate() != 0,
+                    cur_notify: subscribe.cur_notify() != 0,
+                })
+            }
+            BLE_GAP_EVENT_NOTIFY_TX => {
+                let notify_tx = unsafe { &anon.notify_tx };
+                Some(Self::NotifyTx {
+                    conn_handle: notify_tx.conn_handle,
+                    attr_handle: notify_tx.attr_handle,
+                    indication: notify_tx.indication() != 0,
+                    status: notify_tx.status,
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A GATT registration event (the payload of [`GattsEvent::Register`]). Capture the value handles

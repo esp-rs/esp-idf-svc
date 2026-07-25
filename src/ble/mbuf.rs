@@ -29,6 +29,11 @@ impl Mbuf<'_> {
 
     /// Copy this Mbuf into `buf`, returning the number of bytes copied or error if buf is too small
     pub fn read(&self, buf: &mut [u8]) -> Result<usize, BleError> {
+        // A completion callback delivered with an error status may carry a null mbuf.
+        if self.om.is_null() {
+            return Ok(0);
+        }
+
         let mut copied: u16 = 0;
 
         BleError::from_raw(unsafe {

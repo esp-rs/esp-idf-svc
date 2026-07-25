@@ -7,9 +7,7 @@ use alloc::ffi::CString;
 
 use crate::sys::*;
 
-use super::gatt::gatts::ConnHandle;
-use super::gatt::AttrHandle;
-use super::{BleAddr, BleDriver, BleError};
+use super::{BleAddr, BleDriver, BleError, ConnHandle};
 
 // Advertising parameter and field types.
 //
@@ -146,6 +144,10 @@ impl From<&BleAdvFields<'_>> for ble_hs_adv_fields {
     }
 }
 
+/// Role-agnostic connection events. NimBLE multiplexes *role-specific* events (server:
+/// `Subscribe`/`NotifyTx`; client: `NotifyRx`) onto the same connection callback, but those are
+/// demuxed to [`GattsEvent`](super::gatt::gatts::GattsEvent) /
+/// [`GattcEvent`](super::gatt::gattc::GattcEvent) — so they are not part of this enum.
 pub enum BleGapEvent {
     Connect {
         conn_handle: ConnHandle,
@@ -155,19 +157,9 @@ pub enum BleGapEvent {
         conn_handle: ConnHandle,
         reason: BleError,
     },
-    Subscribe {
-        conn_handle: ConnHandle,
-        attr_handle: AttrHandle,
-        cur_indicate: bool,
-        cur_notify: bool,
-    },
     Mtu {
         conn_handle: ConnHandle,
         value: u16,
-    },
-    NotifyTx {
-        conn_handle: ConnHandle,
-        status: i32,
     },
     Other,
 }
@@ -191,27 +183,11 @@ impl From<&ble_gap_event> for BleGapEvent {
                     reason: BleError::new(disconnect.reason),
                 }
             }
-            BLE_GAP_EVENT_SUBSCRIBE => {
-                let subscribe = unsafe { &anon.subscribe };
-                Self::Subscribe {
-                    conn_handle: subscribe.conn_handle,
-                    attr_handle: subscribe.attr_handle,
-                    cur_indicate: subscribe.cur_indicate() != 0,
-                    cur_notify: subscribe.cur_notify() != 0,
-                }
-            }
             BLE_GAP_EVENT_MTU => {
                 let mtu = unsafe { &anon.mtu };
                 Self::Mtu {
                     conn_handle: mtu.conn_handle,
                     value: mtu.value,
-                }
-            }
-            BLE_GAP_EVENT_NOTIFY_TX => {
-                let notify_tx = unsafe { &anon.notify_tx };
-                Self::NotifyTx {
-                    conn_handle: notify_tx.conn_handle,
-                    status: notify_tx.status,
                 }
             }
             _ => Self::Other,

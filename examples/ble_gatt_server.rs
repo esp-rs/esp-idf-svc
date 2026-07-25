@@ -22,11 +22,10 @@ mod example {
 
     use esp_idf_svc::ble::gap::{BleAdvFields, BleAdvParams, BleGapEvent};
     use esp_idf_svc::ble::gatt::gatts::{
-        BleGattCharacteristic, BleGattRegister, BleGattService, BleGattServices, ConnHandle,
-        GattsEvent,
+        BleGattCharacteristic, BleGattRegister, BleGattService, BleGattServices, GattsEvent,
     };
     use esp_idf_svc::ble::gatt::BleGattCharFlag;
-    use esp_idf_svc::ble::{ensure_addr, BleDriver, BleError, BleUuid};
+    use esp_idf_svc::ble::{ensure_addr, BleDriver, BleError, BleUuid, ConnHandle};
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::log::EspLogger;
@@ -104,10 +103,22 @@ mod example {
                         Err(e) => warn!("recv read failed: {e}"),
                     }
                 }
+                GattsEvent::Subscribe {
+                    conn_handle,
+                    attr_handle,
+                    cur_indicate,
+                    ..
+                } if attr_handle == IND_VAL_HANDLE.load(Ordering::Relaxed) => {
+                    let mut subs = SUBSCRIBERS.lock().unwrap();
+                    subs.retain(|&c| c != conn_handle);
+                    if cur_indicate {
+                        subs.push(conn_handle);
+                    }
+                }
                 _ => {}
             }
 
-            0 // ATT status (ignored for `Register`)
+            0 // ATT status (ignored for `Register` / `Subscribe`)
         });
 
         // Advertise once the stack is "in sync"; re-armed on reset (so it can fire again).
@@ -126,18 +137,6 @@ mod example {
                     info!("disconnected ({reason}); re-advertising");
                     SUBSCRIBERS.lock().unwrap().retain(|&c| c != conn_handle);
                     NEEDS_ADV.store(true, Ordering::Relaxed);
-                }
-                BleGapEvent::Subscribe {
-                    conn_handle,
-                    attr_handle,
-                    cur_indicate,
-                    ..
-                } if attr_handle == IND_VAL_HANDLE.load(Ordering::Relaxed) => {
-                    let mut subs = SUBSCRIBERS.lock().unwrap();
-                    subs.retain(|&c| c != conn_handle);
-                    if cur_indicate {
-                        subs.push(conn_handle);
-                    }
                 }
                 _ => {}
             }
