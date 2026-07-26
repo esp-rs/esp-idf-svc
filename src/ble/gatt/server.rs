@@ -264,12 +264,10 @@ where
     where
         F: for<'a> FnMut(GattsEvent<'a>) -> u8 + Send + 'd,
     {
+        // The `gatts_register_cb` trampoline is installed once at construction (see
+        // `BleDriver::new_with_services`), so subscribing only swaps the mutex-guarded `SINGLETON`
+        // slot — no `ble_hs_cfg` write here.
         unsafe { super::super::SINGLETON.gatts.subscribe_nonstatic(callback) };
-
-        unsafe {
-            (*core::ptr::addr_of_mut!(ble_hs_cfg)).gatts_register_cb =
-                Some(super::super::BleSingleton::gatts_register_cb);
-        }
     }
 
     /// Stop delivering GATT-server events to the subscribed hook.

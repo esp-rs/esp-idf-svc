@@ -222,8 +222,8 @@ pub struct BleSecurity {
     pub their_key_dist: u8,
 }
 
-impl Default for BleSecurity {
-    fn default() -> Self {
+impl BleSecurity {
+    pub const fn new() -> Self {
         Self {
             io_cap: BLE_HS_IO_NO_INPUT_OUTPUT as u8,
             oob_data_flag: false,
@@ -236,6 +236,12 @@ impl Default for BleSecurity {
             our_key_dist: 0,
             their_key_dist: 0,
         }
+    }
+}
+
+impl Default for BleSecurity {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -297,12 +303,16 @@ where
     ///
     /// Safe to use only from within the NimBLE host task.
     pub unsafe fn call(&self, arg: A) -> R {
-        if let Some(callback) = self
+        // Clone the callback `Arc` out and drop the lock *before* invoking it. The callback runs on
+        // the NimBLE host task; holding the lock across it would make a `subscribe`/`unsubscribe` on
+        // another thread block until the callback returns, and would deadlock a callback that
+        // re-subscribes itself.
+        let callback = self
             .callback
             .lock()
             .as_ref()
-            .map(|callback| callback.clone())
-        {
+            .map(|callback| callback.clone());
+        if let Some(callback) = callback {
             ((callback.get()).as_mut().unwrap())(arg)
         } else {
             self.default_result.clone()
@@ -361,12 +371,13 @@ impl GattsCallback {
     ///
     /// Safe to use only from within the NimBLE host task.
     pub unsafe fn call(&self, event: gatt::server::GattsEvent<'_>) -> u8 {
-        if let Some(callback) = self
+        // Drop the lock before invoking; see `BleCallback::call` for why the `let` binding matters.
+        let callback = self
             .callback
             .lock()
             .as_ref()
-            .map(|callback| callback.clone())
-        {
+            .map(|callback| callback.clone());
+        if let Some(callback) = callback {
             unsafe { ((callback.get()).as_mut().unwrap())(event) }
         } else {
             0
@@ -420,12 +431,13 @@ impl GattcCallback {
     ///
     /// Safe to use only from within the NimBLE host task.
     pub unsafe fn call(&self, event: gatt::client::GattcEvent<'_>) {
-        if let Some(callback) = self
+        // Drop the lock before invoking; see `BleCallback::call` for why the `let` binding matters.
+        let callback = self
             .callback
             .lock()
             .as_ref()
-            .map(|callback| callback.clone())
-        {
+            .map(|callback| callback.clone());
+        if let Some(callback) = callback {
             unsafe { ((callback.get()).as_mut().unwrap())(event) }
         }
     }
@@ -477,12 +489,13 @@ impl L2capCallback {
     ///
     /// Safe to use only from within the NimBLE host task.
     pub unsafe fn call(&self, event: l2cap::L2capEvent<'_>) -> i32 {
-        if let Some(callback) = self
+        // Drop the lock before invoking; see `BleCallback::call` for why the `let` binding matters.
+        let callback = self
             .callback
             .lock()
             .as_ref()
-            .map(|callback| callback.clone())
-        {
+            .map(|callback| callback.clone());
+        if let Some(callback) = callback {
             unsafe { ((callback.get()).as_mut().unwrap())(event) }
         } else {
             0
@@ -778,21 +791,6 @@ impl BleSingleton {
 
 static SINGLETON: BleSingleton = BleSingleton::new();
 
-/// Shared host initialization for both constructors: `nimble_port_init` + the standard GAP/GATT
-/// service init, gated by the singleton `take`. Does **not** start the host task.
-fn host_init<M: BluetoothModemPeripheral>(_modem: M) -> Result<(), EspError> {
-    SINGLETON.take()?;
-
-    esp!(unsafe { nimble_port_init() })?;
-
-    unsafe {
-        ble_svc_gap_init();
-        ble_svc_gatt_init();
-    }
-
-    Ok(())
-}
-
 /// The NimBLE host handle and primary entrypoint to BLE.
 ///
 /// It is **role-agnostic**: the type parameter `S` is the GATT-server service table, defaulting to
@@ -809,7 +807,12 @@ pub struct BleDriver<'ble, S = ()> {
     started: AtomicBool,
     // Owns the GATT service table (if any). Declared before `_p`; dropped *after* `Drop::drop`
     // runs `nimble_port_deinit`, so the table outlives NimBLE's pointers into it.
-    _services: S,
+    //
+    // Only *read* through `AsRef` in `new_with_services`, which is `#[cfg(esp_idf_bt_nimble_gatt_server)]`.
+    // In a server-off build `S` is always `()` and nothing reads it, so suppress the `-Dwarnings`
+    // "never read" lint — the field is still needed to own `S` for the drop-ordering above.
+    #[allow(dead_code)]
+    services: S,
     _p: PhantomData<&'ble mut ()>,
 }
 
@@ -819,13 +822,7 @@ impl<'ble> BleDriver<'ble, ()> {
     /// GAP/GATT service init, but does **not** start the host task; configure callbacks/security,
     /// then call [`start`](Self::start).
     pub fn new<M: BluetoothModemPeripheral + 'ble>(modem: M) -> Result<Self, EspError> {
-        host_init(modem)?;
-
-        Ok(Self {
-            started: AtomicBool::new(false),
-            _services: (),
-            _p: PhantomData,
-        })
+        Self::host_init(modem, ())
     }
 }
 
@@ -849,18 +846,22 @@ where
         modem: M,
         services: S,
     ) -> Result<Self, EspError> {
-        host_init(modem)?;
+        let this = Self::host_init(modem, services)?;
+
+        // Install the GATT-server registration trampoline in the same pre-`start` window as the host
+        // trampolines (see `host_init`). It dispatches into `SINGLETON.gatts` (empty until
+        // `gatts_subscribe`); NimBLE invokes it while assigning attribute handles during host start.
+        unsafe {
+            (*core::ptr::addr_of_mut!(ble_hs_cfg)).gatts_register_cb =
+                Some(BleSingleton::gatts_register_cb);
+        }
 
         // `?` converts `BleError` to `EspError` via `From<BleError>`.
-        let defs = services.as_ref().as_ptr();
+        let defs = this.services.as_ref().as_ptr();
         BleError::from_raw(unsafe { ble_gatts_count_cfg(defs) })?;
         BleError::from_raw(unsafe { ble_gatts_add_svcs(defs) })?;
 
-        Ok(Self {
-            started: AtomicBool::new(false),
-            _services: services,
-            _p: PhantomData,
-        })
+        Ok(this)
     }
 }
 
@@ -889,13 +890,10 @@ impl<'ble, S> BleDriver<'ble, S> {
     where
         F: FnMut(HostEvent) + Send + 'ble,
     {
+        // The sync/reset trampolines are installed once at construction (see `host_init`), so
+        // subscribing only swaps the callback into the mutex-guarded `SINGLETON` slot — safe at any
+        // time, including after `start`.
         unsafe { SINGLETON.host.subscribe_nonstatic(callback) };
-
-        unsafe {
-            let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
-            (*cfg).sync_cb = Some(BleSingleton::host_sync_cb);
-            (*cfg).reset_cb = Some(BleSingleton::host_reset_cb);
-        }
     }
 
     /// Stop delivering host-lifecycle events to the subscribed hook.
@@ -903,9 +901,21 @@ impl<'ble, S> BleDriver<'ble, S> {
         SINGLETON.host.unsubscribe();
     }
 
-    /// Configure the Security Manager (SMP) parameters. Must be called before
+    /// Configure the Security Manager (SMP) parameters. Must be called **before**
     /// [`start`](Self::start); the settings take effect once the host task runs.
-    pub fn set_security(&self, security: &BleSecurity) {
+    ///
+    /// This writes the global `ble_hs_cfg`, which the running host task reads on its own thread with
+    /// no lock we could share — so it is refused (with `ESP_ERR_INVALID_STATE`) once the host has
+    /// started. It takes `&mut self` rather than `&self` so this write cannot race a concurrent
+    /// config call from another thread; the operational, post-`start` API is all `&self` (and the
+    /// driver is `Sync`).
+    pub fn set_security(&mut self, security: &BleSecurity) -> Result<(), EspError> {
+        // `&mut self` guarantees no other thread holds a `&self` to call `start` concurrently, so the
+        // started-flag cannot flip between this check and the write below.
+        if self.started.load(Ordering::SeqCst) {
+            return Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>());
+        }
+
         unsafe {
             let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
             (*cfg).sm_io_cap = security.io_cap;
@@ -919,6 +929,8 @@ impl<'ble, S> BleDriver<'ble, S> {
             (*cfg).sm_our_key_dist = security.our_key_dist;
             (*cfg).sm_their_key_dist = security.their_key_dist;
         }
+
+        Ok(())
     }
 
     /// Start the NimBLE host task. It runs in the background and calls the
@@ -929,19 +941,90 @@ impl<'ble, S> BleDriver<'ble, S> {
     /// Takes `&self` (flipping an interior started-flag) rather than consuming the driver, so the
     /// service table it owns and every subscribed callback stay put across the call.
     pub fn start(&self) -> Result<(), EspError> {
-        unsafe { nimble_port_freertos_init(Some(BleSingleton::host_task)) };
-
-        self.started.store(true, Ordering::SeqCst);
+        // `nimble_port_freertos_init` -> `esp_nimble_enable` unconditionally `xTaskCreate`s the host
+        // task (it does not guard against a repeat call), so a second `start()` would spawn a second
+        // `nimble_host` task running the event loop and leak the first task handle. Guard it: only
+        // the transition from not-started to started spawns the task.
+        if !self.started.swap(true, Ordering::SeqCst) {
+            unsafe { nimble_port_freertos_init(Some(BleSingleton::host_task)) };
+        }
 
         Ok(())
     }
+
+    /// Stop the NimBLE host task.
+    ///
+    /// Takes `&self` (flipping an interior started-flag) rather than consuming the driver, so the
+    /// service table it owns and every subscribed callback stay put across the call.
+    pub fn stop(&self) -> Result<(), EspError> {
+        // `nimble_port_freertos_init` -> `esp_nimble_enable` unconditionally `xTaskCreate`s the host
+        // task (it does not guard against a repeat call), so a second `start()` would spawn a second
+        // `nimble_host` task running the event loop and leak the first task handle. Guard it: only
+        // the transition from not-started to started spawns the task.
+        if self.started.swap(false, Ordering::SeqCst) {
+            let _ = unsafe { nimble_port_stop() };
+        }
+
+        Ok(())
+    }
+
+    /// Shared host initialization for both constructors: `nimble_port_init` + the standard GAP/GATT
+    /// service init, gated by the singleton `take`. Does **not** start the host task.
+    fn host_init<M: BluetoothModemPeripheral>(_modem: M, services: S) -> Result<Self, EspError> {
+        SINGLETON.take()?;
+
+        esp!(unsafe { nimble_port_init() })?;
+
+        unsafe {
+            ble_svc_gap_init();
+            ble_svc_gatt_init();
+
+            // Install the host-lifecycle trampolines once, here in the single-threaded construction
+            // window (before `start`, and serialized against a second driver by `SINGLETON.take`). They
+            // dispatch into `SINGLETON.host`, which stays empty until `host_subscribe`, so an
+            // unsubscribed hook is simply a no-op. Doing this here rather than lazily in `host_subscribe`
+            // keeps every `ble_hs_cfg` write out of the post-`start` window — where NimBLE's host task
+            // reads these fields on its own thread with no lock we could share. See the `Sync` note.
+            let cfg = core::ptr::addr_of_mut!(ble_hs_cfg);
+            (*cfg).sync_cb = Some(BleSingleton::host_sync_cb);
+            (*cfg).reset_cb = Some(BleSingleton::host_reset_cb);
+        }
+
+        let mut this = Self {
+            started: AtomicBool::new(false),
+            services,
+            _p: PhantomData,
+        };
+
+        this.set_security(&BleSecurity::new())?;
+
+        Ok(this)
+    }
 }
+
+// SAFETY: `BleDriver` is a handle to the process-wide NimBLE host. For `Send + Sync` to be sound,
+// no `&self` method may mutate shared state without synchronization. Each one goes through a
+// thread-safe path:
+//   * NimBLE's own host API - internally locked (`ble_hs_lock`) and callable from any task;
+//   * the mutex-guarded `SINGLETON` slots (callback subscribe/unsubscribe/dispatch).
+// The global `ble_hs_cfg` is the one piece of shared state NimBLE reads with no lock we can share
+// (its host task reads it directly). We keep every write to it off the `&self` API instead of trying
+// to lock it against that reader:
+//   * the callback trampolines are written once at construction (`host_init` /
+//     `new_with_services`) - single-threaded, before `start`, serialized by `SINGLETON.take`;
+//   * `set_security` is the only runtime writer, and it takes `&mut self` (so it cannot alias a
+//     `&self` on another thread) and refuses once `start` has run (so it never races the host task);
+//   * `Drop` clears the fields under `&mut self`, after `nimble_port_deinit` has torn the host down.
+// The owned service table `S` is only ever *read* through `AsRef`. Hence both `Send` and `Sync` are
+// sound even for an `S` (e.g. the heap `BleGattServices`) whose raw pointers otherwise make it
+// auto-`!Send`/`!Sync`: the driver never hands out a `&S`, and the pointers are consumed only by
+// NimBLE's own (thread-safe) registration.
+unsafe impl<S> Send for BleDriver<'_, S> {}
+unsafe impl<S> Sync for BleDriver<'_, S> {}
 
 impl<S> Drop for BleDriver<'_, S> {
     fn drop(&mut self) {
-        if self.started.load(Ordering::SeqCst) {
-            let _ = unsafe { nimble_port_stop() };
-        }
+        let _ = self.stop();
 
         // Tears down the whole host, including the GATT database — after this NimBLE holds no more
         // pointers into the `_services` table, which is dropped *after* this `Drop::drop` returns.
