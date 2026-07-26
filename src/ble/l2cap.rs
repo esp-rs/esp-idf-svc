@@ -8,7 +8,8 @@
 //! notifications, are delivered to the single [`l2cap_subscribe`](BleDriver::l2cap_subscribe) hook.
 //!
 //! Flow control is credit-based and manual: after handling a [`L2capEvent::Received`] you replenish
-//! the peer's credits with [`l2cap_recv_ready`](BleDriver::l2cap_recv_ready); a [`l2cap_send`] that
+//! the peer's credits with [`l2cap_recv_ready`](BleDriver::l2cap_recv_ready); a
+//! [`l2cap_send`](BleDriver::l2cap_send) that
 //! runs out of credits reports [`SendOutcome::Stalled`] and resumes on [`L2capEvent::TxUnstalled`].
 
 use core::ffi::{c_int, c_void};

@@ -96,8 +96,12 @@ impl From<&BleExtAdvParams> for ble_gap_ext_adv_params {
 }
 
 /// Structured advertising payload (safe version of `ble_hs_adv_fields`).
-/// You can also directly use [`BleDriver::ext_adv_set_data`]/[`BleDriver::adv_set_data`] to set the raw
-/// data yourself.
+///
+/// Which raw-payload setter the driver offers depends on whether the build has extended advertising
+/// enabled; in this build it is
+#[cfg_attr(esp_idf_bt_nimble_ext_adv, doc = "[`BleDriver::ext_adv_set_data`],")]
+#[cfg_attr(not(esp_idf_bt_nimble_ext_adv), doc = "[`BleDriver::adv_set_data`],")]
+/// which you can use to set the payload bytes yourself.
 #[derive(Clone, Copy, Default)]
 pub struct BleAdvFields<'a> {
     pub flags: u8,
@@ -274,7 +278,7 @@ impl<'d, S> BleDriver<'d, S> {
 
     /// Start a legacy advertising procedure. Drive this from an [`host_subscribe`] closure once the host
     /// has synced, and restart it from a [`GapEvent::Disconnect`] handler. Events for the
-    /// resulting connection are delivered to the [`subscribe`](Self::subscribe) callback.
+    /// resulting connection are delivered to the [`gap_subscribe`](Self::gap_subscribe) callback.
     ///
     /// [`host_subscribe`]: crate::ble::BleDriver::host_subscribe
     #[cfg(not(esp_idf_bt_nimble_ext_adv))]

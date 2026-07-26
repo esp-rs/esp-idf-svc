@@ -29,6 +29,12 @@ pub mod mbuf;
 /// root rather than in any one subsystem module.
 pub type ConnHandle = u16;
 
+/// The placeholder connection handle NimBLE uses for accesses that did not originate from a peer
+/// (`BLE_HS_CONN_HANDLE_NONE`) — e.g. the local read that fetches a characteristic value when a
+/// notification is sent without an explicit payload. Attribute permissions are not checked for
+/// those.
+pub const CONN_HANDLE_NONE: ConnHandle = BLE_HS_CONN_HANDLE_NONE as ConnHandle;
+
 /// A BLE UUID, either 16-bit (assigned) or 128-bit (vendor-specific).
 #[derive(Clone, Copy, Debug)]
 pub enum BleUuid {
@@ -623,11 +629,23 @@ impl BleSingleton {
         let mbuf = mbuf::Mbuf::from_raw(unsafe { (*ctxt).om });
 
         let event = match unsafe { (*ctxt).op } as u32 {
-            BLE_GATT_ACCESS_OP_READ_CHR => gatt::server::GattsEvent::Read {
-                conn_handle,
-                attr_handle,
-                reply: mbuf,
-            },
+            BLE_GATT_ACCESS_OP_READ_CHR => {
+                // NimBLE only carries the long-read offset from ESP-IDF 5.3 on; the older
+                // `ble_gatt_access_ctxt` has no such member.
+                #[cfg(esp_idf_version_at_least_5_3_0)]
+                let offset = unsafe { (*ctxt).offset };
+                #[cfg(not(esp_idf_version_at_least_5_3_0))]
+                let offset = 0;
+
+                gatt::server::GattsEvent::Read {
+                    conn_handle,
+                    attr_handle,
+                    offset,
+                    reply: mbuf,
+                }
+            }
+            // Writes are always delivered whole and at offset 0 (NimBLE coalesces long writes), so
+            // there is no offset to report here.
             BLE_GATT_ACCESS_OP_WRITE_CHR => gatt::server::GattsEvent::Write {
                 conn_handle,
                 attr_handle,
@@ -869,7 +887,7 @@ impl<'ble, S> BleDriver<'ble, S> {
     /// Subscribe to host-lifecycle events ([`HostEvent`]): `Sync` when the host and controller are
     /// synchronized (you must delay BLE operations until then), and `Reset` when the host resets.
     /// The hook must be re-entrant — a reset is followed by another `Sync` once re-synced.
-    /// See https://mynewt.apache.org/latest/network/ble_setup/ble_sync_cb.html
+    /// See <https://mynewt.apache.org/latest/network/ble_setup/ble_sync_cb.html>
     pub fn host_subscribe<F>(&self, callback: F)
     where
         F: FnMut(HostEvent) + Send + 'static,

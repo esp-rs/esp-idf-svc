@@ -20,29 +20,57 @@ use super::{flags_to_repr, AttrHandle, BleGattCharFlag};
 /// write through one shared trampoline, and they arrive here as [`Read`](Self::Read) /
 /// [`Write`](Self::Write), keyed by the globally-unique `attr_handle`. The
 /// [`Register`](Self::Register) variants fire as the service table is registered (at `start`).
-/// [`Subscribe`](Self::Subscribe) and [`NotifyComplete`](Self::NotifyComplete) are server-role connection
-/// events that NimBLE delivers on the GAP callback and we demux here.
+/// [`SubscriptionChanged`](Self::SubscriptionChanged) and [`NotifyComplete`](Self::NotifyComplete)
+/// are server-role connection events that NimBLE delivers on the GAP callback and we demux here.
 ///
 /// The hook returns the ATT status (`0` on success) for `Read`/`Write`; the return is ignored for
 /// the others.
 pub enum GattsEvent<'a> {
     Register(BleGattRegister),
+    /// A peer is reading one of our characteristics; append the value to `reply`.
+    ///
+    /// This covers every ATT read (Read Request, Read Blob Request, Read By Type Request, Read
+    /// Multiple Request) — NimBLE reports them all the same way — as well as *local* reads, which
+    /// carry [`CONN_HANDLE_NONE`](crate::ble::CONN_HANDLE_NONE) instead of a real connection.
     Read {
         conn_handle: ConnHandle,
         attr_handle: AttrHandle,
+        /// Non-zero only for a long read (ATT Read Blob Request), where it is the offset the peer
+        /// is asking to continue from.
+        ///
+        /// **Always append the whole value regardless of this field**: NimBLE hands a long read a
+        /// scratch buffer and slices `[offset..]` out of it itself. The offset is informational —
+        /// use it to tell a continuation from a fresh read (e.g. to snapshot the value at offset
+        /// `0` so a multi-blob read stays coherent).
+        ///
+        /// Always `0` on ESP-IDF < 5.3, where NimBLE does not report the offset at all.
+        offset: u16,
         reply: Mbuf<'a>,
     },
+    /// A peer wrote one of our characteristics.
+    ///
+    /// This covers every ATT write — Write Request, Write Command (write-without-response), Signed
+    /// Write Command, and a completed Prepare/Execute long write (NimBLE coalesces the queued
+    /// fragments into one event) — as NimBLE does not report which opcode carried the write. It
+    /// need not be distinguished: for a Write Request the status returned by the hook becomes the
+    /// ATT error response, and for a Write Command (which has no response) it is discarded. Local
+    /// writes arrive here too, with [`CONN_HANDLE_NONE`](crate::ble::CONN_HANDLE_NONE).
     Write {
         conn_handle: ConnHandle,
         attr_handle: AttrHandle,
         data: Mbuf<'a>,
     },
-    /// A peer subscribed to / unsubscribed from one of our characteristics (wrote its CCCD).
-    Subscribe {
+    /// A peer's subscription state for one of our characteristics changed: it wrote the CCCD, the
+    /// connection is going down, or a bond was restored — see `reason`. The `prev_*` / `cur_*`
+    /// pairs give the edge, so no shadow state is needed to tell a subscribe from an unsubscribe.
+    SubscriptionChanged {
         conn_handle: ConnHandle,
         attr_handle: AttrHandle,
-        cur_indicate: bool,
+        reason: SubscribeReason,
+        prev_notify: bool,
         cur_notify: bool,
+        prev_indicate: bool,
+        cur_indicate: bool,
     },
     /// An indication/notification we sent completed (for an indication, `status` is the peer's
     /// confirmation result).
@@ -55,19 +83,22 @@ pub enum GattsEvent<'a> {
 }
 
 impl GattsEvent<'static> {
-    /// Build the server-role `Subscribe` / `NotifyComplete` events from a raw GAP event. Returns `None`
-    /// for any other event type. Called from the GAP trampoline's demux.
+    /// Build the server-role `SubscriptionChanged` / `NotifyComplete` events from a raw GAP event.
+    /// Returns `None` for any other event type. Called from the GAP trampoline's demux.
     pub(crate) fn from_gap(event: &ble_gap_event) -> Option<Self> {
         let anon = &event.__bindgen_anon_1;
 
         match event.type_ as u32 {
             BLE_GAP_EVENT_SUBSCRIBE => {
                 let subscribe = unsafe { &anon.subscribe };
-                Some(Self::Subscribe {
+                Some(Self::SubscriptionChanged {
                     conn_handle: subscribe.conn_handle,
                     attr_handle: subscribe.attr_handle,
-                    cur_indicate: subscribe.cur_indicate() != 0,
+                    reason: SubscribeReason::from_raw(subscribe.reason),
+                    prev_notify: subscribe.prev_notify() != 0,
                     cur_notify: subscribe.cur_notify() != 0,
+                    prev_indicate: subscribe.prev_indicate() != 0,
+                    cur_indicate: subscribe.cur_indicate() != 0,
                 })
             }
             BLE_GAP_EVENT_NOTIFY_TX => {
@@ -80,6 +111,33 @@ impl GattsEvent<'static> {
                 })
             }
             _ => None,
+        }
+    }
+}
+
+/// Why a peer's subscription state changed (the `reason` of
+/// [`GattsEvent::SubscriptionChanged`]).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SubscribeReason {
+    /// The peer wrote the characteristic's CCCD.
+    Write,
+    /// The connection is about to be terminated, so NimBLE is clearing the peer's subscription
+    /// state. The `cur_*` flags are therefore `false` — this is *not* the peer opting out.
+    Term,
+    /// A bond was restored from persistence and the peer's subscription state came back with it.
+    /// Nothing was written on the wire; the peer is subscribed as of now.
+    Restore,
+    /// A reason code unknown to this version of the crate.
+    Other(u8),
+}
+
+impl SubscribeReason {
+    fn from_raw(reason: u8) -> Self {
+        match reason as u32 {
+            BLE_GAP_SUBSCRIBE_REASON_WRITE => Self::Write,
+            BLE_GAP_SUBSCRIBE_REASON_TERM => Self::Term,
+            BLE_GAP_SUBSCRIBE_REASON_RESTORE => Self::Restore,
+            _ => Self::Other(reason),
         }
     }
 }

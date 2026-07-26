@@ -100,7 +100,9 @@ mod example {
                         Err(e) => warn!("recv read failed: {e}"),
                     }
                 }
-                GattsEvent::Subscribe {
+                // Fires on a CCCD write, on connection teardown, and on a bond restore alike, so
+                // just mirroring `cur_indicate` into the subscriber list keeps it correct.
+                GattsEvent::SubscriptionChanged {
                     conn_handle,
                     attr_handle,
                     cur_indicate,
@@ -115,7 +117,7 @@ mod example {
                 _ => {}
             }
 
-            0 // ATT status (ignored for `Register` / `Subscribe`)
+            0 // ATT status (ignored for `Register` / `SubscriptionChanged`)
         });
 
         // Advertise once the stack is "in sync"; re-armed on reset (so it can fire again).
