@@ -14,6 +14,7 @@
 
 #[cfg(all(
     not(any(esp32s2, esp32p4)),
+    esp_idf_bt_nimble_enabled,
     not(esp_idf_bt_nimble_l2cap_coc_max_num = "0")
 ))]
 fn main() -> anyhow::Result<()> {
@@ -22,6 +23,7 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(not(all(
     not(any(esp32s2, esp32p4)),
+    esp_idf_bt_nimble_enabled,
     not(esp_idf_bt_nimble_l2cap_coc_max_num = "0")
 )))]
 fn main() -> anyhow::Result<()> {
@@ -30,6 +32,7 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(all(
     not(any(esp32s2, esp32p4)),
+    esp_idf_bt_nimble_enabled,
     not(esp_idf_bt_nimble_l2cap_coc_max_num = "0")
 ))]
 mod example {

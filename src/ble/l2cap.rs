@@ -18,10 +18,13 @@ use crate::sys::*;
 use super::mbuf::Mbuf;
 use super::{BleDriver, BleError, ConnHandle};
 
-// See `mbuf.rs`: on chips whose BLE controller lives in ROM (`SOC_ESP_NIMBLE_CONTROLLER`), the
-// os_mbuf primitives are ROM-aliased, so that is the only name bindgen emits there.
+// See `mbuf.rs`: on chips whose BLE controller lives in ROM (`SOC_ESP_NIMBLE_CONTROLLER`: the
+// c2/c5/c6/c61/h2), the low-level os_mbuf / os_msys primitives are ROM-aliased, so `r_<name>` is the
+// only name bindgen emits there. (`ble_hs_mbuf_*` are host functions and are *not* aliased.)
 #[cfg(all(esp_idf_soc_esp_nimble_controller, esp_idf_bt_controller_enabled))]
 use crate::sys::r_os_mbuf_free_chain as os_mbuf_free_chain;
+#[cfg(all(esp_idf_soc_esp_nimble_controller, esp_idf_bt_controller_enabled))]
+use crate::sys::r_os_msys_get_pkthdr as os_msys_get_pkthdr;
 
 /// An opaque handle to an open L2CAP channel (wraps `*mut ble_l2cap_chan`).
 ///
