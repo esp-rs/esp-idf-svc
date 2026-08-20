@@ -645,11 +645,18 @@ impl<'a> EspWebSocketClient<'a> {
 
 impl Drop for EspWebSocketClient<'_> {
     fn drop(&mut self) {
+        // A `Drop` impl must not panic - ESP-IDF targets build with `panic = "abort"`, so a
+        // panic here takes down the whole application rather than just failing the cleanup.
+        //
+        // `esp_websocket_client_close` legitimately reports `ESP_FAIL` for a client which is
+        // no longer running, which happens whenever the peer tore the connection down first.
         if let Err(e) = esp!(unsafe { esp_websocket_client_close(self.handle, self.timeout) }) {
             log::warn!("WebSocket close failed during drop: {e:?}");
         }
 
-        esp!(unsafe { esp_websocket_client_destroy(self.handle) }).unwrap();
+        if let Err(e) = esp!(unsafe { esp_websocket_client_destroy(self.handle) }) {
+            log::warn!("WebSocket destroy failed during drop: {e:?}");
+        }
 
         // timeout and callback dropped automatically
     }
