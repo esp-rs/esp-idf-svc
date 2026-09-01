@@ -50,6 +50,7 @@ remote_component = { name = "espressif/lan87xx", version = "1.*" }
 - TLS: Server-side APIs (`ServerConfig`, `negotiate_server`, …) are available again on ESP-IDF >= 5.3 with mbedTLS. `CONFIG_ESP_TLS_SERVER` was removed in v5.3, so the old `esp_idf_esp_tls_server` cfg was never set and those APIs were compiled out; gating now uses `esp_idf_esp_tls_server` (IDF ≤ 5.2) or `esp_idf_version_at_least_5_3_0` + `esp_idf_esp_tls_using_mbedtls`.
 
 ### Added
+- MQTT5: new `client5` module (`EspMqtt5Client`, `EspMqtt5Connection`) implementing the `embedded-svc` MQTT v5 client traits, with per-message PUBLISH / SUBSCRIBE / UNSUBSCRIBE property support (MQTT 5.0 §3.3.2.3, §3.8.2.1, §3.10.2.1). Behind the new opt-in `mqtt_protocol_v5` feature, and additionally gated on `CONFIG_MQTT_PROTOCOL_5=y`.
 - Compatibility with ESP-IDF V6.0, and some pre-release 6.0.x.
 - Added support for the Generic Ethernet PHY driver: particularly useful on ESP-IDF 6.0+ as it is built-in.
 - Added type-safe wrappers for the NimBLE low-resource-use BLE stack: GAP, GATT Server, GATT Client, L2CAP. See `examples/ble_*.rs`
