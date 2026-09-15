@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Initiates an extended connect procedure."><title>ble_gap_ext_connect in esp_idf_hal::sys - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="esp_idf_hal" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (574ff7d98 2026-09-14)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">ble_gap_ext_connect</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../esp_idf_hal/index.html">esp_<wbr>idf_<wbr>hal</a><span class="version">0.47.0</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In esp_<wbr>idf_<wbr>hal::<wbr>sys</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">esp_idf_hal</a>::<wbr><a href="index.html">sys</a></div><h1>Function <span class="fn">ble_<wbr>gap_<wbr>ext_<wbr>connect</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/esp_idf_sys/home/runner/work/esp-idf-svc/esp-idf-svc/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys/f9288ee10aa8e0ce/out/bindings.rs.html#106960-106970">Source</a> </span></div><pre class="rust item-decl"><code>pub unsafe extern &quot;C&quot; fn ble_gap_ext_connect(
+    own_addr_type: u8,
+    peer_addr: *const <a class="struct" href="struct.ble_addr_t.html" title="struct esp_idf_hal::sys::ble_addr_t">ble_addr_t</a>,
+    duration_ms: i32,
+    phy_mask: u8,
+    phy_1m_conn_params: *const <a class="struct" href="struct.ble_gap_conn_params.html" title="struct esp_idf_hal::sys::ble_gap_conn_params">ble_gap_conn_params</a>,
+    phy_2m_conn_params: *const <a class="struct" href="struct.ble_gap_conn_params.html" title="struct esp_idf_hal::sys::ble_gap_conn_params">ble_gap_conn_params</a>,
+    phy_coded_conn_params: *const <a class="struct" href="struct.ble_gap_conn_params.html" title="struct esp_idf_hal::sys::ble_gap_conn_params">ble_gap_conn_params</a>,
+    cb: Option&lt;unsafe extern &quot;C&quot; fn(*mut <a class="struct" href="struct.ble_gap_event.html" title="struct esp_idf_hal::sys::ble_gap_event">ble_gap_event</a>, *mut c_void) -&gt; i32&gt;,
+    cb_arg: *mut c_void,
+) -&gt; i32</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Initiates an extended connect procedure.</p>
+<p>@param own_addr_type         The type of address the stack should use for
+itself during connection establishment.
+- BLE_OWN_ADDR_PUBLIC
+- BLE_OWN_ADDR_RANDOM
+- BLE_OWN_ADDR_RPA_PUBLIC_DEFAULT
+- BLE_OWN_ADDR_RPA_RANDOM_DEFAULT
+@param peer_addr             The address of the peer to connect to.
+If this parameter is NULL, the white list
+is used.
+@param duration_ms           The duration of the discovery procedure.
+On expiration, the procedure ends and a
+BLE_GAP_EVENT_DISC_COMPLETE event is
+reported.  Units are milliseconds.
+@param phy_mask              Define on which PHYs connection attempt should
+be done
+@param phy_1m_conn_params     Additional arguments specifying the
+particulars of the connect procedure. When
+BLE_GAP_LE_PHY_1M_MASK is set in phy_mask
+this parameter can be specify to null for
+default values.
+@param phy_2m_conn_params     Additional arguments specifying the
+particulars of the connect procedure. When
+BLE_GAP_LE_PHY_2M_MASK is set in phy_mask
+this parameter can be specify to null for
+default values.
+@param phy_coded_conn_params  Additional arguments specifying the
+particulars of the connect procedure. When
+BLE_GAP_LE_PHY_CODED_MASK is set in
+phy_mask this parameter can be specify to
+null for default values.
+@param cb                    The callback to associate with this connect
+procedure.  When the connect procedure
+completes, the result is reported through
+this callback.  If the connect procedure
+succeeds, the connection inherits this
+callback as its event-reporting mechanism.
+@param cb_arg                The optional argument to pass to the callback
+function.</p>
+<p>@return                      0 on success;
+BLE_HS_EALREADY if a connection attempt is
+already in progress;
+BLE_HS_EBUSY if initiating a connection is not
+possible because scanning is in progress;
+BLE_HS_EDONE if the specified peer is already
+connected;
+Other nonzero on error.</p>
+</div></details></section></div></main></body></html>

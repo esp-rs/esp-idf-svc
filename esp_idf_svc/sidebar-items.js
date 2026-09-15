@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["gatt_services",1]],"mod":["ble","espnow","eth","eventloop","fs","hal","handle","http","io","ipv4","log","mqtt","netif","nvs","ota","partition","ping","sntp","sys","systime","thread","timer","tls","wifi","ws"]};

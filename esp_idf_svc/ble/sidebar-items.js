@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONN_HANDLE_NONE"],"enum":["BleUuid","HostEvent"],"fn":["ensure_addr","id_copy_addr"],"mod":["gap","gatt","l2cap","mbuf"],"struct":["BleAddr","BleDriver","BleError","BleSecurity"],"type":["ConnHandle"]};

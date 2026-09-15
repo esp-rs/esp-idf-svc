@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Performs the Limited or General Extended Discovery Procedures."><title>ble_gap_ext_disc in esp_idf_svc::hal::sys - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="esp_idf_svc" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0-nightly (574ff7d98 2026-09-14)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">ble_gap_ext_disc</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../esp_idf_svc/index.html">esp_<wbr>idf_<wbr>svc</a><span class="version">0.53.0</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In esp_<wbr>idf_<wbr>svc::<wbr>hal::<wbr>sys</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">esp_idf_svc</a>::<wbr><a href="../index.html">hal</a>::<wbr><a href="index.html">sys</a></div><h1>Function <span class="fn">ble_<wbr>gap_<wbr>ext_<wbr>disc</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/esp_idf_sys/home/runner/work/esp-idf-svc/esp-idf-svc/target/riscv32imc-esp-espidf/debug/build/esp-idf-sys/f9288ee10aa8e0ce/out/bindings.rs.html#106926-106937">Source</a> </span></div><pre class="rust item-decl"><code>pub unsafe extern &quot;C&quot; fn ble_gap_ext_disc(
+    own_addr_type: u8,
+    duration: u16,
+    period: u16,
+    filter_duplicates: u8,
+    filter_policy: u8,
+    limited: u8,
+    uncoded_params: *const <a class="struct" href="../../sys/struct.ble_gap_ext_disc_params.html" title="struct esp_idf_svc::sys::ble_gap_ext_disc_params">ble_gap_ext_disc_params</a>,
+    coded_params: *const <a class="struct" href="../../sys/struct.ble_gap_ext_disc_params.html" title="struct esp_idf_svc::sys::ble_gap_ext_disc_params">ble_gap_ext_disc_params</a>,
+    cb: Option&lt;unsafe extern &quot;C&quot; fn(*mut <a class="struct" href="../../sys/struct.ble_gap_event.html" title="struct esp_idf_svc::sys::ble_gap_event">ble_gap_event</a>, *mut c_void) -&gt; i32&gt;,
+    cb_arg: *mut c_void,
+) -&gt; i32</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Performs the Limited or General Extended Discovery Procedures.</p>
+<p>@param own_addr_type         The type of address the stack should use for
+itself when sending scan requests.  Valid
+values are:
+- BLE_ADDR_TYPE_PUBLIC
+- BLE_ADDR_TYPE_RANDOM
+- BLE_ADDR_TYPE_RPA_PUB_DEFAULT
+- BLE_ADDR_TYPE_RPA_RND_DEFAULT
+This parameter is ignored unless active
+scanning is being used.
+@param duration              The duration of the discovery procedure.
+On expiration, if period is set to 0, the
+procedure ends and a
+BLE_GAP_EVENT_DISC_COMPLETE event is
+reported.  Units are 10 milliseconds.
+Specify 0 for no expiration.
+@param period                Time interval from when the Controller started
+its last Scan Duration until it begins the
+subsequent Scan Duration. Specify 0 to scan
+continuously. Units are 1.28 second.
+@param filter_duplicates     Set to enable packet filtering in the
+controller
+@param filter_policy         Set the used filter policy. Valid values are:
+- BLE_HCI_SCAN_FILT_NO_WL
+- BLE_HCI_SCAN_FILT_USE_WL
+- BLE_HCI_SCAN_FILT_NO_WL_INITA
+- BLE_HCI_SCAN_FILT_USE_WL_INITA
+- BLE_HCI_SCAN_FILT_MAX
+This parameter is ignored unless
+@p filter_duplicates is set.
+@param limited               If limited discovery procedure should be used.
+@param uncoded_params        Additional arguments specifying the particulars
+of the discovery procedure for uncoded PHY.
+If NULL is provided no scan is performed for
+this PHY.
+@param coded_params         Additional arguments specifying the particulars
+of the discovery procedure for coded PHY.
+If NULL is provided no scan is performed for
+this PHY.
+@param cb                    The callback to associate with this discovery
+procedure.  Advertising reports and discovery
+termination events are reported through this
+callback.
+@param cb_arg                The optional argument to pass to the callback
+function.</p>
+<p>@return                      0 on success; nonzero on failure.</p>
+</div></details></section></div></main></body></html>

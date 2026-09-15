@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GapEvent"],"fn":["conn_find"],"struct":["BleAdvFields","BleAdvParams","BleConnDesc"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BleGattRegister","GattsEvent","SubscribeReason"],"struct":["BleGattCharacteristic","BleGattService","BleGattServices","GattServices"]};

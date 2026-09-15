@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BleGattCharFlag"],"fn":["att_mtu","set_preferred_mtu"],"mod":["client","server"],"type":["AttrHandle"]};
