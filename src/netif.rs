@@ -238,7 +238,10 @@ impl NetifConfiguration {
             key: "PPP_CL_DEF".try_into().unwrap(),
             description: "ppp".try_into().unwrap(),
             route_priority: 30,
-            ip_configuration: Some(ipv4::Configuration::Client(Default::default())),
+            // IPv4 addressing and DNS are negotiated by PPP/IPCP. PPP interfaces
+            // must not carry the DHCP-client flag; ESP-IDF explicitly rejects DHCP
+            // operations for point-to-point interfaces.
+            ip_configuration: None,
             stack: NetifStack::Ppp,
             custom_mac: None,
         }
@@ -421,7 +424,12 @@ impl EspNetif {
             ),
             None => (
                 esp_netif_inherent_config_t {
-                    flags: conf.flags | esp_netif_flags_ESP_NETIF_FLAG_AUTOUP,
+                    flags: conf.flags
+                        | if matches!(conf.stack, NetifStack::Ppp) {
+                            0
+                        } else {
+                            esp_netif_flags_ESP_NETIF_FLAG_AUTOUP
+                        },
                     mac: initial_mac,
                     ip_info: ptr::null(),
                     get_ip_event: conf.got_ip_event_id.map(NonZeroU32::get).unwrap_or(0),
@@ -861,8 +869,17 @@ impl EspEventDeserializer for IpEvent<'_> {
             };
 
             IpEvent::DhcpIp6Assigned(DhcpIp6Assignment(event))
+        } else if event_id == ip_event_t_IP_EVENT_PPP_LOST_IP {
+            // ESP-IDF posts an `ip_event_got_ip_t` for PPP loss as well; only
+            // its `esp_netif` member is populated.
+            let event = unsafe {
+                (data.payload.unwrap() as *const _ as *const ip_event_got_ip_t)
+                    .as_ref()
+                    .unwrap()
+            };
+
+            IpEvent::DhcpIpDeassigned(event.esp_netif)
         } else if event_id == ip_event_t_IP_EVENT_STA_LOST_IP
-            || event_id == ip_event_t_IP_EVENT_PPP_LOST_IP
             || event_id == ip_event_t_IP_EVENT_ETH_LOST_IP
         {
             let netif_handle_mut = unsafe {
@@ -1013,6 +1030,10 @@ mod driver {
         inner: alloc::boxed::Box<EspNetifDriverInner<'d, T>>,
         started: bool,
     }
+
+    // The C driver retains a pointer to `inner`, whose allocation remains stable
+    // when this outer value moves. Both callbacks are Send and `T` owns the netif.
+    unsafe impl<T> Send for EspNetifDriver<'_, T> where T: BorrowMut<EspNetif> + Send {}
 
     impl<T> EspNetifDriver<'static, T>
     where
@@ -1215,6 +1236,8 @@ mod driver {
                 );
             }
 
+            self.started = true;
+
             Ok(())
         }
 
@@ -1232,6 +1255,8 @@ mod driver {
                     core::ptr::null_mut(),
                 );
             }
+
+            self.started = false;
 
             Ok(())
         }
@@ -1319,20 +1344,18 @@ mod driver {
             Ok(())
         }
 
-        fn tx(&mut self, data: &[u8]) -> Result<(), EspError> {
-            (self.tx)(data)
-        }
-
         unsafe extern "C" fn raw_tx(
             h: *mut core::ffi::c_void,
             buffer: *mut core::ffi::c_void,
             len: usize,
         ) -> i32 {
-            let this = unsafe { (h as *mut Self).as_mut() }.unwrap();
+            let this = h as *mut Self;
             let data = core::slice::from_raw_parts(buffer as *mut u8, len);
-
-            #[allow(clippy::let_and_return)]
-            let result = match this.tx(data) {
+            // Only the callback field is accessed here. Creating `&mut Self`
+            // would incorrectly claim exclusive access to the netif while its
+            // RX side can be active on another task.
+            let tx = unsafe { &mut *core::ptr::addr_of_mut!((*this).tx) };
+            let result = match tx(data) {
                 Ok(_) => ESP_OK,
                 Err(e) => e.code(),
             };
@@ -1527,7 +1550,7 @@ mod ppp {
                 phase_events_enabled: cfg.ppp_phase_event_enabled,
                 error_events_enabled: cfg.ppp_error_event_enabled,
                 #[cfg(esp_idf_lwip_enable_lcp_echo)]
-                lcp_echo_disabled: cfg.lcp_echo_disabled,
+                lcp_echo_disabled: cfg.ppp_lcp_echo_disabled,
                 #[cfg(esp_idf_lwip_ppp_server_support)]
                 our_ip4_addr: Newtype::<core::net::Ipv4Addr>::from(cfg.our_ip4_addr),
                 #[cfg(esp_idf_lwip_ppp_server_support)]
@@ -1542,7 +1565,7 @@ mod ppp {
                 ppp_phase_event_enabled: cfg.phase_events_enabled,
                 ppp_error_event_enabled: cfg.error_events_enabled,
                 #[cfg(esp_idf_lwip_enable_lcp_echo)]
-                lcp_echo_disabled: cfg.lcp_echo_disabled,
+                ppp_lcp_echo_disabled: cfg.lcp_echo_disabled,
                 #[cfg(esp_idf_lwip_ppp_server_support)]
                 our_ip4_addr: Newtype::<esp_ip4_addr_t>::from(cfg.our_ip4_addr),
                 #[cfg(esp_idf_lwip_ppp_server_support)]

@@ -86,6 +86,14 @@ pub mod log;
 ))]
 pub mod mdns;
 #[cfg(all(
+    feature = "std",
+    feature = "alloc",
+    esp_idf_comp_esp_event_enabled,
+    esp_idf_comp_esp_netif_enabled,
+    esp_idf_lwip_ppp_support
+))]
+pub mod modem;
+#[cfg(all(
     feature = "alloc",
     any(esp_idf_comp_mqtt_enabled, esp_idf_comp_espressif__mqtt_enabled),
     esp_idf_comp_esp_event_enabled

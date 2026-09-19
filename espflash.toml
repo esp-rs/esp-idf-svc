@@ -1,2 +1,10 @@
 [idf_format_args]
 partition_table = "partitions.csv"
+
+[connection]
+
+[[usb_device]]
+vid = "303a"
+pid = "1001"
+
+[flash]

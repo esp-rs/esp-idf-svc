@@ -19,6 +19,20 @@ CONFIG_ETH_SPI_ETHERNET_DM9051=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
 CONFIG_ETH_SPI_ETHERNET_KSZ8851SNL=y
 
+# GSM
+CONFIG_LWIP_PPP_SUPPORT=y
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=2048
+CONFIG_LWIP_PPP_ENABLE_IPV6=n
+CONFIG_LWIP_PPP_NOTIFY_PHASE_SUPPORT=y
+CONFIG_LWIP_PPP_PAP_SUPPORT=y
+CONFIG_LWIP_PPP_CHAP_SUPPORT=y
+CONFIG_LWIP_ENABLE_LCP_ECHO=y
+CONFIG_LWIP_LCP_ECHOINTERVAL=10
+CONFIG_LWIP_LCP_MAXECHOFAILS=3
+
+
+# We don't have an example for classic BT - yet - we need to enable class BT
+# specifically to workaround this bug in ESP IDF v5.2 (fixed in ESP IDF v5.2.1+):
 # We need to enable class specifically to workaround this bug in ESP IDF v5.2 (fixed in ESP IDF v5.2.1+):
 # https://github.com/espressif/esp-idf/issues/13113
 # And, required for BT Classic examples

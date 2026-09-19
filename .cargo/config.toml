@@ -1,6 +1,11 @@
 [build]
-target = "riscv32imc-esp-espidf"
+#target = "riscv32imc-esp-espidf"
 #target = "riscv32imac-esp-espidf"
+target = "xtensa-esp32s3-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+rustflags = ["--cfg", "espidf_time64"]
 
 [target.'cfg(target_os = "espidf")']
 linker = "ldproxy"
