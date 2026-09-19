@@ -1,3 +1,13 @@
+# ⚠️ This repository has moved
+
+## `esp-idf-svc` is now developed in the [esp-rs/esp-idf](https://github.com/esp-rs/esp-idf) monorepo, together with `esp-idf-sys` and `esp-idf-hal`
+
+The sources live under [`esp-idf-svc/`](https://github.com/esp-rs/esp-idf/tree/master/esp-idf-svc) there, with the complete history of this repository and its releases tagged as `esp-idf-svc-vX.Y.Z`.
+
+**Please open issues and pull requests in [esp-rs/esp-idf](https://github.com/esp-rs/esp-idf).** This repository is kept read-only for reference; the content below describes the crate as of its last release from here.
+
+---
+
 # Safe Rust wrappers for the services in the [ESP IDF SDK](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/)
 
 [![CI](https://github.com/esp-rs/esp-idf-svc/actions/workflows/ci.yml/badge.svg)](https://github.com/esp-rs/esp-idf-svc/actions/workflows/ci.yml)
